@@ -43,6 +43,7 @@ describe('AuthController', () => {
       };
 
       User.create.mockResolvedValue(mockUser);
+      User.storeRefreshToken = jest.fn().mockResolvedValue();
       jwt.sign.mockReturnValue('test-token-123');
 
       await register(req, res);
@@ -59,7 +60,8 @@ describe('AuthController', () => {
         success: true,
         data: {
           user: mockUser,
-          token: 'test-token-123'
+          accessToken: 'test-token-123',
+          refreshToken: 'test-token-123'
         }
       });
     });
@@ -172,6 +174,7 @@ describe('AuthController', () => {
 
       User.findByEmail.mockResolvedValue(mockUser);
       User.validatePassword.mockResolvedValue(true);
+      User.storeRefreshToken = jest.fn().mockResolvedValue();
       jwt.sign.mockReturnValue('test-token-123');
 
       await login(req, res);
@@ -188,7 +191,8 @@ describe('AuthController', () => {
             last_name: mockUser.last_name,
             role: mockUser.role
           },
-          token: 'test-token-123'
+          accessToken: 'test-token-123',
+          refreshToken: 'test-token-123'
         }
       });
     });
@@ -375,8 +379,12 @@ describe('AuthController', () => {
 
   describe('logout', () => {
     it('should logout successfully', async () => {
+      req.user = { id: 1 };
+      User.clearRefreshToken = jest.fn().mockResolvedValue();
+
       await logout(req, res);
 
+      expect(User.clearRefreshToken).toHaveBeenCalledWith(1);
       expect(res.json).toHaveBeenCalledWith({
         success: true,
         message: 'Logged out successfully'

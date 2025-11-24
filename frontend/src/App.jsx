@@ -11,6 +11,7 @@ import ResetPassword from '@/pages/ResetPassword';
 import Dashboard from '@/pages/Dashboard';
 import Analytics from '@/pages/Analytics';
 import MyClasses from '@/pages/MyClasses';
+import ClassDetailsPage from '@/pages/ClassDetailsPage';
 import Sessions from '@/pages/Sessions';
 import Notifications from '@/pages/Notifications';
 import Settings from '@/pages/Settings';
@@ -73,6 +74,7 @@ function App() {
         <Route index element={<Navigate to="/app/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="classes" element={<MyClasses />} />
+        <Route path="classes/:id" element={<ClassDetailsPage />} />
         <Route path="sessions" element={<Sessions />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="notifications" element={<Notifications />} />

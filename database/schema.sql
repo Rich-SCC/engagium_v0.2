@@ -32,6 +32,8 @@ CREATE TABLE classes (
     subject VARCHAR(100),
     section VARCHAR(50),
     description TEXT,
+    schedule JSONB, -- {days: ['monday', 'wednesday'], time: '10:00 AM'}
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -71,11 +73,38 @@ CREATE TABLE participation_logs (
     additional_data JSONB
 );
 
+-- Session links table (multiple links per class)
+CREATE TABLE session_links (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+    link_url VARCHAR(500) NOT NULL,
+    link_type VARCHAR(50), -- 'zoom', 'meet', 'teams', etc.
+    label VARCHAR(100),
+    zoom_meeting_id VARCHAR(100),
+    zoom_passcode VARCHAR(100),
+    is_primary BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Exempted accounts table (exclude from tracking)
+CREATE TABLE exempted_accounts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+    account_identifier VARCHAR(255) NOT NULL, -- email or name
+    reason VARCHAR(255), -- 'TA', 'Observer', 'Alt account', etc.
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(class_id, account_identifier)
+);
+
 -- Create indexes for better performance
 CREATE INDEX idx_classes_instructor_id ON classes(instructor_id);
+CREATE INDEX idx_classes_status ON classes(status);
 CREATE INDEX idx_students_class_id ON students(class_id);
 CREATE INDEX idx_sessions_class_id ON sessions(class_id);
 CREATE INDEX idx_sessions_status ON sessions(status);
+CREATE INDEX idx_session_links_class_id ON session_links(class_id);
+CREATE INDEX idx_exempted_accounts_class_id ON exempted_accounts(class_id);
 CREATE INDEX idx_participation_logs_session_id ON participation_logs(session_id);
 CREATE INDEX idx_participation_logs_student_id ON participation_logs(student_id);
 CREATE INDEX idx_participation_logs_timestamp ON participation_logs(timestamp);
@@ -96,4 +125,7 @@ CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_classes_updated_at BEFORE UPDATE ON classes
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_session_links_updated_at BEFORE UPDATE ON session_links
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

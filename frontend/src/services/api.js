@@ -124,12 +124,27 @@ export const authAPI = {
 
 // Classes API
 export const classesAPI = {
-  getAll: () => api.get('/classes'),
+  getAll: (includeArchived = false) => api.get(`/classes?include_archived=${includeArchived}`),
   getStats: () => api.get('/classes/stats'),
   getById: (id) => api.get(`/classes/${id}`),
   create: (classData) => api.post('/classes', classData),
   update: (id, classData) => api.put(`/classes/${id}`, classData),
   delete: (id) => api.delete(`/classes/${id}`),
+  
+  // Status and schedule
+  updateStatus: (id, status) => api.patch(`/classes/${id}/status`, { status }),
+  updateSchedule: (id, schedule) => api.patch(`/classes/${id}/schedule`, { schedule }),
+
+  // Session links
+  getLinks: (classId) => api.get(`/classes/${classId}/links`),
+  addLink: (classId, linkData) => api.post(`/classes/${classId}/links`, linkData),
+  updateLink: (classId, linkId, linkData) => api.put(`/classes/${classId}/links/${linkId}`, linkData),
+  deleteLink: (classId, linkId) => api.delete(`/classes/${classId}/links/${linkId}`),
+
+  // Exempted accounts
+  getExemptions: (classId) => api.get(`/classes/${classId}/exemptions`),
+  addExemption: (classId, exemptionData) => api.post(`/classes/${classId}/exemptions`, exemptionData),
+  deleteExemption: (classId, exemptionId) => api.delete(`/classes/${classId}/exemptions/${exemptionId}`),
 
   // Student management
   getStudents: (classId) => api.get(`/classes/${classId}/students`),
@@ -143,6 +158,12 @@ export const classesAPI = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+    }),
+  bulkDeleteStudents: (classId, studentIds) =>
+    api.post(`/classes/${classId}/students/bulk-delete`, { student_ids: studentIds }),
+  exportStudents: (classId) =>
+    api.get(`/classes/${classId}/students/export`, {
+      responseType: 'blob',
     }),
 };
 

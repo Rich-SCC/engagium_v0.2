@@ -355,11 +355,101 @@ const importStudents = async (req, res) => {
   }
 };
 
+// Bulk delete students
+const bulkDeleteStudents = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { student_ids } = req.body;
+
+    if (!student_ids || !Array.isArray(student_ids) || student_ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'student_ids array is required'
+      });
+    }
+
+    // Check ownership
+    const existingClass = await Class.findById(classId);
+    if (!existingClass) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (existingClass.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const deletedCount = await Student.bulkDelete(student_ids);
+
+    res.json({
+      success: true,
+      message: `${deletedCount} student(s) deleted successfully`,
+      deleted_count: deletedCount
+    });
+  } catch (error) {
+    console.error('Bulk delete students error:', error);
+    
+    if (error.message.includes('participation logs')) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Export students to CSV
+const exportStudentsCSV = async (req, res) => {
+  try {
+    const { classId } = req.params;
+
+    // Check ownership
+    const existingClass = await Class.findById(classId);
+    if (!existingClass) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (existingClass.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const csv = await Student.exportToCSV(classId);
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="students_${classId}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    console.error('Export students CSV error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   getStudents,
   addStudent,
   updateStudent,
   removeStudent,
   importStudents,
+  bulkDeleteStudents,
+  exportStudentsCSV,
   upload
 };

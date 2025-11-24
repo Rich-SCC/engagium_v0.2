@@ -104,6 +104,84 @@ class Student {
     const result = await db.query(query, [classId, studentId]);
     return result.rows[0];
   }
+
+  static async bulkDelete(ids) {
+    // Check if any students have participation logs
+    const logCheck = await db.query(
+      'SELECT student_id FROM participation_logs WHERE student_id = ANY($1) GROUP BY student_id',
+      [ids]
+    );
+
+    if (logCheck.rows.length > 0) {
+      const studentsWithLogs = logCheck.rows.map(row => row.student_id);
+      throw new Error(`Cannot delete students with participation logs: ${studentsWithLogs.join(', ')}`);
+    }
+
+    const query = 'DELETE FROM students WHERE id = ANY($1)';
+    const result = await db.query(query, [ids]);
+    return result.rowCount;
+  }
+
+  static parseCSV(csvContent) {
+    const lines = csvContent.trim().split('\n');
+    if (lines.length < 2) {
+      throw new Error('CSV must contain header and at least one data row');
+    }
+
+    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const students = [];
+
+    // Validate required columns
+    const requiredColumns = ['first_name', 'last_name'];
+    const missingColumns = requiredColumns.filter(col => !header.includes(col));
+    if (missingColumns.length > 0) {
+      throw new Error(`Missing required columns: ${missingColumns.join(', ')}`);
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim());
+      if (values.length !== header.length) {
+        continue; // Skip malformed rows
+      }
+
+      const student = {};
+      header.forEach((col, index) => {
+        student[col] = values[index] || null;
+      });
+
+      students.push(student);
+    }
+
+    return students;
+  }
+
+  static async importFromCSV(classId, csvContent) {
+    const parsedStudents = this.parseCSV(csvContent);
+    const studentsData = parsedStudents.map(s => ({
+      class_id: classId,
+      first_name: s.first_name,
+      last_name: s.last_name,
+      email: s.email || null,
+      student_id: s.student_id || null
+    }));
+
+    return await this.bulkCreate(studentsData);
+  }
+
+  static async exportToCSV(classId) {
+    const students = await this.findByClassId(classId);
+    
+    if (students.length === 0) {
+      return 'first_name,last_name,email,student_id\n';
+    }
+
+    const header = 'first_name,last_name,email,student_id\n';
+    const rows = students.map(s => 
+      `${s.first_name},${s.last_name},${s.email || ''},${s.student_id || ''}`
+    ).join('\n');
+
+    return header + rows;
+  }
 }
 
 module.exports = Student;
