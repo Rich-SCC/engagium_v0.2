@@ -1,130 +1,135 @@
 import React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   HomeIcon,
-  AcademicCapIcon,
-  UserGroupIcon,
-  PlayIcon,
+  BellIcon,
   ChartBarIcon,
+  BookOpenIcon,
   CogIcon,
-  ArrowRightOnRectangleIcon,
+  PencilIcon,
 } from '@heroicons/react/24/outline';
 
-const Layout = ({ children }) => {
+const Layout = () => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
     await logout();
-    navigate('/login');
+    navigate('/');
   };
 
   const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
-    { name: 'Classes', href: '/classes', icon: AcademicCapIcon },
-    { name: 'Sessions', href: '/sessions', icon: PlayIcon },
-    { name: 'Analytics', href: '/analytics', icon: ChartBarIcon },
+    { name: 'Home', href: '/app/dashboard', icon: HomeIcon },
+    { name: 'Notification', href: '/app/notifications', icon: BellIcon },
+    { name: 'Analytics', href: '/app/analytics', icon: ChartBarIcon },
+    { name: 'My Classes', href: '/app/classes', icon: BookOpenIcon },
+    { name: 'Settings', href: '/app/settings', icon: CogIcon },
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Navigation sidebar */}
-      <div className="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg lg:block lg:translate-x-0">
-        <div className="flex h-full flex-col">
-          {/* Logo */}
-          <div className="flex h-16 items-center justify-center border-b border-gray-200">
-            <h1 className="text-xl font-bold text-primary-600">Engagium</h1>
+    <div className="min-h-screen bg-gray-100">
+      {/* Left Sidebar */}
+      <aside className="fixed inset-y-0 left-0 w-64 bg-gray-400 shadow-lg">
+        <div className="flex h-full flex-col p-6">
+          {/* Profile Section */}
+          <div className="mb-8">
+            <div className="relative w-32 h-32 mx-auto mb-4">
+              {/* Profile Image Placeholder */}
+              <div className="w-full h-full rounded-full bg-orange-100 flex items-center justify-center border-4 border-white overflow-hidden">
+                <div className="text-center">
+                  <div className="text-5xl">👤</div>
+                </div>
+              </div>
+              {/* Edit Button */}
+              <button className="absolute bottom-1 right-1 w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-md hover:bg-gray-50">
+                <PencilIcon className="w-4 h-4 text-gray-600" />
+              </button>
+            </div>
+
+            {/* User Info */}
+            <div className="text-center">
+              <h2 className="text-white text-xl font-bold mb-1">
+                {user?.first_name && user?.last_name 
+                  ? `${user.first_name} ${user.last_name}`
+                  : 'User'}
+              </h2>
+              <p className="text-white text-xs mb-1">
+                {user?.role?.toUpperCase() || 'INSTRUCTOR'} OF SCIENCE IN COMPUTER SCIENCE
+              </p>
+              <p className="text-white text-sm font-semibold">
+                {user?.student_id || '20221524'}
+              </p>
+            </div>
           </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 space-y-1 px-2 py-4">
+          {/* Navigation Menu */}
+          <nav className="flex-1 space-y-2">
             {navigation.map((item) => {
-              const isActive = location.pathname === item.href;
+              const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
               return (
                 <Link
                   key={item.name}
                   to={item.href}
-                  className={`group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-colors ${
+                  className={`flex items-center px-4 py-3 rounded-full text-white font-medium transition-all ${
                     isActive
-                      ? 'bg-primary-100 text-primary-700'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                      ? 'bg-white text-gray-800 shadow-md'
+                      : 'hover:bg-gray-500'
                   }`}
                 >
-                  <item.icon
-                    className={`mr-3 h-5 w-5 flex-shrink-0 ${
-                      isActive ? 'text-primary-500' : 'text-gray-400 group-hover:text-gray-500'
-                    }`}
-                  />
-                  {item.name}
+                  <item.icon className="w-5 h-5 mr-3" />
+                  <span>{item.name}</span>
+                  {isActive && (
+                    <svg className="w-4 h-4 ml-auto" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
                 </Link>
               );
             })}
           </nav>
 
-          {/* User menu */}
-          <div className="border-t border-gray-200 p-4">
-            <div className="flex items-center">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">
-                  {user?.first_name} {user?.last_name}
-                </p>
-                <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-              </div>
-              <div className="flex-shrink-0 ml-3">
-                <button
-                  onClick={handleLogout}
-                  className="inline-flex items-center p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
-                  title="Logout"
-                >
-                  <ArrowRightOnRectangleIcon className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-          </div>
+          {/* Logout Button */}
+          <button
+            onClick={handleLogout}
+            className="w-full mt-4 px-4 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-full transition-all flex items-center justify-center space-x-2"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            <span>Logout</span>
+          </button>
         </div>
-      </div>
+      </aside>
 
-      {/* Main content */}
-      <div className="lg:pl-64">
-        {/* Top bar */}
-        <div className="sticky top-0 z-40 bg-white shadow-sm">
-          <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center">
-              <h1 className="text-lg font-semibold text-gray-900">
-                {navigation.find(item => item.href === location.pathname)?.name || 'Engagium'}
+      {/* Main Content Area */}
+      <div className="ml-64 min-h-screen">
+        {/* Top Bar */}
+        <header className="bg-white shadow-sm">
+          <div className="flex items-center justify-between px-8 py-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                Welcome Back, {user?.first_name || 'User'}!
               </h1>
+              <p className="text-sm text-red-600 font-semibold">
+                You have 1 class!
+              </p>
             </div>
-            <div className="flex items-center space-x-4">
-              <Link
-                to="/settings"
-                className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
-                title="Settings"
-              >
-                <CogIcon className="h-5 w-5" />
-              </Link>
+            <div className="flex items-center">
+              <input
+                type="search"
+                placeholder="Search..."
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-400"
+              />
             </div>
           </div>
-        </div>
+        </header>
 
-        {/* Page content */}
-        <main className="py-6">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            {children}
-          </div>
+        {/* Page Content */}
+        <main className="p-8">
+          <Outlet />
         </main>
-      </div>
-
-      {/* Mobile menu overlay */}
-      <div className="lg:hidden fixed inset-0 z-50 hidden">
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-75" />
-        <div className="fixed inset-y-0 left-0 flex w-64 max-w-xs flex-col bg-white">
-          {/* Mobile menu content would go here */}
-          <div className="flex h-16 items-center justify-center border-b border-gray-200">
-            <h1 className="text-xl font-bold text-primary-600">Engagium</h1>
-          </div>
-        </div>
       </div>
     </div>
   );

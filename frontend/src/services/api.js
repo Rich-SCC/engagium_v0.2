@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getToken, removeToken } from '@/utils/auth';
+import { getToken, getRefreshToken, setToken, removeTokens } from '@/utils/auth';
 
 // Create axios instance
 const api = axios.create({
@@ -9,6 +9,22 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Track if we're currently refreshing the token to avoid multiple refresh requests
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  
+  failedQueue = [];
+};
 
 // Request interceptor to add auth token
 api.interceptors.request.use(
@@ -24,16 +40,67 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor to handle common errors
+// Response interceptor to handle common errors and token refresh
 api.interceptors.response.use(
   (response) => {
     return response.data;
   },
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config;
+
     // Handle 401 unauthorized - token expired or invalid
-    if (error.response?.status === 401) {
-      removeToken();
-      window.location.href = '/login';
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        // If we're already refreshing, queue this request
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(token => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return axios(originalRequest);
+          })
+          .catch(err => {
+            return Promise.reject(err);
+          });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      const refreshToken = getRefreshToken();
+
+      if (!refreshToken) {
+        // No refresh token, redirect to login
+        removeTokens();
+        window.location.href = '/login';
+        return Promise.reject(error);
+      }
+
+      try {
+        // Attempt to refresh the access token
+        const response = await axios.post('/api/auth/refresh-token', {
+          refreshToken
+        });
+
+        const { accessToken } = response.data.data;
+        setToken(accessToken);
+        
+        // Update the authorization header
+        api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        
+        processQueue(null, accessToken);
+        
+        return axios(originalRequest);
+      } catch (refreshError) {
+        // Refresh failed, redirect to login
+        processQueue(refreshError, null);
+        removeTokens();
+        window.location.href = '/login';
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
     }
 
     // Extract error message from response
@@ -50,6 +117,9 @@ export const authAPI = {
   logout: () => api.post('/auth/logout'),
   getProfile: () => api.get('/auth/profile'),
   updateProfile: (userData) => api.put('/auth/profile', userData),
+  refreshToken: (refreshToken) => api.post('/auth/refresh-token', { refreshToken }),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) => api.post('/auth/reset-password', { token, password }),
 };
 
 // Classes API

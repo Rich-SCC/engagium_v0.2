@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { authAPI } from '@/services/api';
-import { getToken, setToken, removeToken, isTokenValid } from '@/utils/auth';
+import { getToken, setTokens, removeTokens, isTokenValid } from '@/utils/auth';
 
 // Auth context
 const AuthContext = createContext();
@@ -137,12 +137,12 @@ export const AuthProvider = ({ children }) => {
           });
         } catch (error) {
           // Token is invalid, remove it
-          removeToken();
+          removeTokens();
           dispatch({ type: 'LOGOUT' });
         }
       } else {
         // Remove invalid token
-        removeToken();
+        removeTokens();
         dispatch({ type: 'LOGOUT' });
       }
     };
@@ -156,12 +156,12 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const response = await authAPI.login(credentials);
-      const { user, token } = response.data;
+      const { user, accessToken, refreshToken } = response.data;
 
-      setToken(token);
+      setTokens(accessToken, refreshToken);
       dispatch({
         type: 'LOGIN_SUCCESS',
-        payload: { user, token },
+        payload: { user, token: accessToken },
       });
 
       return { success: true };
@@ -180,12 +180,12 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const response = await authAPI.register(userData);
-      const { user, token } = response.data;
+      const { user, accessToken, refreshToken } = response.data;
 
-      setToken(token);
+      setTokens(accessToken, refreshToken);
       dispatch({
         type: 'REGISTER_SUCCESS',
-        payload: { user, token },
+        payload: { user, token: accessToken },
       });
 
       return { success: true };
@@ -207,7 +207,7 @@ export const AuthProvider = ({ children }) => {
       console.error('Logout API call failed:', error);
     }
 
-    removeToken();
+    removeTokens();
     dispatch({ type: 'LOGOUT' });
   };
 

@@ -4,17 +4,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import Layout from '@/components/Layout';
 
 // Auth pages
-import Login from '@/pages/Login';
-import Register from '@/pages/Register';
+import LandingPage from '@/pages/LandingPage';
+import ResetPassword from '@/pages/ResetPassword';
 
 // Main pages
 import Dashboard from '@/pages/Dashboard';
-
-// Placeholder components for other routes
-const Classes = () => <div className="p-6"><h1 className="text-2xl font-bold">Classes</h1><p>Classes page coming soon...</p></div>;
-const Sessions = () => <div className="p-6"><h1 className="text-2xl font-bold">Sessions</h1><p>Sessions page coming soon...</p></div>;
-const Analytics = () => <div className="p-6"><h1 className="text-2xl font-bold">Analytics</h1><p>Analytics page coming soon...</p></div>;
-const Settings = () => <div className="p-6"><h1 className="text-2xl font-bold">Settings</h1><p>Settings page coming soon...</p></div>;
+import Analytics from '@/pages/Analytics';
+import MyClasses from '@/pages/MyClasses';
+import Sessions from '@/pages/Sessions';
+import Notifications from '@/pages/Notifications';
+import Settings from '@/pages/Settings';
 
 // Protected route component
 const ProtectedRoute = ({ children }) => {
@@ -28,7 +27,7 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  return isAuthenticated ? children : <Navigate to="/" replace />;
 };
 
 // Public route component (redirect to dashboard if authenticated)
@@ -43,44 +42,40 @@ const PublicRoute = ({ children }) => {
     );
   }
 
-  return !isAuthenticated ? children : <Navigate to="/dashboard" replace />;
+  return !isAuthenticated ? children : <Navigate to="/app/dashboard" replace />;
 };
 
 function App() {
   return (
     <Routes>
-      {/* Public routes */}
+      {/* Landing Page - Public */}
+      <Route path="/" element={<LandingPage />} />
+
+      {/* Reset Password route - needs token from email */}
       <Route
-        path="/login"
+        path="/reset-password"
         element={
           <PublicRoute>
-            <Login />
-          </PublicRoute>
-        }
-      />
-      <Route
-        path="/register"
-        element={
-          <PublicRoute>
-            <Register />
+            <ResetPassword />
           </PublicRoute>
         }
       />
 
       {/* Protected routes */}
       <Route
-        path="/"
+        path="/app"
         element={
           <ProtectedRoute>
             <Layout />
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route index element={<Navigate to="/app/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
-        <Route path="classes" element={<Classes />} />
+        <Route path="classes" element={<MyClasses />} />
         <Route path="sessions" element={<Sessions />} />
         <Route path="analytics" element={<Analytics />} />
+        <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<Settings />} />
       </Route>
 
@@ -93,7 +88,7 @@ function App() {
               <h1 className="text-4xl font-bold text-gray-900 mb-4">404</h1>
               <p className="text-gray-600 mb-8">Page not found</p>
               <a
-                href="/dashboard"
+                href="/app/dashboard"
                 className="btn-primary"
               >
                 Go to Dashboard

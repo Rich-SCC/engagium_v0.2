@@ -17,6 +17,9 @@ CREATE TABLE users (
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
     role user_role DEFAULT 'instructor' NOT NULL,
+    reset_token VARCHAR(255),
+    reset_token_expires TIMESTAMP WITH TIME ZONE,
+    refresh_token TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -77,6 +80,7 @@ CREATE INDEX idx_participation_logs_session_id ON participation_logs(session_id)
 CREATE INDEX idx_participation_logs_student_id ON participation_logs(student_id);
 CREATE INDEX idx_participation_logs_timestamp ON participation_logs(timestamp);
 CREATE INDEX idx_participation_logs_interaction_type ON participation_logs(interaction_type);
+CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()

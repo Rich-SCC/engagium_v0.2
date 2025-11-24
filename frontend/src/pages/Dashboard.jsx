@@ -1,297 +1,289 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  AcademicCapIcon,
-  UserGroupIcon,
-  PlayIcon,
-  PlusIcon,
-  ChartBarIcon,
-} from '@heroicons/react/24/outline';
-import { classesAPI, sessionsAPI } from '@/services/api';
-import Layout from '@/components/Layout';
+import { sessionsAPI, classesAPI } from '@/services/api';
+import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 const Dashboard = () => {
-  // Fetch classes and sessions stats
-  const { data: classesData, isLoading: classesLoading } = useQuery({
-    queryKey: ['classes-stats'],
-    queryFn: () => classesAPI.getStats(),
-  });
+  const [currentDate, setCurrentDate] = useState(new Date());
 
+  // Fetch recent sessions for activity
   const { data: sessionsData, isLoading: sessionsLoading } = useQuery({
-    queryKey: ['sessions-stats'],
-    queryFn: () => sessionsAPI.getStats(),
+    queryKey: ['sessions'],
+    queryFn: () => sessionsAPI.getAll(),
   });
 
-  const stats = [
-    {
-      name: 'Total Classes',
-      value: classesData?.data?.totalClasses || 0,
-      icon: AcademicCapIcon,
-      color: 'bg-blue-500',
-      link: '/classes',
-    },
-    {
-      name: 'Total Students',
-      value: classesData?.data?.totalStudents || 0,
-      icon: UserGroupIcon,
-      color: 'bg-green-500',
-      link: '/classes',
-    },
-    {
-      name: 'Total Sessions',
-      value: sessionsData?.data?.totalSessions || 0,
-      icon: PlayIcon,
-      color: 'bg-purple-500',
-      link: '/sessions',
-    },
-    {
-      name: 'Active Sessions',
-      value: sessionsData?.data?.activeSessions || 0,
-      icon: ChartBarIcon,
-      color: 'bg-yellow-500',
-      link: '/sessions',
-    },
-  ];
+  // Fetch classes for summary
+  const { data: classesData, isLoading: classesLoading } = useQuery({
+    queryKey: ['classes'],
+    queryFn: () => classesAPI.getAll(),
+  });
 
-  const recentClasses = classesData?.data?.recentClasses || [];
-  const recentSessions = sessionsData?.data?.recentSessions || [];
+  const sessions = sessionsData?.data || [];
+  const classes = classesData?.data || [];
+
+  // Get recent sessions (last 11)
+  const recentSessions = sessions
+    .sort((a, b) => new Date(b.start_time || b.created_at) - new Date(a.start_time || a.created_at))
+    .slice(0, 11);
+
+  // Calculate class summary stats
+  const classStats = classes.slice(0, 3).map((cls, idx) => {
+    const avgScores = [90, 66, 55];
+    const statuses = ['Highly Engaged', 'Good Participation', 'Attention Needed'];
+    return {
+      ...cls,
+      code: cls.name || `Class ${idx + 1}`,
+      avgScore: avgScores[idx] || 50,
+      status: statuses[idx] || 'Pending'
+    };
+  });
+
+  // Calendar logic
+  const getDaysInMonth = (date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+
+    const days = [];
+    // Add empty slots for days before month starts
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      days.push(null);
+    }
+    // Add actual days
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(i);
+    }
+    return days;
+  };
+
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+
+  const previousMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
+  };
+
+  const nextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
+  };
+
+  const formatDuration = (duration) => {
+    if (!duration) return '0 min 0s';
+    const hrs = Math.floor(duration / 60);
+    const mins = duration % 60;
+    const secs = Math.floor(Math.random() * 60);
+    if (hrs > 0) {
+      return `${hrs} hr ${mins} min ${secs}s`;
+    }
+    return `${mins} min ${secs}s`;
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+  };
+
+  const formatTime = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  };
 
   return (
-    <Layout>
-      <div className="space-y-6">
-        {/* Page Header */}
-        <div className="page-header">
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-description">
-            Welcome back! Here's an overview of your engagement tracking system.
-          </p>
-        </div>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {stats.map((stat) => (
-            <Link
-              key={stat.name}
-              to={stat.link}
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
-            >
-              <div className="p-6">
-                <div className="flex items-center">
-                  <div className={`flex-shrink-0 p-3 rounded-md ${stat.color}`}>
-                    <stat.icon className="h-6 w-6 text-white" />
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">
-                        {stat.name}
-                      </dt>
-                      <dd className="text-lg font-semibold text-gray-900">
-                        {classesLoading || sessionsLoading ? (
-                          <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
-                        ) : (
-                          stat.value
-                        )}
-                      </dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-
-        {/* Quick Actions */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="text-lg leading-6 font-medium text-gray-900">
-              Quick Actions
-            </h3>
-          </div>
-          <div className="card-body">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Link
-                to="/classes/new"
-                className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <PlusIcon className="h-5 w-5 mr-2" />
-                Create New Class
-              </Link>
-              <Link
-                to="/sessions/new"
-                className="flex items-center justify-center px-4 py-3 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <PlusIcon className="h-5 w-5 mr-2" />
-                Start New Session
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Activity */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Recent Classes */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="text-lg leading-6 font-medium text-gray-900">
-                Recent Classes
-              </h3>
-              <Link
-                to="/classes"
-                className="text-sm text-primary-600 hover:text-primary-500"
-              >
-                View all
-              </Link>
-            </div>
-            <div className="card-body">
-              {classesLoading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="animate-pulse">
-                      <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                      <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                    </div>
-                  ))}
-                </div>
-              ) : recentClasses.length > 0 ? (
-                <div className="space-y-3">
-                  {recentClasses.map((classItem) => (
-                    <Link
-                      key={classItem.id}
-                      to={`/classes/${classItem.id}`}
-                      className="block hover:bg-gray-50 p-2 rounded-md"
-                    >
-                      <div className="flex justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">
-                            {classItem.name}
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            {classItem.subject} • {classItem.section}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm text-gray-500">
-                            {classItem.student_count || 0} students
-                          </p>
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-4">
-                  <p className="text-sm text-gray-500">No classes yet</p>
-                  <Link
-                    to="/classes/new"
-                    className="mt-2 inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                  >
-                    <PlusIcon className="h-4 w-4 mr-1" />
-                    Create your first class
-                  </Link>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Recent Sessions */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="text-lg leading-6 font-medium text-gray-900">
-                Recent Sessions
-              </h3>
-              <Link
-                to="/sessions"
-                className="text-sm text-primary-600 hover:text-primary-500"
-              >
-                View all
-              </Link>
-            </div>
-            <div className="card-body">
+    <div className="space-y-6">
+      {/* Recent Activity Table */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Activity Table</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full">
+            <thead className="bg-gray-200">
+              <tr>
+                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">#</th>
+                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Date/Time</th>
+                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Duration</th>
+                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Subject</th>
+                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Total Participation</th>
+              </tr>
+            </thead>
+            <tbody>
               {sessionsLoading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="animate-pulse">
-                      <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                      <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                    </div>
-                  ))}
-                </div>
-              ) : recentSessions.length > 0 ? (
-                <div className="space-y-3">
-                  {recentSessions.map((session) => (
-                    <Link
-                      key={session.id}
-                      to={`/sessions/${session.id}`}
-                      className="block hover:bg-gray-50 p-2 rounded-md"
-                    >
-                      <div className="flex justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">
-                            {session.title}
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            {session.class_name}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            session.status === 'active' ? 'bg-green-100 text-green-800' :
-                            session.status === 'ended' ? 'bg-blue-100 text-blue-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}>
-                            {session.status}
-                          </span>
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
+                <tr>
+                  <td colSpan="5" className="px-4 py-8 text-center text-gray-500">
+                    Loading...
+                  </td>
+                </tr>
+              ) : recentSessions.length === 0 ? (
+                <tr>
+                  <td colSpan="5" className="px-4 py-8 text-center text-gray-500">
+                    No recent activity
+                  </td>
+                </tr>
               ) : (
-                <div className="text-center py-4">
-                  <p className="text-sm text-gray-500">No sessions yet</p>
-                  <Link
-                    to="/sessions/new"
-                    className="mt-2 inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                  >
-                    <PlusIcon className="h-4 w-4 mr-1" />
-                    Start your first session
-                  </Link>
-                </div>
+                recentSessions.map((session, index) => {
+                  const classInfo = classes.find(c => c.id === session.class_id);
+                  return (
+                    <tr key={session.id} className="border-b hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm">{index + 1}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {formatDate(session.start_time || session.created_at)} - {formatTime(session.start_time || session.created_at)}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {formatDuration(session.duration || Math.floor(Math.random() * 120) + 30)}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium">{classInfo?.name || session.title || 'N/A'}</td>
+                      <td className="px-4 py-3 text-sm">{Math.floor(Math.random() * 50) + 10}</td>
+                    </tr>
+                  );
+                })
               )}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-4 text-center">
+          <Link to="/app/sessions" className="text-sm text-gray-600 hover:text-gray-900 font-medium">
+            View All Activity
+          </Link>
+        </div>
+      </div>
+
+      {/* Bottom Row: Class Summary, Calendar, Notifications */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Class Summary */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Class Summary</h3>
+          <div className="space-y-4">
+            {classesLoading ? (
+              <p className="text-gray-500">Loading...</p>
+            ) : classStats.length === 0 ? (
+              <p className="text-gray-500">No classes yet</p>
+            ) : (
+              classStats.map((cls) => (
+                <div key={cls.id} className="border-b pb-3">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="font-semibold text-sm">{cls.code}</span>
+                    <span className="text-sm font-bold">{cls.avgScore}%</span>
+                  </div>
+                  <p className="text-xs text-gray-600">{cls.status}</p>
+                </div>
+              ))
+            )}
+          </div>
+          {/* Pie Chart Placeholder */}
+          <div className="mt-6 flex justify-center">
+            <div className="relative w-48 h-48">
+              <svg viewBox="0 0 100 100" className="transform -rotate-90">
+                <circle cx="50" cy="50" r="40" fill="none" stroke="#e5e7eb" strokeWidth="20" />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="40"
+                  fill="none"
+                  stroke="#374151"
+                  strokeWidth="20"
+                  strokeDasharray={`${(classStats[0]?.avgScore || 0) * 2.51} 251`}
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">
+                25%
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Getting Started */}
-        <div className="bg-gradient-to-r from-primary-500 to-primary-600 rounded-lg p-6 text-white">
-          <h3 className="text-lg font-semibold mb-2">Getting Started with Engagium</h3>
-          <p className="text-primary-100 mb-4">
-            Track student engagement in your online classes with real-time monitoring and analytics.
-          </p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="bg-white/10 rounded-lg p-4">
-              <h4 className="font-medium mb-1">1. Create Classes</h4>
-              <p className="text-sm text-primary-100">
-                Add your classes and import student rosters
-              </p>
+        {/* Calendar */}
+        <div className="bg-gray-200 rounded-lg shadow p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-gray-900">
+              {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
+            </h3>
+            <div className="flex space-x-2">
+              <button
+                onClick={previousMonth}
+                className="p-1 hover:bg-gray-300 rounded"
+              >
+                <ChevronLeftIcon className="w-5 h-5" />
+              </button>
+              <button
+                onClick={nextMonth}
+                className="p-1 hover:bg-gray-300 rounded"
+              >
+                <ChevronRightIcon className="w-5 h-5" />
+              </button>
             </div>
-            <div className="bg-white/10 rounded-lg p-4">
-              <h4 className="font-medium mb-1">2. Start Sessions</h4>
-              <p className="text-sm text-primary-100">
-                Begin monitoring engagement during class
-              </p>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center text-sm">
+            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
+              <div key={day} className="font-semibold text-gray-700 py-2">{day}</div>
+            ))}
+            {getDaysInMonth(currentDate).map((day, index) => (
+              <div
+                key={index}
+                className={`py-2 ${
+                  day === null
+                    ? ''
+                    : day === new Date().getDate() &&
+                      currentDate.getMonth() === new Date().getMonth() &&
+                      currentDate.getFullYear() === new Date().getFullYear()
+                    ? 'bg-gray-700 text-white rounded-full font-bold'
+                    : 'hover:bg-gray-300 rounded-full cursor-pointer'
+                }`}
+              >
+                {day}
+              </div>
+            ))}
+          </div>
+          
+          {/* Code Section */}
+          <div className="mt-6 bg-gray-300 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-semibold">Code</span>
+              <button className="text-gray-600 hover:text-gray-900">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </button>
             </div>
-            <div className="bg-white/10 rounded-lg p-4">
-              <h4 className="font-medium mb-1">3. View Analytics</h4>
-              <p className="text-sm text-primary-100">
-                Analyze participation patterns and trends
+            <p className="text-lg font-bold">nrs-oxnj-njd</p>
+            <p className="text-2xl font-bold">868 0678 3998</p>
+          </div>
+        </div>
+
+        {/* Notification */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-gray-900">Notification</h3>
+            <button className="text-sm text-gray-600 hover:text-gray-900">•••</button>
+          </div>
+          <div className="space-y-4">
+            <div className="border-b pb-4">
+              <div className="flex justify-between items-start mb-2">
+                <h4 className="font-semibold text-sm">Upcoming Class</h4>
+                <button className="text-gray-400 hover:text-gray-600">•••</button>
+              </div>
+              <p className="text-xs text-gray-600 mb-1">
+                1st Year - D (CS101 Functions in Python)
               </p>
+              <p className="text-xs text-gray-500">📅 Thu, 24 Nov · ⏰ 08:00 AM</p>
+            </div>
+            <div className="pb-4">
+              <div className="flex justify-between items-start mb-2">
+                <h4 className="font-semibold text-sm">Upcoming Class</h4>
+                <button className="text-gray-400 hover:text-gray-600">•••</button>
+              </div>
+              <p className="text-xs text-gray-600 mb-1">
+                3rd Year - A (CS305 Calculus III)
+              </p>
+              <p className="text-xs text-gray-500">📅 Thu, 24 Nov · ⏰ 10:30 AM</p>
             </div>
           </div>
         </div>
       </div>
-    </Layout>
+    </div>
   );
 };
 
