@@ -24,6 +24,15 @@ const upload = multer({
 const getStudents = async (req, res) => {
   try {
     const { classId } = req.params;
+    const { 
+      search, 
+      sortBy, 
+      sortOrder, 
+      tagIds, 
+      hasNotes,
+      limit,
+      offset
+    } = req.query;
 
     // Verify class exists and user has access
     const classData = await Class.findById(classId);
@@ -41,7 +50,23 @@ const getStudents = async (req, res) => {
       });
     }
 
-    const students = await Student.findByClassId(classId);
+    // Use advanced search if filters provided, otherwise simple list
+    let students;
+    if (search || sortBy || tagIds || hasNotes !== undefined) {
+      const options = {
+        search,
+        sortBy: sortBy || 'last_name',
+        sortOrder: sortOrder || 'ASC',
+        tagIds: tagIds ? (Array.isArray(tagIds) ? tagIds : [tagIds]) : [],
+        hasNotes: hasNotes !== undefined ? hasNotes === 'true' : null,
+        limit: limit ? parseInt(limit) : null,
+        offset: offset ? parseInt(offset) : 0
+      };
+
+      students = await Student.searchAndFilter(classId, options);
+    } else {
+      students = await Student.findByClassId(classId);
+    }
 
     res.json({
       success: true,
@@ -451,5 +476,224 @@ module.exports = {
   importStudents,
   bulkDeleteStudents,
   exportStudentsCSV,
+  upload
+};
+
+// Get student with detailed info
+const getStudentDetails = async (req, res) => {
+  try {
+    const { classId, studentId } = req.params;
+
+    // Verify class exists and user has access
+    const classData = await Class.findById(classId);
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const student = await Student.findByIdWithDetails(studentId);
+
+    if (!student || student.class_id !== classId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: student
+    });
+  } catch (error) {
+    console.error('Get student details error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Check for duplicate students
+const checkDuplicates = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { email, student_id } = req.query;
+
+    // Verify class exists and user has access
+    const classData = await Class.findById(classId);
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const duplicates = await Student.findDuplicates(classId, email, student_id);
+
+    res.json({
+      success: true,
+      data: {
+        has_duplicates: duplicates.length > 0,
+        duplicates
+      }
+    });
+  } catch (error) {
+    console.error('Check duplicates error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Merge two students
+const mergeStudents = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { keep_student_id, merge_student_id } = req.body;
+
+    if (!keep_student_id || !merge_student_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both keep_student_id and merge_student_id are required'
+      });
+    }
+
+    if (keep_student_id === merge_student_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot merge a student with itself'
+      });
+    }
+
+    // Verify class exists and user has access
+    const classData = await Class.findById(classId);
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Verify both students belong to this class
+    const keepStudent = await Student.findById(keep_student_id);
+    const mergeStudent = await Student.findById(merge_student_id);
+
+    if (!keepStudent || keepStudent.class_id !== classId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Keep student not found in this class'
+      });
+    }
+
+    if (!mergeStudent || mergeStudent.class_id !== classId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Merge student not found in this class'
+      });
+    }
+
+    const mergedStudent = await Student.merge(keep_student_id, merge_student_id);
+
+    res.json({
+      success: true,
+      data: mergedStudent,
+      message: 'Students merged successfully'
+    });
+  } catch (error) {
+    console.error('Merge students error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Bulk update students
+const bulkUpdateStudents = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { updates } = req.body;
+
+    if (!updates || !Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'updates array is required'
+      });
+    }
+
+    // Verify class exists and user has access
+    const classData = await Class.findById(classId);
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const results = await Student.bulkUpdate(updates);
+
+    const successful = results.filter(r => r.success);
+    const failed = results.filter(r => !r.success);
+
+    res.json({
+      success: true,
+      data: {
+        updated: successful.length,
+        failed: failed.length,
+        results
+      }
+    });
+  } catch (error) {
+    console.error('Bulk update students error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+module.exports = {
+  getStudents,
+  getStudentDetails,
+  addStudent,
+  updateStudent,
+  removeStudent,
+  importStudents,
+  bulkDeleteStudents,
+  exportStudentsCSV,
+  checkDuplicates,
+  mergeStudents,
+  bulkUpdateStudents,
   upload
 };

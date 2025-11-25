@@ -147,7 +147,8 @@ export const classesAPI = {
   deleteExemption: (classId, exemptionId) => api.delete(`/classes/${classId}/exemptions/${exemptionId}`),
 
   // Student management
-  getStudents: (classId) => api.get(`/classes/${classId}/students`),
+  getStudents: (classId, params) => api.get(`/classes/${classId}/students`, { params }),
+  getStudentDetails: (classId, studentId) => api.get(`/classes/${classId}/students/${studentId}`),
   addStudent: (classId, studentData) => api.post(`/classes/${classId}/students`, studentData),
   updateStudent: (classId, studentId, studentData) =>
     api.put(`/classes/${classId}/students/${studentId}`, studentData),
@@ -161,10 +162,45 @@ export const classesAPI = {
     }),
   bulkDeleteStudents: (classId, studentIds) =>
     api.post(`/classes/${classId}/students/bulk-delete`, { student_ids: studentIds }),
+  bulkUpdateStudents: (classId, updates) =>
+    api.post(`/classes/${classId}/students/bulk-update`, { updates }),
   exportStudents: (classId) =>
     api.get(`/classes/${classId}/students/export`, {
       responseType: 'blob',
     }),
+  checkDuplicates: (classId, params) =>
+    api.get(`/classes/${classId}/students/check-duplicates`, { params }),
+  mergeStudents: (classId, keepStudentId, mergeStudentId) =>
+    api.post(`/classes/${classId}/students/merge`, {
+      keep_student_id: keepStudentId,
+      merge_student_id: mergeStudentId
+    }),
+
+  // Student tags
+  getTags: (classId) => api.get(`/classes/${classId}/tags`),
+  createTag: (classId, tagData) => api.post(`/classes/${classId}/tags`, tagData),
+  updateTag: (classId, tagId, tagData) => api.put(`/classes/${classId}/tags/${tagId}`, tagData),
+  deleteTag: (classId, tagId) => api.delete(`/classes/${classId}/tags/${tagId}`),
+  getStudentTags: (classId, studentId) => api.get(`/classes/${classId}/students/${studentId}/tags`),
+  assignTag: (classId, studentId, tagId) =>
+    api.post(`/classes/${classId}/students/${studentId}/tags/${tagId}`),
+  removeTag: (classId, studentId, tagId) =>
+    api.delete(`/classes/${classId}/students/${studentId}/tags/${tagId}`),
+  bulkAssignTag: (classId, tagId, studentIds) =>
+    api.post(`/classes/${classId}/tags/${tagId}/bulk-assign`, { student_ids: studentIds }),
+  bulkRemoveTag: (classId, tagId, studentIds) =>
+    api.post(`/classes/${classId}/tags/${tagId}/bulk-remove`, { student_ids: studentIds }),
+
+  // Student notes
+  getStudentNotes: (classId, studentId) => api.get(`/classes/${classId}/students/${studentId}/notes`),
+  createNote: (classId, studentId, noteText) =>
+    api.post(`/classes/${classId}/students/${studentId}/notes`, { note_text: noteText }),
+  updateNote: (classId, studentId, noteId, noteText) =>
+    api.put(`/classes/${classId}/students/${studentId}/notes/${noteId}`, { note_text: noteText }),
+  deleteNote: (classId, studentId, noteId) =>
+    api.delete(`/classes/${classId}/students/${studentId}/notes/${noteId}`),
+  getRecentNotes: (classId, limit = 10) =>
+    api.get(`/classes/${classId}/notes/recent`, { params: { limit } }),
 };
 
 // Sessions API

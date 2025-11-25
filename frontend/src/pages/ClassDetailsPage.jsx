@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { classesAPI } from '@/services/api';
 import {
@@ -7,40 +7,62 @@ import {
   PencilIcon,
   LinkIcon,
   ShieldExclamationIcon,
-  UserGroupIcon,
-  DocumentArrowUpIcon,
-  ArrowDownTrayIcon,
-  PlusIcon,
-  TrashIcon
+  UserGroupIcon
 } from '@heroicons/react/24/outline';
-import ClassFormModal from '@/components/ClassFormModal';
-import SessionLinksModal from '@/components/SessionLinksModal';
-import ExemptionListModal from '@/components/ExemptionListModal';
-import StudentImportModal from '@/components/StudentImportModal';
+import ClassFormModal from '@/components/ClassDetails/ClassFormModal';
+import SessionLinksModal from '@/components/ClassDetails/SessionLinksModal';
+import ExemptionListModal from '@/components/ClassDetails/ExemptionListModal';
+import StudentImportModal from '@/components/Students/StudentImportModal';
+import TagManagementModal from '@/components/Students/TagManagementModal';
+import StudentNotesModal from '@/components/Students/StudentNotesModal';
+import StudentMergeModal from '@/components/Students/StudentMergeModal';
+import StudentRosterToolbar from '@/components/Students/StudentRosterToolbar';
+import StudentTableRow from '@/components/Students/StudentTableRow';
+import StudentBulkActionsBar from '@/components/Students/StudentBulkActionsBar';
 
 const ClassDetailsPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   
+  // Modal states
   const [showEditModal, setShowEditModal] = useState(false);
   const [showLinksModal, setShowLinksModal] = useState(false);
   const [showExemptionsModal, setShowExemptionsModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showTagsModal, setShowTagsModal] = useState(false);
+  const [showNotesModal, setShowNotesModal] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  
+  // Data states
   const [selectedStudents, setSelectedStudents] = useState([]);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('last_name');
 
+  // Queries
   const { data: classData, isLoading: classLoading } = useQuery({
     queryKey: ['class', id],
     queryFn: () => classesAPI.getById(id),
   });
 
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
-    queryKey: ['students', id],
-    queryFn: () => classesAPI.getStudents(id),
+    queryKey: ['students', id, searchTerm, sortBy],
+    queryFn: () => classesAPI.getStudents(id, { 
+      search: searchTerm,
+      sortBy,
+      sortOrder: 'ASC'
+    }),
+  });
+
+  const { data: tagsData } = useQuery({
+    queryKey: ['tags', id],
+    queryFn: () => classesAPI.getTags(id),
   });
 
   const classInfo = classData?.data;
   const students = studentsData?.data || [];
+  const tags = tagsData?.data || [];
 
   const updateClassMutation = useMutation({
     mutationFn: (data) => classesAPI.update(id, data),
@@ -66,6 +88,15 @@ const ClassDetailsPage = () => {
     }
   });
 
+  const bulkAssignTagMutation = useMutation({
+    mutationFn: (tagId) => classesAPI.bulkAssignTag(id, tagId, selectedStudents),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['students', id]);
+      setSelectedStudents([]);
+    }
+  });
+
+  // Handlers
   const handleExportCSV = async () => {
     try {
       const blob = await classesAPI.exportStudents(id);
@@ -92,6 +123,15 @@ const ClassDetailsPage = () => {
     if (confirm(`Delete ${selectedStudents.length} selected students?`)) {
       bulkDeleteMutation.mutate(selectedStudents);
     }
+  };
+
+  const handleBulkTag = (tagId) => {
+    bulkAssignTagMutation.mutate(tagId);
+  };
+
+  const handleViewNotes = (student) => {
+    setSelectedStudent(student);
+    setShowNotesModal(true);
   };
 
   const toggleStudentSelection = (studentId) => {
@@ -196,51 +236,43 @@ const ClassDetailsPage = () => {
         <div className="p-6 border-b flex items-center justify-between">
           <div className="flex items-center gap-3">
             <UserGroupIcon className="w-6 h-6 text-gray-600" />
-            <h2 className="text-xl font-bold">
-              Students ({students.length})
-            </h2>
-          </div>
-          <div className="flex gap-2">
-            {selectedStudents.length > 0 && (
-              <button
-                onClick={handleBulkDelete}
-                disabled={bulkDeleteMutation.isPending}
-                className="px-4 py-2 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 flex items-center"
-              >
-                <TrashIcon className="w-5 h-5 mr-2" />
-                Delete ({selectedStudents.length})
-              </button>
-            )}
-            <button
-              onClick={handleExportCSV}
-              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center"
-            >
-              <ArrowDownTrayIcon className="w-5 h-5 mr-2" />
-              Export CSV
-            </button>
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 flex items-center"
-            >
-              <DocumentArrowUpIcon className="w-5 h-5 mr-2" />
-              Import CSV
-            </button>
+            <h2 className="text-xl font-bold">Students ({students.length})</h2>
           </div>
         </div>
+
+        <StudentRosterToolbar
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          onImport={() => setShowImportModal(true)}
+          onExport={handleExportCSV}
+          onManageTags={() => setShowTagsModal(true)}
+          onMerge={() => setShowMergeModal(true)}
+          studentCount={students.length}
+        />
 
         {studentsLoading ? (
           <div className="p-12 text-center text-gray-500">Loading students...</div>
         ) : students.length === 0 ? (
           <div className="p-12 text-center">
             <UserGroupIcon className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">No students yet</h3>
-            <p className="text-gray-500 mb-6">Import students from CSV or add them manually</p>
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="bg-gray-900 text-white px-6 py-3 rounded-lg hover:bg-gray-800"
-            >
-              Import Students
-            </button>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {searchTerm ? 'No students found' : 'No students yet'}
+            </h3>
+            <p className="text-gray-500 mb-6">
+              {searchTerm
+                ? 'Try adjusting your search or filters'
+                : 'Import students from CSV or add them manually'}
+            </p>
+            {!searchTerm && (
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="bg-gray-900 text-white px-6 py-3 rounded-lg hover:bg-gray-800"
+              >
+                Import Students
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -250,7 +282,7 @@ const ClassDetailsPage = () => {
                   <th className="px-6 py-3 text-left">
                     <input
                       type="checkbox"
-                      checked={selectedStudents.length === students.length}
+                      checked={selectedStudents.length === students.length && students.length > 0}
                       onChange={toggleSelectAll}
                       className="rounded border-gray-300"
                     />
@@ -264,6 +296,9 @@ const ClassDetailsPage = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Student ID
                   </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Participation
+                  </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
@@ -271,42 +306,30 @@ const ClassDetailsPage = () => {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {students.map((student) => (
-                  <tr key={student.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedStudents.includes(student.id)}
-                        onChange={() => toggleStudentSelection(student.id)}
-                        className="rounded border-gray-300"
-                      />
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="font-medium text-gray-900">
-                        {student.first_name} {student.last_name}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {student.email || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {student.student_id || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button
-                        onClick={() => handleDeleteStudent(student.id)}
-                        disabled={deleteStudentMutation.isPending}
-                        className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
+                  <StudentTableRow
+                    key={student.id}
+                    student={student}
+                    isSelected={selectedStudents.includes(student.id)}
+                    onToggleSelect={toggleStudentSelection}
+                    onDelete={handleDeleteStudent}
+                    onViewNotes={handleViewNotes}
+                    onEdit={(s) => console.log('Edit', s)}
+                  />
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {/* Bulk Actions Bar */}
+      <StudentBulkActionsBar
+        selectedCount={selectedStudents.length}
+        onClearSelection={() => setSelectedStudents([])}
+        onBulkDelete={handleBulkDelete}
+        onBulkTag={handleBulkTag}
+        tags={tags}
+      />
 
       {/* Modals */}
       <ClassFormModal
@@ -333,6 +356,29 @@ const ClassDetailsPage = () => {
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         classId={id}
+      />
+
+      <TagManagementModal
+        isOpen={showTagsModal}
+        onClose={() => setShowTagsModal(false)}
+        classId={id}
+      />
+
+      <StudentNotesModal
+        isOpen={showNotesModal}
+        onClose={() => {
+          setShowNotesModal(false);
+          setSelectedStudent(null);
+        }}
+        classId={id}
+        student={selectedStudent}
+      />
+
+      <StudentMergeModal
+        isOpen={showMergeModal}
+        onClose={() => setShowMergeModal(false)}
+        classId={id}
+        students={students}
       />
     </div>
   );

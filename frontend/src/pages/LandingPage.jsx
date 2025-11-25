@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import LoginModal from '@/components/LoginModal';
-import SignUpModal from '@/components/SignUpModal';
-import ForgotPasswordModal from '@/components/ForgotPasswordModal';
+import LoginModal from '@/components/Auth/LoginModal';
+import SignUpModal from '@/components/Auth/SignUpModal';
+import ForgotPasswordModal from '@/components/Auth/ForgotPasswordModal';
 
 const LandingPage = () => {
   const navigate = useNavigate();

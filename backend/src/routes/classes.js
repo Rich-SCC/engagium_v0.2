@@ -19,14 +19,36 @@ const {
 } = require('../controllers/classController');
 const {
   getStudents,
+  getStudentDetails,
   addStudent,
   updateStudent,
   removeStudent,
   importStudents,
   bulkDeleteStudents,
   exportStudentsCSV,
+  checkDuplicates,
+  mergeStudents,
+  bulkUpdateStudents,
   upload
 } = require('../controllers/studentController');
+const {
+  getClassTags,
+  createTag,
+  updateTag,
+  deleteTag,
+  assignTagToStudent,
+  removeTagFromStudent,
+  bulkAssignTag,
+  bulkRemoveTag,
+  getStudentTags
+} = require('../controllers/studentTagController');
+const {
+  getStudentNotes,
+  createNote,
+  updateNote,
+  deleteNote,
+  getRecentClassNotes
+} = require('../controllers/studentNoteController');
 
 const router = express.Router();
 
@@ -58,11 +80,33 @@ router.delete('/:id/exemptions/:exemptionId', deleteExemptedAccount);
 
 // Student routes within classes
 router.get('/:classId/students', getStudents);
+router.get('/:classId/students/check-duplicates', checkDuplicates);
+router.get('/:classId/students/export', exportStudentsCSV);
+router.get('/:classId/students/:studentId', getStudentDetails);
 router.post('/:classId/students', addStudent);
 router.put('/:classId/students/:studentId', updateStudent);
 router.delete('/:classId/students/:studentId', removeStudent);
 router.post('/:classId/students/import', upload.single('csvFile'), importStudents);
 router.post('/:classId/students/bulk-delete', bulkDeleteStudents);
-router.get('/:classId/students/export', exportStudentsCSV);
+router.post('/:classId/students/bulk-update', bulkUpdateStudents);
+router.post('/:classId/students/merge', mergeStudents);
+
+// Student tags routes
+router.get('/:classId/tags', getClassTags);
+router.post('/:classId/tags', createTag);
+router.put('/:classId/tags/:tagId', updateTag);
+router.delete('/:classId/tags/:tagId', deleteTag);
+router.get('/:classId/students/:studentId/tags', getStudentTags);
+router.post('/:classId/students/:studentId/tags/:tagId', assignTagToStudent);
+router.delete('/:classId/students/:studentId/tags/:tagId', removeTagFromStudent);
+router.post('/:classId/tags/:tagId/bulk-assign', bulkAssignTag);
+router.post('/:classId/tags/:tagId/bulk-remove', bulkRemoveTag);
+
+// Student notes routes
+router.get('/:classId/notes/recent', getRecentClassNotes);
+router.get('/:classId/students/:studentId/notes', getStudentNotes);
+router.post('/:classId/students/:studentId/notes', createNote);
+router.put('/:classId/students/:studentId/notes/:noteId', updateNote);
+router.delete('/:classId/students/:studentId/notes/:noteId', deleteNote);
 
 module.exports = router;

@@ -182,6 +182,204 @@ class Student {
 
     return header + rows;
   }
+
+  // Search and filter students with advanced options
+  static async searchAndFilter(classId, options = {}) {
+    const {
+      search = '',
+      sortBy = 'last_name',
+      sortOrder = 'ASC',
+      tagIds = [],
+      hasNotes = null,
+      limit = null,
+      offset = 0
+    } = options;
+
+    let query = `
+      SELECT DISTINCT s.*,
+             COUNT(DISTINCT pl.id) as participation_count,
+             COUNT(DISTINCT sn.id) as notes_count,
+             ARRAY_AGG(DISTINCT st.id) FILTER (WHERE st.id IS NOT NULL) as tag_ids,
+             ARRAY_AGG(DISTINCT st.tag_name) FILTER (WHERE st.tag_name IS NOT NULL) as tag_names
+      FROM students s
+      LEFT JOIN participation_logs pl ON s.id = pl.student_id
+      LEFT JOIN student_notes sn ON s.id = sn.student_id
+      LEFT JOIN student_tag_assignments sta ON s.id = sta.student_id
+      LEFT JOIN student_tags st ON sta.tag_id = st.id
+      WHERE s.class_id = $1
+    `;
+
+    const params = [classId];
+    let paramCount = 1;
+
+    // Search filter
+    if (search) {
+      paramCount++;
+      query += ` AND (
+        s.first_name ILIKE $${paramCount} OR 
+        s.last_name ILIKE $${paramCount} OR 
+        s.email ILIKE $${paramCount} OR 
+        s.student_id ILIKE $${paramCount}
+      )`;
+      params.push(`%${search}%`);
+    }
+
+    query += ` GROUP BY s.id`;
+
+    // Tag filter
+    if (tagIds.length > 0) {
+      paramCount++;
+      query += ` HAVING ARRAY_AGG(DISTINCT st.id) && $${paramCount}`;
+      params.push(tagIds);
+    }
+
+    // Has notes filter
+    if (hasNotes !== null) {
+      if (hasNotes) {
+        query += ` ${tagIds.length > 0 ? 'AND' : 'HAVING'} COUNT(DISTINCT sn.id) > 0`;
+      } else {
+        query += ` ${tagIds.length > 0 ? 'AND' : 'HAVING'} COUNT(DISTINCT sn.id) = 0`;
+      }
+    }
+
+    // Sorting
+    const validSortColumns = ['first_name', 'last_name', 'email', 'student_id', 'participation_count', 'notes_count'];
+    const validSortOrders = ['ASC', 'DESC'];
+    
+    if (validSortColumns.includes(sortBy) && validSortOrders.includes(sortOrder.toUpperCase())) {
+      if (sortBy === 'participation_count' || sortBy === 'notes_count') {
+        query += ` ORDER BY ${sortBy} ${sortOrder}`;
+      } else {
+        query += ` ORDER BY s.${sortBy} ${sortOrder}`;
+      }
+    } else {
+      query += ` ORDER BY s.last_name ASC, s.first_name ASC`;
+    }
+
+    // Pagination
+    if (limit) {
+      paramCount++;
+      query += ` LIMIT $${paramCount}`;
+      params.push(limit);
+    }
+
+    if (offset > 0) {
+      paramCount++;
+      query += ` OFFSET $${paramCount}`;
+      params.push(offset);
+    }
+
+    const result = await db.query(query, params);
+    return result.rows;
+  }
+
+  // Get student with full details (tags, notes count, participation count)
+  static async findByIdWithDetails(id) {
+    const query = `
+      SELECT s.*, 
+             c.name as class_name, 
+             c.subject,
+             COUNT(DISTINCT pl.id) as participation_count,
+             COUNT(DISTINCT sn.id) as notes_count,
+             ARRAY_AGG(DISTINCT st.id) FILTER (WHERE st.id IS NOT NULL) as tag_ids,
+             ARRAY_AGG(DISTINCT st.tag_name) FILTER (WHERE st.tag_name IS NOT NULL) as tag_names
+      FROM students s
+      JOIN classes c ON s.class_id = c.id
+      LEFT JOIN participation_logs pl ON s.id = pl.student_id
+      LEFT JOIN student_notes sn ON s.id = sn.student_id
+      LEFT JOIN student_tag_assignments sta ON s.id = sta.student_id
+      LEFT JOIN student_tags st ON sta.tag_id = st.id
+      WHERE s.id = $1
+      GROUP BY s.id, c.id
+    `;
+
+    const result = await db.query(query, [id]);
+    return result.rows[0];
+  }
+
+  // Get participation count for student
+  static async getParticipationCount(studentId) {
+    const query = `
+      SELECT COUNT(*) as count
+      FROM participation_logs
+      WHERE student_id = $1
+    `;
+
+    const result = await db.query(query, [studentId]);
+    return parseInt(result.rows[0].count);
+  }
+
+  // Check for duplicate students (by email or student_id)
+  static async findDuplicates(classId, email, studentId) {
+    const query = `
+      SELECT * FROM students
+      WHERE class_id = $1 AND (
+        (email IS NOT NULL AND email = $2) OR
+        (student_id IS NOT NULL AND student_id = $3)
+      )
+    `;
+
+    const result = await db.query(query, [classId, email, studentId]);
+    return result.rows;
+  }
+
+  // Merge two students (combine participation logs, notes, tags)
+  static async merge(keepStudentId, mergeStudentId) {
+    const client = await db.getClient();
+
+    try {
+      await client.query('BEGIN');
+
+      // Transfer participation logs
+      await client.query(
+        'UPDATE participation_logs SET student_id = $1 WHERE student_id = $2',
+        [keepStudentId, mergeStudentId]
+      );
+
+      // Transfer notes
+      await client.query(
+        'UPDATE student_notes SET student_id = $1 WHERE student_id = $2',
+        [keepStudentId, mergeStudentId]
+      );
+
+      // Transfer tags (avoiding duplicates)
+      await client.query(
+        `INSERT INTO student_tag_assignments (student_id, tag_id)
+         SELECT $1, tag_id FROM student_tag_assignments WHERE student_id = $2
+         ON CONFLICT (student_id, tag_id) DO NOTHING`,
+        [keepStudentId, mergeStudentId]
+      );
+
+      // Delete the merged student
+      await client.query('DELETE FROM students WHERE id = $1', [mergeStudentId]);
+
+      await client.query('COMMIT');
+
+      return await this.findByIdWithDetails(keepStudentId);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // Bulk update students (for bulk edit operations)
+  static async bulkUpdate(updates) {
+    const results = [];
+
+    for (const update of updates) {
+      try {
+        const { id, ...data } = update;
+        const student = await this.update(id, data);
+        results.push({ success: true, data: student });
+      } catch (error) {
+        results.push({ success: false, error: error.message, id: update.id });
+      }
+    }
+
+    return results;
+  }
 }
 
 module.exports = Student;

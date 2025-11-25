@@ -12,9 +12,9 @@ import {
   PencilIcon,
   TrashIcon
 } from '@heroicons/react/24/outline';
-import ClassFormModal from '@/components/ClassFormModal';
-import SessionLinksModal from '@/components/SessionLinksModal';
-import ExemptionListModal from '@/components/ExemptionListModal';
+import ClassFormModal from '@/components/ClassDetails/ClassFormModal';
+import SessionLinksModal from '@/components/ClassDetails/SessionLinksModal';
+import ExemptionListModal from '@/components/ClassDetails/ExemptionListModal';
 
 const MyClasses = () => {
   const navigate = useNavigate();
