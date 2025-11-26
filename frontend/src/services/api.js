@@ -217,6 +217,12 @@ export const sessionsAPI = {
   delete: (id) => api.delete(`/sessions/${id}`),
   start: (id) => api.put(`/sessions/${id}/start`),
   end: (id) => api.put(`/sessions/${id}/end`),
+  
+  // Extension endpoints (NEW)
+  startFromMeeting: (data) => api.post('/sessions/start-from-meeting', data),
+  endWithTimestamp: (id, endedAt) => 
+    api.put(`/sessions/${id}/end-with-timestamp`, { ended_at: endedAt }),
+  
   getStudents: (id) => api.get(`/sessions/${id}/students`),
   
   // Date range and calendar
@@ -244,6 +250,17 @@ export const participationAPI = {
     api.get(`/participation/sessions/${sessionId}/summary`),
   getRecentActivity: (sessionId, minutes = 5) =>
     api.get(`/participation/sessions/${sessionId}/recent?minutes=${minutes}`),
+};
+
+// Notifications API
+export const notificationsAPI = {
+  getAll: (unreadOnly = false) =>
+    api.get('/notifications', { params: { unread: unreadOnly } }),
+  getUnreadCount: () => api.get('/notifications/unread-count'),
+  markAsRead: (id) => api.put(`/notifications/${id}/read`),
+  markAllAsRead: () => api.put('/notifications/read-all'),
+  delete: (id) => api.delete(`/notifications/${id}`),
+  create: (data) => api.post('/notifications', data),
 };
 
 export default api;

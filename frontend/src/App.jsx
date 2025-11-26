@@ -9,11 +9,13 @@ import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
 
 // Main pages
-import Dashboard from '@/pages/Dashboard';
+import Home from '@/pages/Home';
+import LiveFeed from '@/pages/LiveFeed';
 import Analytics from '@/pages/Analytics';
 import MyClasses from '@/pages/MyClasses';
 import ClassDetailsPage from '@/pages/ClassDetailsPage';
 import Sessions from '@/pages/Sessions';
+import SessionDetailPage from '@/pages/SessionDetailPage';
 import Notifications from '@/pages/Notifications';
 import Settings from '@/pages/Settings';
 
@@ -44,7 +46,7 @@ const PublicRoute = ({ children }) => {
     );
   }
 
-  return !isAuthenticated ? children : <Navigate to="/app/dashboard" replace />;
+  return !isAuthenticated ? children : <Navigate to="/app/home" replace />;
 };
 
 function App() {
@@ -82,14 +84,19 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/app/dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
+        <Route index element={<Navigate to="/app/home" replace />} />
+        <Route path="home" element={<Home />} />
+        <Route path="live-feed" element={<LiveFeed />} />
         <Route path="classes" element={<MyClasses />} />
         <Route path="classes/:id" element={<ClassDetailsPage />} />
         <Route path="sessions" element={<Sessions />} />
+        <Route path="sessions/:id" element={<SessionDetailPage />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<Settings />} />
+        
+        {/* Legacy redirect for old dashboard route */}
+        <Route path="dashboard" element={<Navigate to="/app/home" replace />} />
       </Route>
     </Routes>
   );

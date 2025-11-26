@@ -1,0 +1,16 @@
+{
+  "name": "engagium-database",
+  "version": "1.0.0",
+  "description": "Database setup and seeding utilities for Engagium",
+  "private": true,
+  "scripts": {
+    "seed": "node seed-database.js",
+    "generate-hash": "node generate-hash.js",
+    "verify": "node verify-seed.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "pg": "^8.11.3",
+    "dotenv": "^16.3.1"
+  }
+}

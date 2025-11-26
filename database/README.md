@@ -71,7 +71,50 @@ Apply the database schema:
 psql -U engagium_user -d engagium -f schema.sql
 ```
 
-### 4. Configure Backend Connection
+### 4. Seed Test Data (Optional)
+
+To populate the database with realistic test data for development:
+
+**Option A: Using Node.js Script (Recommended)**
+
+```bash
+# Make sure you're in the database directory
+cd database
+
+# Make sure bcrypt and pg are installed
+npm install bcrypt pg dotenv
+
+# Run the seeding script
+node seed-database.js
+```
+
+This will:
+- Generate proper bcrypt password hashes
+- Insert 3 instructors, 5 classes, 45 students
+- Create 13 sessions with participation data
+- Add tags, notes, and notifications
+
+**Option B: Using SQL File Directly**
+
+First, generate a password hash:
+
+```bash
+node generate-hash.js
+```
+
+Then copy the hash and replace it in `seed-data.sql`, and run:
+
+```bash
+psql -U engagium_user -d engagium -f seed-data.sql
+```
+
+**Test Login Credentials:**
+- Email: `john.doe@university.edu`
+- Password: `Password123!`
+
+Other test accounts: `sarah.smith@university.edu` and `michael.johnson@university.edu` (same password)
+
+### 5. Configure Backend Connection
 
 Create a `.env` file in the `backend` directory (if it doesn't exist):
 

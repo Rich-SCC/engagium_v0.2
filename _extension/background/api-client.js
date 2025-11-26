@@ -30,7 +30,7 @@ async function apiRequest(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
   const headers = {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
+    'X-Extension-Token': token,
     ...options.headers
   };
 
@@ -64,15 +64,58 @@ async function apiRequest(endpoint, options = {}) {
 
 export async function verifyToken() {
   try {
-    const response = await apiRequest('/auth/verify');
-    return response.valid === true;
+    const token = await getAuthToken();
+    if (!token) return false;
+    
+    // Use the new extension token verification endpoint
+    const url = `${API_BASE_URL}/extension-tokens/verify`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ token })
+    });
+    
+    if (!response.ok) return false;
+    
+    const data = await response.json();
+    return data.success === true;
   } catch (error) {
+    console.error('[API] Token verification failed:', error);
     return false;
   }
 }
 
 export async function getUserInfo() {
-  return await apiRequest('/auth/me');
+  try {
+    const token = await getAuthToken();
+    if (!token) throw new Error('Not authenticated');
+    
+    // Verify token and get user info in one call
+    const url = `${API_BASE_URL}/extension-tokens/verify`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ token })
+    });
+    
+    if (!response.ok) {
+      throw new Error('Authentication failed');
+    }
+    
+    const data = await response.json();
+    if (data.success && data.data.user) {
+      return { success: true, data: data.data.user };
+    }
+    
+    throw new Error('Invalid response from server');
+  } catch (error) {
+    console.error('[API] Get user info failed:', error);
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -98,6 +141,28 @@ export async function getStudentsByClass(classId) {
 
 export async function getSessionById(sessionId) {
   return await apiRequest(`/sessions/${sessionId}`);
+}
+
+export async function startSessionFromMeeting(sessionData) {
+  const { class_id, meeting_id, platform } = sessionData;
+  return await apiRequest('/sessions/start-from-meeting', {
+    method: 'POST',
+    body: JSON.stringify({
+      class_id,
+      meeting_link: meeting_id,
+      platform,
+      additional_data: {
+        extension_version: chrome.runtime.getManifest().version
+      }
+    })
+  });
+}
+
+export async function endSessionWithTimestamp(sessionId, endedAt) {
+  return await apiRequest(`/sessions/${sessionId}/end-with-timestamp`, {
+    method: 'PUT',
+    body: JSON.stringify({ ended_at: endedAt })
+  });
 }
 
 export async function startSession(sessionId) {

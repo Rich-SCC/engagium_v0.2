@@ -16,16 +16,43 @@ function PopupApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sessionDuration, setSessionDuration] = useState(0);
+  
+  // Meeting detection state
+  const [meetingDetected, setMeetingDetected] = useState(null); // { meeting_id, platform, mapped_class_id, mapped_class_name }
+  const [availableClasses, setAvailableClasses] = useState([]);
+  const [selectedClassId, setSelectedClassId] = useState(null);
 
   // Load session status on mount
   useEffect(() => {
     loadSessionStatus();
+    loadMeetingDetectionStatus();
     
     // Refresh every 2 seconds
-    const interval = setInterval(loadSessionStatus, 2000);
+    const interval = setInterval(() => {
+      loadSessionStatus();
+      loadMeetingDetectionStatus();
+    }, 2000);
     
     return () => clearInterval(interval);
   }, []);
+  
+  // Load meeting detection status
+  async function loadMeetingDetectionStatus() {
+    try {
+      const response = await sendMessage(MESSAGE_TYPES.GET_MEETING_STATUS);
+      if (response.success && response.data) {
+        setMeetingDetected(response.data.meeting);
+        setAvailableClasses(response.data.classes || []);
+        
+        // Pre-select mapped class if exists
+        if (response.data.meeting?.mapped_class_id) {
+          setSelectedClassId(response.data.meeting.mapped_class_id);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading meeting status:', err);
+    }
+  }
 
   // Update session duration timer
   useEffect(() => {
@@ -97,6 +124,35 @@ function PopupApp() {
     }
   }
 
+  async function handleStartSession(classId) {
+    if (!meetingDetected || !classId) return;
+    
+    try {
+      setIsLoading(true);
+      const response = await sendMessage(MESSAGE_TYPES.START_SESSION, {
+        class_id: classId,
+        meeting_id: meetingDetected.meeting_id,
+        platform: meetingDetected.platform
+      });
+      
+      if (response.success) {
+        setMeetingDetected(null); // Clear detection UI
+        await loadSessionStatus();
+      } else {
+        setError(response.error);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function handleDismissMeeting() {
+    setMeetingDetected(null);
+    sendMessage(MESSAGE_TYPES.DISMISS_MEETING);
+  }
+
   function openOptions() {
     chrome.runtime.openOptionsPage();
   }
@@ -159,6 +215,95 @@ function PopupApp() {
           </svg>
           <span>{error}</span>
           <button onClick={() => setError(null)}>×</button>
+        </div>
+      )}
+
+      {/* Meeting Detection Banner (shows when meeting detected but no active session) */}
+      {meetingDetected && !isActive && (
+        <div className="meeting-detection">
+          <div className="meeting-banner">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M15.5 5H21M21 5V10.5M21 5L13 13"/>
+              <path d="M7 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V17"/>
+            </svg>
+            <div className="meeting-info">
+              <h3>Meeting Detected</h3>
+              <p className="meeting-platform">{meetingDetected.platform === 'google-meet' ? 'Google Meet' : meetingDetected.platform}</p>
+            </div>
+          </div>
+
+          {/* Mapped Class (Auto-Track) */}
+          {meetingDetected.mapped_class_id && meetingDetected.mapped_class_name && (
+            <div className="meeting-action-mapped">
+              <p className="mapped-label">Track attendance for:</p>
+              <div className="mapped-class">{meetingDetected.mapped_class_name}</div>
+              <div className="button-group">
+                <button 
+                  className="button button-primary"
+                  onClick={() => handleStartSession(meetingDetected.mapped_class_id)}
+                  disabled={isLoading}
+                >
+                  Start Tracking
+                </button>
+                <button 
+                  className="button button-secondary"
+                  onClick={handleDismissMeeting}
+                  disabled={isLoading}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Unmapped Class (Manual Selection) */}
+          {!meetingDetected.mapped_class_id && availableClasses.length > 0 && (
+            <div className="meeting-action-unmapped">
+              <p className="unmapped-label">Select class to track:</p>
+              <select 
+                className="class-selector"
+                value={selectedClassId || ''}
+                onChange={(e) => setSelectedClassId(e.target.value)}
+              >
+                <option value="">-- Select a class --</option>
+                {availableClasses.map(cls => (
+                  <option key={cls.id} value={cls.id}>
+                    {cls.name}
+                  </option>
+                ))}
+              </select>
+              <div className="button-group">
+                <button 
+                  className="button button-primary"
+                  onClick={() => handleStartSession(selectedClassId)}
+                  disabled={isLoading || !selectedClassId}
+                >
+                  Start Tracking
+                </button>
+                <button 
+                  className="button button-secondary"
+                  onClick={handleDismissMeeting}
+                  disabled={isLoading}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* No Classes Available */}
+          {!meetingDetected.mapped_class_id && availableClasses.length === 0 && (
+            <div className="meeting-action-none">
+              <p className="no-classes-message">No classes found. Please create a class in the web app first.</p>
+              <button 
+                className="button button-secondary"
+                onClick={handleDismissMeeting}
+                disabled={isLoading}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
       )}
 

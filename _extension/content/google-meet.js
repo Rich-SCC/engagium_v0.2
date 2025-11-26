@@ -54,6 +54,7 @@ const state = {
   lastChatMessageCount: 0,
   participantObserver: null,
   chatObserver: null,
+  previousMeetingId: null, // For platform switch detection
 };
 
 // ============================================================================
@@ -91,6 +92,85 @@ function init() {
   
   // Listen for messages from background
   chrome.runtime.onMessage.addListener(handleBackgroundMessage);
+  
+  // Monitor URL changes for platform switches (professor switches meeting links mid-session)
+  monitorURLChanges();
+}
+
+/**
+ * Monitor URL changes to detect platform switches
+ * (Professor switches to different Google Meet link mid-session)
+ */
+function monitorURLChanges() {
+  let lastUrl = window.location.href;
+  
+  // Use MutationObserver to detect URL changes in SPA
+  new MutationObserver(() => {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      handleURLChange();
+    }
+  }).observe(document.querySelector('title'), {
+    childList: true,
+    subtree: true
+  });
+  
+  // Also listen to popstate (back/forward navigation)
+  window.addEventListener('popstate', handleURLChange);
+  
+  // And pushState/replaceState (programmatic navigation)
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    handleURLChange();
+  };
+  
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    handleURLChange();
+  };
+}
+
+/**
+ * Handle URL change (potential platform switch)
+ */
+function handleURLChange() {
+  const newMeetingId = extractMeetingId();
+  
+  // No meeting ID means left the meeting
+  if (!newMeetingId) {
+    if (state.isTracking) {
+      console.log('[GoogleMeet] Left meeting');
+      stopTracking();
+    }
+    return;
+  }
+  
+  // If meeting ID changed while tracking, it's a platform switch
+  if (state.isTracking && newMeetingId !== state.meetingId) {
+    console.log('[GoogleMeet] Platform switch detected:', state.meetingId, '->', newMeetingId);
+    
+    // Log platform switch event
+    sendMessage(MESSAGE_TYPES.PLATFORM_SWITCH, {
+      platform: 'google-meet',
+      old_meeting_id: state.meetingId,
+      new_meeting_id: newMeetingId,
+      timestamp: now()
+    });
+    
+    // Update meeting ID and continue tracking
+    state.previousMeetingId = state.meetingId;
+    state.meetingId = newMeetingId;
+    
+    // Clear participants (new meeting)
+    state.participants.clear();
+    
+    // Re-scan participants
+    setTimeout(() => scanParticipants(), 1000);
+  }
 }
 
 /**

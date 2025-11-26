@@ -8,6 +8,8 @@ import {
   BookOpenIcon,
   CogIcon,
   ArrowRightOnRectangleIcon,
+  RssIcon,
+  CalendarIcon,
 } from '@heroicons/react/24/outline';
 
 const Layout = () => {
@@ -21,10 +23,12 @@ const Layout = () => {
   };
 
   const navigation = [
-    { name: 'Home', href: '/app/dashboard', icon: HomeIcon },
-    { name: 'Notification', href: '/app/notifications', icon: BellIcon },
-    { name: 'Analytics', href: '/app/analytics', icon: ChartBarIcon },
+    { name: 'Home', href: '/app/home', icon: HomeIcon },
+    { name: 'Live Feed', href: '/app/live-feed', icon: RssIcon },
     { name: 'My Classes', href: '/app/classes', icon: BookOpenIcon },
+    { name: 'Sessions', href: '/app/sessions', icon: CalendarIcon },
+    { name: 'Analytics', href: '/app/analytics', icon: ChartBarIcon },
+    { name: 'Notifications', href: '/app/notifications', icon: BellIcon },
     { name: 'Settings', href: '/app/settings', icon: CogIcon },
   ];
 

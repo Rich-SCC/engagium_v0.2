@@ -1,16 +1,31 @@
 -- Engagium Database Schema
 -- PostgreSQL Schema for Phase 1 MVP
+-- Migration-ready: Can be run multiple times safely with IF NOT EXISTS
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Create enum types
-CREATE TYPE user_role AS ENUM ('instructor', 'admin');
-CREATE TYPE session_status AS ENUM ('scheduled', 'active', 'ended');
-CREATE TYPE interaction_type AS ENUM ('manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle');
+DO $$ BEGIN
+    CREATE TYPE user_role AS ENUM ('instructor', 'admin');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE session_status AS ENUM ('active', 'ended');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE interaction_type AS ENUM ('manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'platform_switch');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- Users table
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
@@ -25,7 +40,7 @@ CREATE TABLE users (
 );
 
 -- Classes table
-CREATE TABLE classes (
+CREATE TABLE IF NOT EXISTS classes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     instructor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
@@ -39,7 +54,7 @@ CREATE TABLE classes (
 );
 
 -- Students table
-CREATE TABLE students (
+CREATE TABLE IF NOT EXISTS students (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
     first_name VARCHAR(100) NOT NULL,
@@ -51,19 +66,20 @@ CREATE TABLE students (
 );
 
 -- Sessions table
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     meeting_link VARCHAR(500),
     started_at TIMESTAMP WITH TIME ZONE,
     ended_at TIMESTAMP WITH TIME ZONE,
-    status session_status DEFAULT 'scheduled' NOT NULL,
+    status session_status DEFAULT 'active' NOT NULL,
+    additional_data JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Participation logs table
-CREATE TABLE participation_logs (
+CREATE TABLE IF NOT EXISTS participation_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -74,7 +90,7 @@ CREATE TABLE participation_logs (
 );
 
 -- Session links table (multiple links per class)
-CREATE TABLE session_links (
+CREATE TABLE IF NOT EXISTS session_links (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
     link_url VARCHAR(500) NOT NULL,
@@ -88,7 +104,7 @@ CREATE TABLE session_links (
 );
 
 -- Exempted accounts table (exclude from tracking)
-CREATE TABLE exempted_accounts (
+CREATE TABLE IF NOT EXISTS exempted_accounts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
     account_identifier VARCHAR(255) NOT NULL, -- email or name
@@ -98,7 +114,7 @@ CREATE TABLE exempted_accounts (
 );
 
 -- Student tags table (flexible labeling system)
-CREATE TABLE student_tags (
+CREATE TABLE IF NOT EXISTS student_tags (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
     tag_name VARCHAR(100) NOT NULL,
@@ -108,7 +124,7 @@ CREATE TABLE student_tags (
 );
 
 -- Student tag assignments (many-to-many)
-CREATE TABLE student_tag_assignments (
+CREATE TABLE IF NOT EXISTS student_tag_assignments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     tag_id UUID NOT NULL REFERENCES student_tags(id) ON DELETE CASCADE,
@@ -117,7 +133,7 @@ CREATE TABLE student_tag_assignments (
 );
 
 -- Student notes table (timestamped log)
-CREATE TABLE student_notes (
+CREATE TABLE IF NOT EXISTS student_notes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     note_text TEXT NOT NULL,
@@ -125,23 +141,37 @@ CREATE TABLE student_notes (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Notifications table (system/operational alerts)
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    action_url VARCHAR(500),
+    read BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Create indexes for better performance
-CREATE INDEX idx_classes_instructor_id ON classes(instructor_id);
-CREATE INDEX idx_classes_status ON classes(status);
-CREATE INDEX idx_students_class_id ON students(class_id);
-CREATE INDEX idx_sessions_class_id ON sessions(class_id);
-CREATE INDEX idx_sessions_status ON sessions(status);
-CREATE INDEX idx_session_links_class_id ON session_links(class_id);
-CREATE INDEX idx_exempted_accounts_class_id ON exempted_accounts(class_id);
-CREATE INDEX idx_participation_logs_session_id ON participation_logs(session_id);
-CREATE INDEX idx_participation_logs_student_id ON participation_logs(student_id);
-CREATE INDEX idx_participation_logs_timestamp ON participation_logs(timestamp);
-CREATE INDEX idx_participation_logs_interaction_type ON participation_logs(interaction_type);
+CREATE INDEX IF NOT EXISTS idx_classes_instructor_id ON classes(instructor_id);
+CREATE INDEX IF NOT EXISTS idx_classes_status ON classes(status);
+CREATE INDEX IF NOT EXISTS idx_students_class_id ON students(class_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_class_id ON sessions(class_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_session_links_class_id ON session_links(class_id);
+CREATE INDEX IF NOT EXISTS idx_exempted_accounts_class_id ON exempted_accounts(class_id);
+CREATE INDEX IF NOT EXISTS idx_participation_logs_session_id ON participation_logs(session_id);
+CREATE INDEX IF NOT EXISTS idx_participation_logs_student_id ON participation_logs(student_id);
+CREATE INDEX IF NOT EXISTS idx_participation_logs_timestamp ON participation_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_participation_logs_interaction_type ON participation_logs(interaction_type);
 CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token);
-CREATE INDEX idx_student_tags_class_id ON student_tags(class_id);
-CREATE INDEX idx_student_tag_assignments_student_id ON student_tag_assignments(student_id);
-CREATE INDEX idx_student_tag_assignments_tag_id ON student_tag_assignments(tag_id);
-CREATE INDEX idx_student_notes_student_id ON student_notes(student_id);
+CREATE INDEX IF NOT EXISTS idx_student_tags_class_id ON student_tags(class_id);
+CREATE INDEX IF NOT EXISTS idx_student_tag_assignments_student_id ON student_tag_assignments(student_id);
+CREATE INDEX IF NOT EXISTS idx_student_tag_assignments_tag_id ON student_tag_assignments(tag_id);
+CREATE INDEX IF NOT EXISTS idx_student_notes_student_id ON student_notes(student_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -152,12 +182,15 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Create triggers for updated_at
+-- Create triggers for updated_at (DROP IF EXISTS for idempotency)
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_classes_updated_at ON classes;
 CREATE TRIGGER update_classes_updated_at BEFORE UPDATE ON classes
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_session_links_updated_at ON session_links;
 CREATE TRIGGER update_session_links_updated_at BEFORE UPDATE ON session_links
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

@@ -1,18 +1,14 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { sessionsAPI, classesAPI } from '@/services/api';
 import { Link } from 'react-router-dom';
 import {
-  PlusIcon,
   CalendarIcon,
   ListBulletIcon
 } from '@heroicons/react/24/outline';
-import SessionFormModal from '@/components/Sessions/SessionFormModal';
 import SessionCalendarView from '@/components/Sessions/SessionCalendarView';
 
 const Sessions = () => {
-  const queryClient = useQueryClient();
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -20,41 +16,41 @@ const Sessions = () => {
   const { data: sessionsData, isLoading } = useQuery({
     queryKey: ['sessions'],
     queryFn: () => sessionsAPI.getAll(),
+    staleTime: 2 * 60 * 1000, // 2 minutes
   });
 
   const { data: calendarData, isLoading: calendarLoading } = useQuery({
     queryKey: ['sessions-calendar', currentYear, currentMonth],
     queryFn: () => sessionsAPI.getCalendarData(currentYear, currentMonth),
-    enabled: viewMode === 'calendar'
+    enabled: viewMode === 'calendar',
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   const { data: classesData } = useQuery({
     queryKey: ['classes'],
     queryFn: () => classesAPI.getAll(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   const sessions = sessionsData?.data || [];
   const calendarSessions = calendarData?.data || [];
   const classes = classesData?.data || [];
 
-  const createSessionMutation = useMutation({
-    mutationFn: (data) => sessionsAPI.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['sessions']);
-      queryClient.invalidateQueries(['sessions-calendar']);
-      setShowCreateModal(false);
+  const formatDateTime = (session) => {
+    // Prefer session_date/session_time, fallback to started_at
+    if (session.session_date) {
+      const date = new Date(session.session_date);
+      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const timeStr = session.session_time ? session.session_time.substring(0, 5) : '';
+      return { date: dateStr, time: timeStr };
+    } else if (session.started_at) {
+      const date = new Date(session.started_at);
+      return {
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      };
     }
-  });
-
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const formatTime = (timeString) => {
-    if (!timeString) return '';
-    return timeString.substring(0, 5);
+    return { date: 'N/A', time: '' };
   };
 
   const handleMonthChange = (year, month) => {
@@ -66,7 +62,12 @@ const Sessions = () => {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Sessions</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Sessions</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Sessions are automatically created when you start tracking via the browser extension
+          </p>
+        </div>
         <div className="flex gap-3">
           {/* View Toggle */}
           <div className="flex border border-gray-300 rounded-lg overflow-hidden">
@@ -93,14 +94,6 @@ const Sessions = () => {
               Calendar
             </button>
           </div>
-
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-gray-900 text-white px-6 py-2 rounded-lg hover:bg-gray-800 transition flex items-center gap-2"
-          >
-            <PlusIcon className="w-5 h-5" />
-            New Session
-          </button>
         </div>
       </div>
 
@@ -126,13 +119,7 @@ const Sessions = () => {
             <div className="bg-white rounded-lg shadow p-12 text-center">
               <div className="text-6xl mb-4">📅</div>
               <h3 className="text-xl font-semibold text-gray-900 mb-2">No sessions yet</h3>
-              <p className="text-gray-500 mb-6">Create your first session to begin tracking attendance and participation</p>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="bg-gray-900 text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition"
-              >
-                Create Your First Session
-              </button>
+              <p className="text-gray-500">Sessions are automatically created when you start tracking attendance via the browser extension</p>
             </div>
           ) : (
             <div className="bg-white rounded-lg shadow">
@@ -159,11 +146,12 @@ const Sessions = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {sessions.map((session) => {
                     const classInfo = classes.find(c => c.id === session.class_id);
+                    const dateTime = formatDateTime(session);
                     return (
                       <tr key={session.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4">
                           <div className="flex flex-col">
-                            <div className="text-sm font-medium text-gray-900">{session.title}</div>
+                            <div className="text-sm font-medium text-gray-900">{session.title || classInfo?.name || 'Untitled Session'}</div>
                             {session.topic && (
                               <div className="text-sm text-gray-500">{session.topic}</div>
                             )}
@@ -174,13 +162,11 @@ const Sessions = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
-                            {formatDate(session.session_date)}
+                            {dateTime.date}
                           </div>
-                          {session.session_time && (
-                            <div className="text-xs text-gray-500">
-                              {formatTime(session.session_time)}
-                            </div>
-                          )}
+                          <div className="text-xs text-gray-500">
+                            {dateTime.time}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
@@ -212,15 +198,6 @@ const Sessions = () => {
           )}
         </>
       )}
-
-      {/* Create Session Modal */}
-      <SessionFormModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onSubmit={(data) => createSessionMutation.mutate(data)}
-        classes={classes}
-        isLoading={createSessionMutation.isPending}
-      />
     </div>
   );
 };

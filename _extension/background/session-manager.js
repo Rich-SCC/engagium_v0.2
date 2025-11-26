@@ -21,6 +21,7 @@ import {
 } from '../utils/storage.js';
 import { now } from '../utils/date-utils.js';
 import { matchParticipant } from '../utils/student-matcher.js';
+import { startSessionFromMeeting, endSessionWithTimestamp } from './api-client.js';
 
 class SessionManager {
   constructor() {
@@ -29,8 +30,9 @@ class SessionManager {
   }
 
   /**
-   * Start a new tracking session
-   * @param {Object} sessionData - { class_id, class_name, meeting_id, meeting_platform }
+   * Start a new tracking session from extension meeting detection
+   * Calls backend API to create session
+   * @param {Object} sessionData - { class_id, meeting_id, meeting_platform }
    * @returns {Promise<Object>} Created session
    */
   async startSession(sessionData) {
@@ -40,23 +42,48 @@ class SessionManager {
       throw new Error('A session is already active. Please end it first.');
     }
 
-    const session = {
-      id: uuidv4(),
-      ...sessionData,
-      started_at: now(),
-      ended_at: null,
-      status: SESSION_STATUS.ACTIVE
-    };
+    try {
+      // Call backend API to create session
+      const response = await startSessionFromMeeting({
+        class_id: sessionData.class_id,
+        meeting_id: sessionData.meeting_id,
+        platform: sessionData.meeting_platform
+      });
 
-    await createSession(session);
-    this.activeSessionId = session.id;
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to start session');
+      }
 
-    console.log('[SessionManager] Session started:', session.id);
-    return session;
+      const backendSession = response.data.session;
+
+      // Store session locally for offline sync
+      const session = {
+        id: backendSession.id,
+        class_id: sessionData.class_id,
+        class_name: sessionData.class_name || 'Unknown Class',
+        meeting_id: sessionData.meeting_id,
+        meeting_platform: sessionData.meeting_platform,
+        started_at: backendSession.started_at || now(),
+        ended_at: null,
+        status: SESSION_STATUS.ACTIVE,
+        backend_id: backendSession.id // Store for reference
+      };
+
+      await createSession(session);
+      this.activeSessionId = session.id;
+
+      console.log('[SessionManager] Session started:', session.id, '(backend:', backendSession.id, ')');
+      return session;
+
+    } catch (error) {
+      console.error('[SessionManager] Failed to start session:', error);
+      throw error;
+    }
   }
 
   /**
    * End the active session
+   * Calls backend API with ended_at timestamp
    * @param {string} sessionId 
    * @returns {Promise<Object>} Updated session
    */
@@ -70,17 +97,41 @@ class SessionManager {
       throw new Error('Session already ended');
     }
 
-    const updatedSession = await updateSession(sessionId, {
-      ended_at: now(),
-      status: SESSION_STATUS.ENDED
-    });
+    const endedAt = now();
 
-    if (this.activeSessionId === sessionId) {
-      this.activeSessionId = null;
+    try {
+      // Call backend API to end session
+      if (session.backend_id) {
+        await endSessionWithTimestamp(session.backend_id, endedAt);
+      }
+
+      // Update local session
+      const updatedSession = await updateSession(sessionId, {
+        ended_at: endedAt,
+        status: SESSION_STATUS.ENDED
+      });
+
+      if (this.activeSessionId === sessionId) {
+        this.activeSessionId = null;
+      }
+
+      console.log('[SessionManager] Session ended:', sessionId);
+      return updatedSession;
+
+    } catch (error) {
+      console.error('[SessionManager] Failed to end session:', error);
+      // Still mark as ended locally even if API call fails
+      const updatedSession = await updateSession(sessionId, {
+        ended_at: endedAt,
+        status: SESSION_STATUS.ENDED
+      });
+      
+      if (this.activeSessionId === sessionId) {
+        this.activeSessionId = null;
+      }
+      
+      throw error;
     }
-
-    console.log('[SessionManager] Session ended:', sessionId);
-    return updatedSession;
   }
 
   /**
@@ -238,7 +289,8 @@ class SessionManager {
       [MESSAGE_TYPES.REACTION]: 'reaction',
       [MESSAGE_TYPES.HAND_RAISE]: 'hand_raise',
       [MESSAGE_TYPES.MIC_TOGGLE]: 'mic_on',
-      [MESSAGE_TYPES.CAMERA_TOGGLE]: 'camera_on'
+      [MESSAGE_TYPES.CAMERA_TOGGLE]: 'camera_on',
+      [MESSAGE_TYPES.PLATFORM_SWITCH]: 'platform_switch'
     };
     return mapping[messageType] || 'other';
   }

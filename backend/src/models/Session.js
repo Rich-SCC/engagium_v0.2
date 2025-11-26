@@ -2,22 +2,22 @@ const db = require('../config/database');
 
 class Session {
   static async create(sessionData) {
-    const { class_id, title, meeting_link, session_date, session_time, topic, description } = sessionData;
+    const { class_id, title, meeting_link, started_at, additional_data } = sessionData;
 
     const query = `
-      INSERT INTO sessions (class_id, title, meeting_link, session_date, session_time, topic, description)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO sessions (class_id, title, meeting_link, started_at, status, additional_data)
+      VALUES ($1, $2, $3, $4, 'active', $5)
       RETURNING *
     `;
+
+    const additionalDataJson = additional_data ? JSON.stringify(additional_data) : null;
 
     const result = await db.query(query, [
       class_id, 
       title, 
       meeting_link,
-      session_date || null,
-      session_time || null,
-      topic || null,
-      description || null
+      started_at || null,
+      additionalDataJson
     ]);
     return result.rows[0];
   }
@@ -58,12 +58,12 @@ class Session {
     
     if (startDate) {
       params.push(startDate);
-      query += ` AND session_date >= $${params.length}`;
+      query += ` AND started_at >= $${params.length}`;
     }
     
     if (endDate) {
       params.push(endDate);
-      query += ` AND session_date <= $${params.length}`;
+      query += ` AND started_at <= $${params.length}`;
     }
     
     if (status) {
@@ -71,34 +71,30 @@ class Session {
       query += ` AND status = $${params.length}`;
     }
     
-    query += ' ORDER BY session_date DESC, session_time DESC, created_at DESC';
+    query += ' ORDER BY started_at DESC NULLS LAST, created_at DESC';
 
     const result = await db.query(query, params);
     return result.rows;
   }
 
   static async update(id, sessionData) {
-    const { title, meeting_link, session_date, session_time, topic, description } = sessionData;
+    const { title, meeting_link, additional_data } = sessionData;
 
     const query = `
       UPDATE sessions
       SET title = COALESCE($1, title),
           meeting_link = COALESCE($2, meeting_link),
-          session_date = COALESCE($3, session_date),
-          session_time = COALESCE($4, session_time),
-          topic = COALESCE($5, topic),
-          description = COALESCE($6, description)
-      WHERE id = $7
+          additional_data = COALESCE($3, additional_data)
+      WHERE id = $4
       RETURNING *
     `;
+
+    const additionalDataJson = additional_data ? JSON.stringify(additional_data) : null;
 
     const result = await db.query(query, [
       title,
       meeting_link,
-      session_date,
-      session_time,
-      topic,
-      description,
+      additionalDataJson,
       id
     ]);
     return result.rows[0];
@@ -125,6 +121,18 @@ class Session {
     `;
 
     const result = await db.query(query, [id]);
+    return result.rows[0];
+  }
+
+  static async updateEndTime(id, ended_at) {
+    const query = `
+      UPDATE sessions
+      SET status = 'ended', ended_at = $1
+      WHERE id = $2
+      RETURNING *
+    `;
+
+    const result = await db.query(query, [ended_at, id]);
     return result.rows[0];
   }
 
@@ -204,9 +212,9 @@ class Session {
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       WHERE c.instructor_id = $1
-        AND session_date >= $2
-        AND session_date <= $3
-      ORDER BY session_date ASC, session_time ASC
+        AND started_at >= $2
+        AND started_at <= $3
+      ORDER BY started_at ASC
     `;
 
     const result = await db.query(query, [instructorId, startDate, endDate]);
@@ -219,8 +227,9 @@ class Session {
         s.id,
         s.title,
         s.topic,
-        s.session_date,
-        s.session_time,
+        s.description,
+        s.started_at,
+        s.ended_at,
         s.status,
         c.id as class_id,
         c.name as class_name,
@@ -228,9 +237,9 @@ class Session {
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       WHERE c.instructor_id = $1
-        AND EXTRACT(YEAR FROM session_date) = $2
-        AND EXTRACT(MONTH FROM session_date) = $3
-      ORDER BY session_date ASC, session_time ASC
+        AND EXTRACT(YEAR FROM started_at) = $2
+        AND EXTRACT(MONTH FROM started_at) = $3
+      ORDER BY started_at ASC
     `;
 
     const result = await db.query(query, [instructorId, year, month]);

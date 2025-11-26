@@ -451,21 +451,19 @@ const generateExtensionToken = async (req, res) => {
       });
     }
     
-    // Generate long-lived JWT token for extension (30 days)
-    const token = jwt.sign(
-      { 
-        id: user.id,
-        type: 'extension'
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '30d' }
-    );
+    const ExtensionToken = require('../models/ExtensionToken');
+    
+    // Create a new extension token (30 days expiry)
+    const { plainToken, tokenInfo } = await ExtensionToken.create(user.id, 30);
     
     res.json({
       success: true,
       data: {
-        token,
+        token: plainToken, // User-facing token (not the JWT)
+        token_preview: tokenInfo.token_preview,
         expires_in: '30 days',
+        expires_at: tokenInfo.expires_at,
+        created_at: tokenInfo.created_at,
         user: {
           id: user.id,
           email: user.email,
@@ -473,7 +471,8 @@ const generateExtensionToken = async (req, res) => {
           last_name: user.last_name,
           role: user.role
         }
-      }
+      },
+      message: 'Extension token generated successfully. Save this token securely - it will not be shown again.'
     });
   } catch (error) {
     console.error('Generate extension token error:', error);

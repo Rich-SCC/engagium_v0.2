@@ -20,17 +20,19 @@ body {
 }
 
 .container {
-  max-width: 900px;
+  max-width: 1000px;
   margin: 0 auto;
-  padding: 0 20px 40px;
+  padding: 0 32px 40px;
 }
 
 /* Header */
 .header {
-  background: linear-gradient(135deg, #557170 0%, #3d5453 100%);
-  color: white;
-  padding: 32px 0;
+  background: white;
+  color: #1f2937;
+  padding: 24px 0;
   margin-bottom: 32px;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .logo {
@@ -40,14 +42,17 @@ body {
 }
 
 .logo h1 {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+  color: #557170;
+  letter-spacing: -0.5px;
 }
 
 .logo p {
   font-size: 14px;
-  opacity: 0.9;
+  color: #6b7280;
+  font-weight: 500;
 }
 
 /* Loading */
@@ -114,20 +119,21 @@ body {
 /* Tabs */
 .tabs {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   background: white;
-  padding: 4px;
-  border-radius: 10px;
-  margin-bottom: 24px;
+  padding: 6px;
+  border-radius: 12px;
+  margin-bottom: 32px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
 }
 
 .tab {
   flex: 1;
-  padding: 12px 20px;
+  padding: 12px 24px;
   background: transparent;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   color: #6b7280;
@@ -137,12 +143,13 @@ body {
 
 .tab:hover:not(:disabled) {
   background: #f3f4f6;
-  color: #1f2937;
+  color: #374151;
 }
 
 .tab.active {
-  background: linear-gradient(135deg, #557170 0%, #3d5453 100%);
+  background: #557170;
   color: white;
+  box-shadow: 0 2px 4px rgba(85, 113, 112, 0.3);
 }
 
 .tab:disabled {
@@ -177,17 +184,18 @@ body {
 /* Card */
 .card {
   background: white;
-  border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 20px;
+  border-radius: 16px;
+  padding: 28px;
+  margin-bottom: 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
 }
 
 .card h3 {
   font-size: 18px;
   font-weight: 600;
   color: #1f2937;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 /* Forms */
@@ -211,13 +219,13 @@ body {
 
 .input, .select {
   width: 100%;
-  padding: 10px 12px;
+  padding: 12px 14px;
   font-size: 14px;
   border: 1px solid #d1d5db;
-  border-radius: 8px;
+  border-radius: 10px;
   background: white;
   color: #1f2937;
-  transition: border-color 0.2s;
+  transition: all 0.2s;
 }
 
 .input:focus, .select:focus {
@@ -286,9 +294,9 @@ body {
 
 /* Buttons */
 .button {
-  padding: 10px 20px;
+  padding: 12px 24px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -304,23 +312,25 @@ body {
 }
 
 .button-primary {
-  background: linear-gradient(135deg, #557170 0%, #3d5453 100%);
+  background: #557170;
   color: white;
 }
 
 .button-primary:hover {
+  background: #466060;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(85, 113, 112, 0.4);
+  box-shadow: 0 4px 12px rgba(85, 113, 112, 0.3);
 }
 
 .button-secondary {
-  background: #f3f4f6;
-  color: #1f2937;
-  border: 1px solid #e5e7eb;
+  background: white;
+  color: #374151;
+  border: 1px solid #d1d5db;
 }
 
 .button-secondary:hover {
-  background: #e5e7eb;
+  background: #f9fafb;
+  border-color: #9ca3af;
 }
 
 /* Auth Status */
@@ -328,11 +338,11 @@ body {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: 20px;
-  padding: 16px;
+  margin-bottom: 24px;
+  padding: 20px;
   background: #f0fdf4;
-  border: 2px solid #86efac;
-  border-radius: 8px;
+  border: 1px solid #86efac;
+  border-radius: 12px;
 }
 
 .status-icon {
@@ -388,10 +398,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
-  background: #f9fafb;
+  padding: 18px;
+  background: white;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 12px;
+  transition: all 0.2s;
+}
+
+.mapping-item:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .mapping-info {
@@ -423,13 +439,13 @@ body {
 }
 
 .button-icon-danger {
-  background: #fef2f2;
+  background: white;
   border: 1px solid #fecaca;
   color: #dc2626;
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  font-size: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  font-size: 18px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -440,6 +456,9 @@ body {
 .button-icon-danger:hover {
   background: #dc2626;
   color: white;
+  border-color: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
 }
 
 .empty-state {

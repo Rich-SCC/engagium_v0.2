@@ -13,20 +13,17 @@ describe('Session Model', () => {
   describe('create', () => {
     it('should create a new session', async () => {
       const sessionData = {
-        class_id: 1,
-        title: 'Week 1 Lecture',
-        meeting_link: 'https://meet.example.com/test',
-        session_date: '2025-12-01',
-        session_time: '10:00:00',
-        topic: 'Introduction',
-        description: 'First lecture'
+        class_id: 'class-1',
+        title: 'CS 101 - Nov 26, 10:00 AM',
+        meeting_link: 'https://meet.google.com/abc-defg-hij',
+        started_at: '2025-11-26T10:00:00Z',
+        additional_data: null
       };
 
       const mockSession = {
-        id: 1,
+        id: 'session-1',
         ...sessionData,
-        status: 'scheduled',
-        started_at: null,
+        status: 'active',
         ended_at: null,
         created_at: new Date()
       };
@@ -38,7 +35,7 @@ describe('Session Model', () => {
       expect(result).toEqual(mockSession);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO sessions'),
-        [sessionData.class_id, sessionData.title, sessionData.meeting_link, sessionData.session_date, sessionData.session_time, sessionData.topic, sessionData.description]
+        [sessionData.class_id, sessionData.title, sessionData.meeting_link, sessionData.started_at, null]
       );
     });
   });
@@ -131,29 +128,26 @@ describe('Session Model', () => {
   describe('update', () => {
     it('should update session information', async () => {
       const updateData = {
-        title: 'Updated Title',
-        meeting_link: 'https://meet.example.com/updated',
-        session_date: '2025-12-02',
-        session_time: '11:00:00',
-        topic: 'Updated Topic',
-        description: 'Updated description'
+        title: 'Updated Title - Nov 26, 10:00 AM',
+        meeting_link: 'https://meet.google.com/updated-link',
+        additional_data: { platform_switches: [] }
       };
 
       const mockUpdatedSession = {
-        id: 1,
-        class_id: 1,
+        id: 'session-1',
+        class_id: 'class-1',
         ...updateData,
-        status: 'scheduled'
+        status: 'ended'
       };
 
       db.query.mockResolvedValue({ rows: [mockUpdatedSession] });
 
-      const result = await Session.update(1, updateData);
+      const result = await Session.update('session-1', updateData);
 
       expect(result).toEqual(mockUpdatedSession);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('UPDATE sessions'),
-        [updateData.title, updateData.meeting_link, updateData.session_date, updateData.session_time, updateData.topic, updateData.description, 1]
+        [updateData.title, updateData.meeting_link, JSON.stringify(updateData.additional_data), 'session-1']
       );
     });
   });

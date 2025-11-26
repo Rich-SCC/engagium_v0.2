@@ -28,6 +28,9 @@ import { now } from '../utils/date-utils.js';
 
 console.log('[Background] Service worker started');
 
+// Meeting detection state
+let currentMeetingDetection = null; // { meeting_id, platform, tab_id }
+
 // ============================================================================
 // Message Handler
 // ============================================================================
@@ -71,6 +74,9 @@ async function handleMessage(message, sender) {
     case MESSAGE_TYPES.MIC_TOGGLE:
     case MESSAGE_TYPES.CAMERA_TOGGLE:
       return await sessionManager.handleParticipationEvent({ type, ...data });
+      
+    case MESSAGE_TYPES.PLATFORM_SWITCH:
+      return await handlePlatformSwitch(data);
 
     // ========== From Popup ==========
     case MESSAGE_TYPES.START_SESSION:
@@ -84,6 +90,12 @@ async function handleMessage(message, sender) {
 
     case MESSAGE_TYPES.GET_PARTICIPANTS:
       return await handleGetParticipants(data);
+      
+    case MESSAGE_TYPES.GET_MEETING_STATUS:
+      return await handleGetMeetingStatus();
+      
+    case MESSAGE_TYPES.DISMISS_MEETING:
+      return await handleDismissMeeting();
 
     case MESSAGE_TYPES.MANUAL_MATCH:
       return await sessionManager.manualMatch(data.participantId, data.studentId);
@@ -117,50 +129,82 @@ async function handleMeetingDetected(data, sender) {
   const { platform, meetingId } = data;
   console.log('[Background] Meeting detected:', platform, meetingId);
 
-  // Check if auto-start enabled
-  const autoStart = await getSetting('auto_start');
-  
-  if (!autoStart) {
-    console.log('[Background] Auto-start disabled, waiting for manual start');
-    return { autoStart: false };
-  }
+  // Store meeting detection state
+  currentMeetingDetection = {
+    meeting_id: meetingId,
+    platform: platform,
+    tab_id: sender.tab.id
+  };
 
   // Check if meeting is mapped to a class
   const mappings = await getSetting('meeting_mappings') || {};
   const classMapping = mappings[meetingId];
 
-  if (!classMapping) {
-    console.log('[Background] Meeting not mapped to class');
-    return { autoStart: false, needsMapping: true };
+  if (classMapping) {
+    currentMeetingDetection.mapped_class_id = classMapping.class_id;
+    currentMeetingDetection.mapped_class_name = classMapping.class_name;
   }
 
-  // Auto-start session
+  console.log('[Background] Meeting detection stored, awaiting user action');
+  
+  return { 
+    detected: true, 
+    meeting: currentMeetingDetection 
+  };
+}
+
+async function handleGetMeetingStatus() {
+  if (!currentMeetingDetection) {
+    return { meeting: null, classes: [] };
+  }
+
+  // Fetch available classes
+  let classes = [];
   try {
-    const session = await sessionManager.startSession({
-      class_id: classMapping.class_id,
-      class_name: classMapping.class_name,
-      meeting_id: meetingId,
-      meeting_platform: platform
-    });
-
-    // Load student roster
-    const students = await getStudentsByClass(classMapping.class_id);
-    sessionManager.setStudentRoster(students);
-
-    // Update badge
-    updateBadge('active');
-
-    // Notify content script
-    chrome.tabs.sendMessage(sender.tab.id, {
-      type: MESSAGE_TYPES.SESSION_STARTED,
-      sessionId: session.id
-    });
-
-    return { autoStart: true, session };
+    const authenticated = await isAuthenticated();
+    if (authenticated) {
+      const response = await getClasses();
+      classes = response.data || response.classes || [];
+    }
   } catch (error) {
-    console.error('[Background] Failed to auto-start session:', error);
-    return { autoStart: false, error: error.message };
+    console.error('[Background] Failed to fetch classes:', error);
   }
+
+  return {
+    meeting: currentMeetingDetection,
+    classes: classes
+  };
+}
+
+function handleDismissMeeting() {
+  console.log('[Background] Meeting dismissed');
+  currentMeetingDetection = null;
+  return { dismissed: true };
+}
+
+async function handlePlatformSwitch(data) {
+  const { platform, old_meeting_id, new_meeting_id, timestamp } = data;
+  console.log('[Background] Platform switch:', old_meeting_id, '->', new_meeting_id);
+  
+  // Log as participation event with type 'platform_switch'
+  const session = await sessionManager.getActiveSession();
+  if (!session) {
+    console.warn('[Background] No active session for platform switch');
+    return { logged: false };
+  }
+  
+  // Create event manually (no participant associated)
+  await sessionManager.handleParticipationEvent({
+    type: MESSAGE_TYPES.PLATFORM_SWITCH,
+    old_meeting_id,
+    new_meeting_id,
+    platform,
+    timestamp,
+    participantId: null // No specific participant
+  });
+  
+  console.log('[Background] Platform switch logged');
+  return { logged: true };
 }
 
 // ============================================================================
@@ -168,33 +212,55 @@ async function handleMeetingDetected(data, sender) {
 // ============================================================================
 
 async function handleStartSession(data) {
-  const { classId, className, meetingId, meetingPlatform } = data;
+  const { class_id, meeting_id, platform } = data;
 
-  // Create session
-  const session = await sessionManager.startSession({
-    class_id: classId,
-    class_name: className,
-    meeting_id: meetingId,
-    meeting_platform: meetingPlatform
-  });
-
-  // Load student roster
-  const students = await getStudentsByClass(classId);
-  sessionManager.setStudentRoster(students);
-
-  // Try to start session in backend (create if needed)
   try {
-    // Note: We may need to create the session in backend first
-    // For now, just log
-    console.log('[Background] Session started locally:', session.id);
+    // Fetch class name if not provided
+    let className = data.class_name;
+    if (!className) {
+      const classesResponse = await getClasses();
+      const classes = classesResponse.data || classesResponse.classes || [];
+      const matchedClass = classes.find(c => c.id === class_id);
+      className = matchedClass?.name || 'Unknown Class';
+    }
+
+    // Create session via session manager (calls backend API)
+    const session = await sessionManager.startSession({
+      class_id: class_id,
+      class_name: className,
+      meeting_id: meeting_id,
+      meeting_platform: platform
+    });
+
+    // Load student roster for matching
+    const students = await getStudentsByClass(class_id);
+    sessionManager.setStudentRoster(students);
+
+    // Update badge
+    updateBadge('active');
+
+    // Clear meeting detection state
+    currentMeetingDetection = null;
+
+    // Notify content script to start tracking
+    if (currentMeetingDetection?.tab_id) {
+      try {
+        chrome.tabs.sendMessage(currentMeetingDetection.tab_id, {
+          type: MESSAGE_TYPES.SESSION_STARTED,
+          sessionId: session.id
+        });
+      } catch (error) {
+        console.error('[Background] Failed to notify content script:', error);
+      }
+    }
+
+    console.log('[Background] Session started:', session.id);
+    return session;
+
   } catch (error) {
-    console.error('[Background] Failed to start backend session:', error);
+    console.error('[Background] Failed to start session:', error);
+    throw error;
   }
-
-  // Update badge
-  updateBadge('active');
-
-  return session;
 }
 
 async function handleEndSession(data) {

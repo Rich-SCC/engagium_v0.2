@@ -36,6 +36,7 @@ const getStudents = async (req, res) => {
 
     // Verify class exists and user has access
     const classData = await Class.findById(classId);
+    
     if (!classData) {
       return res.status(404).json({
         success: false,

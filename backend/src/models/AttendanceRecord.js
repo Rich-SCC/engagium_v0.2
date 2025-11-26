@@ -94,15 +94,14 @@ class AttendanceRecord {
       SELECT 
         ar.*,
         ses.title as session_title,
-        ses.topic as session_topic,
-        ses.session_date,
-        ses.session_time,
+        ses.started_at,
+        ses.ended_at,
         c.name as class_name
       FROM attendance_records ar
       JOIN sessions ses ON ar.session_id = ses.id
       JOIN classes c ON ses.class_id = c.id
       WHERE ar.student_id = $1
-      ORDER BY ses.session_date DESC, ses.session_time DESC
+      ORDER BY ses.started_at DESC NULLS LAST
       LIMIT $2
     `;
 
@@ -152,12 +151,12 @@ class AttendanceRecord {
 
     if (startDate) {
       params.push(startDate);
-      query += ` AND s.session_date >= $${params.length}`;
+      query += ` AND s.started_at >= $${params.length}`;
     }
 
     if (endDate) {
       params.push(endDate);
-      query += ` AND s.session_date <= $${params.length}`;
+      query += ` AND s.started_at <= $${params.length}`;
     }
 
     const result = await db.query(query, params);
@@ -172,9 +171,8 @@ class AttendanceRecord {
       SELECT
         s.id as session_id,
         s.title,
-        s.topic,
-        s.session_date,
-        s.session_time,
+        s.started_at,
+        s.ended_at,
         COUNT(*) as total_students,
         COUNT(CASE WHEN ar.status = 'present' THEN 1 END) as present_count,
         COUNT(CASE WHEN ar.status = 'absent' THEN 1 END) as absent_count,
@@ -191,17 +189,17 @@ class AttendanceRecord {
 
     if (startDate) {
       params.push(startDate);
-      query += ` AND s.session_date >= $${params.length}`;
+      query += ` AND s.started_at >= $${params.length}`;
     }
 
     if (endDate) {
       params.push(endDate);
-      query += ` AND s.session_date <= $${params.length}`;
+      query += ` AND s.started_at <= $${params.length}`;
     }
 
     query += `
-      GROUP BY s.id, s.title, s.topic, s.session_date, s.session_time
-      ORDER BY s.session_date DESC, s.session_time DESC
+      GROUP BY s.id, s.title, s.started_at, s.ended_at
+      ORDER BY s.started_at DESC NULLS LAST
       LIMIT $${params.length + 1}
     `;
     params.push(limit);

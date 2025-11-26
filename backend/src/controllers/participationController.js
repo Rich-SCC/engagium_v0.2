@@ -179,6 +179,9 @@ const getSessionSummary = async (req, res) => {
     // Get session statistics
     const stats = await Session.getSessionStats(sessionId);
 
+    // Get total students in the class
+    stats.total_students = await ParticipationLog.getClassStudentCount(session.class_id);
+
     // Get interaction summary
     const interactionSummary = await ParticipationLog.getSessionInteractionSummary(sessionId);
 

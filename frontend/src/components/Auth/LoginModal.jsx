@@ -21,7 +21,7 @@ const LoginModal = ({ onClose, onSwitchToSignUp, onSwitchToForgotPassword }) => 
     const result = await login(formData);
     if (result.success) {
       onClose();
-      navigate('/app/dashboard');
+      navigate('/app/home');
     }
   };
 

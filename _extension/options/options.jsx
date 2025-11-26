@@ -91,32 +91,34 @@ function OptionsApp() {
         return;
       }
 
-      // Validate token by fetching user profile
+      // Validate token using the new extension token verification endpoint
       const isDev = !('update_url' in chrome.runtime.getManifest());
       const baseUrl = isDev ? 'http://localhost:3001' : 'https://engagium.app';
       
-      const response = await fetch(`${baseUrl}/api/auth/profile`, {
+      const response = await fetch(`${baseUrl}/api/extension-tokens/verify`, {
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`
-        }
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ token })
       });
 
       const data = await response.json();
 
       if (!data.success) {
-        showMessage('error', data.error || 'Invalid token');
+        showMessage('error', data.error || 'Invalid or expired token');
         return;
       }
 
       // Store token and user info
       await chrome.storage.local.set({
         [STORAGE_KEYS.AUTH_TOKEN]: token,
-        [STORAGE_KEYS.USER_INFO]: data.data
+        [STORAGE_KEYS.USER_INFO]: data.data.user
       });
 
       setAuthToken(token);
       setIsAuthenticated(true);
-      setUserInfo(data.data);
+      setUserInfo(data.data.user);
       
       // Load classes
       await loadClasses();

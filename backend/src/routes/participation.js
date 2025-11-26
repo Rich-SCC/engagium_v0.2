@@ -1,5 +1,6 @@
 const express = require('express');
 const { instructorAuth } = require('../middleware/auth');
+const { flexibleAuth } = require('../middleware/flexibleAuth');
 const {
   getParticipationLogs,
   addParticipationLog,
@@ -10,13 +11,15 @@ const {
 
 const router = express.Router();
 
-// All participation routes require instructor authentication
+// Routes that work with both web app (JWT) and extension (extension token)
+router.post('/sessions/:sessionId/logs', flexibleAuth, addParticipationLog);
+router.post('/sessions/:sessionId/logs/bulk', flexibleAuth, addBulkParticipationLogs);
+
+// Web app only routes
 router.use(instructorAuth);
 
 // Session-specific participation routes
 router.get('/sessions/:sessionId/logs', getParticipationLogs);
-router.post('/sessions/:sessionId/logs', addParticipationLog);
-router.post('/sessions/:sessionId/logs/bulk', addBulkParticipationLogs);
 router.get('/sessions/:sessionId/summary', getSessionSummary);
 router.get('/sessions/:sessionId/recent', getRecentActivity);
 

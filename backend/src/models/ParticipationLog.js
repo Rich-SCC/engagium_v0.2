@@ -152,6 +152,12 @@ class ParticipationLog {
     const result = await db.query(query, [sessionId]);
     return result.rows;
   }
+
+  static async getClassStudentCount(classId) {
+    const query = 'SELECT COUNT(*) as total_students FROM students WHERE class_id = $1';
+    const result = await db.query(query, [classId]);
+    return result.rows[0].total_students;
+  }
 }
 
 module.exports = ParticipationLog;

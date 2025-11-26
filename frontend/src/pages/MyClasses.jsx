@@ -30,6 +30,7 @@ const MyClasses = () => {
   const { data: classesData, isLoading } = useQuery({
     queryKey: ['classes', showArchived],
     queryFn: () => classesAPI.getAll(showArchived),
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   const classes = classesData?.data || [];

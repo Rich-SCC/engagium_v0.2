@@ -1,5 +1,6 @@
 const express = require('express');
 const { instructorAuth } = require('../middleware/auth');
+const { flexibleAuth } = require('../middleware/flexibleAuth');
 const {
   getClasses,
   getClass,
@@ -55,14 +56,21 @@ const {
 
 const router = express.Router();
 
-// All class routes require instructor authentication
+// Routes that work with both web app (JWT) and extension (extension token)
+// These must come FIRST before the param routes
+router.get('/stats', instructorAuth, getClassStats);
+
+// Extension-compatible routes (read-only)
+router.get('/', flexibleAuth, getClasses);
+router.get('/:id', flexibleAuth, getClass);
+router.get('/:classId/students', flexibleAuth, getStudents);
+router.get('/:classId/students/:studentId', flexibleAuth, getStudentDetails);
+
+// All other routes require instructor authentication (web app only)
 router.use(instructorAuth);
 
-// Class routes
-router.get('/', getClasses);
-router.get('/stats', getClassStats);
+// Class management routes
 router.post('/', createClass);
-router.get('/:id', getClass);
 router.put('/:id', updateClass);
 router.delete('/:id', deleteClass);
 
@@ -84,11 +92,10 @@ router.delete('/:id/exemptions/:exemptionId', deleteExemptedAccount);
 // Class sessions
 router.get('/:classId/sessions', getClassSessions);
 
-// Student routes within classes
-router.get('/:classId/students', getStudents);
+// Student routes within classes (web app only - require instructorAuth)
+// Note: GET routes for students are already defined above with flexibleAuth
 router.get('/:classId/students/check-duplicates', checkDuplicates);
 router.get('/:classId/students/export', exportStudentsCSV);
-router.get('/:classId/students/:studentId', getStudentDetails);
 router.post('/:classId/students', addStudent);
 router.put('/:classId/students/:studentId', updateStudent);
 router.delete('/:classId/students/:studentId', removeStudent);

@@ -42,7 +42,7 @@ const SignUpModal = ({ onClose, onSwitchToLogin }) => {
     const { confirmPassword, ...registerData } = formData;
     const result = await register(registerData);
     if (result.success) {
-      navigate('/app/dashboard');
+      navigate('/app/home');
     }
   };
 

@@ -11,6 +11,8 @@ const authRoutes = require('./src/routes/auth');
 const classRoutes = require('./src/routes/classes');
 const sessionRoutes = require('./src/routes/sessions');
 const participationRoutes = require('./src/routes/participation');
+const notificationRoutes = require('./src/routes/notifications');
+const extensionTokenRoutes = require('./src/routes/extensionTokens');
 
 // Import socket handlers
 const socketHandler = require('./src/socket/socketHandler');
@@ -55,6 +57,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/classes', classRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/participation', participationRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/extension-tokens', extensionTokenRoutes);
 
 // Socket connection handling
 socketHandler(io);

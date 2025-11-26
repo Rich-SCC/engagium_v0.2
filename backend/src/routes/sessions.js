@@ -1,11 +1,10 @@
 const express = require('express');
 const { instructorAuth } = require('../middleware/auth');
+const { flexibleAuth } = require('../middleware/flexibleAuth');
 const {
   getSessions,
   getSession,
-  createSession,
   updateSession,
-  startSession,
   endSession,
   deleteSession,
   getSessionStats,
@@ -16,33 +15,37 @@ const {
   getAttendanceStats,
   getSessionsByDateRange,
   getCalendarData,
-  getClassSessions
+  getClassSessions,
+  startSessionFromMeeting,
+  endSessionWithTimestamp
 } = require('../controllers/sessionController');
 
 const router = express.Router();
 
-// All session routes require instructor authentication
+// Stats route MUST come before param routes
+router.get('/stats', instructorAuth, getSessionStats);
+router.get('/date-range', instructorAuth, getSessionsByDateRange);
+router.get('/calendar', instructorAuth, getCalendarData);
+
+// Routes that work with both web app (JWT) and extension (extension token)
+router.post('/start-from-meeting', flexibleAuth, startSessionFromMeeting);
+router.put('/:id/end-with-timestamp', flexibleAuth, endSessionWithTimestamp);
+router.get('/:id', flexibleAuth, getSession);
+router.get('/:id/students', flexibleAuth, getSessionStudents);
+
+// All other routes require instructor authentication (web app only)
 router.use(instructorAuth);
 
 // Session collection routes
 router.get('/', getSessions);
-router.get('/stats', getSessionStats);
-router.get('/date-range', getSessionsByDateRange);
-router.get('/calendar', getCalendarData);
-router.post('/', createSession);
 
 // Individual session routes
-router.get('/:id', getSession);
 router.get('/:id/full', getSessionWithAttendance);
-router.put('/:id', updateSession);
+router.put('/:id', updateSession); // Only allows title updates post-session
 router.delete('/:id', deleteSession);
 
 // Session lifecycle management
-router.put('/:id/start', startSession);
-router.put('/:id/end', endSession);
-
-// Session student management
-router.get('/:id/students', getSessionStudents);
+router.put('/:id/end', endSession); // Manual end (legacy)
 
 // Attendance routes
 router.post('/:id/attendance/bulk', submitBulkAttendance);

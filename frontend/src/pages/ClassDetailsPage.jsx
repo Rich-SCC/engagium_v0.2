@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { classesAPI } from '@/services/api';
@@ -16,6 +16,7 @@ import StudentImportModal from '@/components/Students/StudentImportModal';
 import TagManagementModal from '@/components/Students/TagManagementModal';
 import StudentNotesModal from '@/components/Students/StudentNotesModal';
 import StudentMergeModal from '@/components/Students/StudentMergeModal';
+import StudentFormModal from '@/components/Students/StudentFormModal';
 import StudentRosterToolbar from '@/components/Students/StudentRosterToolbar';
 import StudentTableRow from '@/components/Students/StudentTableRow';
 import StudentBulkActionsBar from '@/components/Students/StudentBulkActionsBar';
@@ -33,31 +34,45 @@ const ClassDetailsPage = () => {
   const [showTagsModal, setShowTagsModal] = useState(false);
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
+  const [showStudentFormModal, setShowStudentFormModal] = useState(false);
   
   // Data states
   const [selectedStudents, setSelectedStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('last_name');
+
+  // Debounce search term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   // Queries
   const { data: classData, isLoading: classLoading } = useQuery({
     queryKey: ['class', id],
     queryFn: () => classesAPI.getById(id),
+    staleTime: 10 * 60 * 1000, // 10 minutes for class data
   });
 
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
-    queryKey: ['students', id, searchTerm, sortBy],
+    queryKey: ['students', id, debouncedSearchTerm, sortBy],
     queryFn: () => classesAPI.getStudents(id, { 
-      search: searchTerm,
+      search: debouncedSearchTerm,
       sortBy,
       sortOrder: 'ASC'
     }),
+    staleTime: 2 * 60 * 1000, // 2 minutes for student lists
   });
 
   const { data: tagsData } = useQuery({
     queryKey: ['tags', id],
     queryFn: () => classesAPI.getTags(id),
+    staleTime: 10 * 60 * 1000, // 10 minutes for tags
   });
 
   const classInfo = classData?.data;
@@ -93,6 +108,15 @@ const ClassDetailsPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries(['students', id]);
       setSelectedStudents([]);
+    }
+  });
+
+  const updateStudentMutation = useMutation({
+    mutationFn: ({ studentId, data }) => classesAPI.updateStudent(id, studentId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['students', id]);
+      setShowStudentFormModal(false);
+      setSelectedStudent(null);
     }
   });
 
@@ -132,6 +156,15 @@ const ClassDetailsPage = () => {
   const handleViewNotes = (student) => {
     setSelectedStudent(student);
     setShowNotesModal(true);
+  };
+
+  const handleEditStudent = (student) => {
+    setSelectedStudent(student);
+    setShowStudentFormModal(true);
+  };
+
+  const handleUpdateStudent = (data) => {
+    updateStudentMutation.mutate({ studentId: selectedStudent.id, data });
   };
 
   const toggleStudentSelection = (studentId) => {
@@ -371,7 +404,7 @@ const ClassDetailsPage = () => {
                     onToggleSelect={toggleStudentSelection}
                     onDelete={handleDeleteStudent}
                     onViewNotes={handleViewNotes}
-                    onEdit={(s) => console.log('Edit', s)}
+                    onEdit={handleEditStudent}
                   />
                 ))}
               </tbody>
@@ -437,6 +470,17 @@ const ClassDetailsPage = () => {
         onClose={() => setShowMergeModal(false)}
         classId={id}
         students={students}
+      />
+
+      <StudentFormModal
+        isOpen={showStudentFormModal}
+        onClose={() => {
+          setShowStudentFormModal(false);
+          setSelectedStudent(null);
+        }}
+        onSubmit={handleUpdateStudent}
+        initialData={selectedStudent}
+        isLoading={updateStudentMutation.isPending}
       />
     </div>
   );

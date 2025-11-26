@@ -77,34 +77,90 @@ engagium_v0.2/
 
 ### Prerequisites
 - Node.js 18+
-- Docker and Docker Compose
+- PostgreSQL 15+ (local installation or Docker)
 - npm or yarn
 
-### 1. Clone and Setup
+### Option A: Quick Setup with Docker (Recommended for Beginners)
+
+#### 1. Clone and Setup
 ```bash
 git clone <repository-url>
 cd engagium_v0.2
 ```
 
-### 2. Start Database
+#### 2. Start Database
 ```bash
 cd database
 docker-compose up -d
 ```
 This will start PostgreSQL on port 5432 with the initial schema.
 
-### 3. Install Dependencies
+#### 3. Install Dependencies & Start
 ```bash
 # Backend
-cd backend
+cd ../backend
 npm install
+npm run dev
 
 # Frontend (in new terminal)
 cd ../frontend
 npm install
+npm run dev
 ```
 
-### 4. Start Development Servers
+### Option B: Setup with Test Data (Recommended for Development)
+
+This option sets up a local PostgreSQL database and seeds it with realistic test data.
+
+#### 1. Setup PostgreSQL Database
+```bash
+cd database
+
+# Create database and user
+psql -U postgres -f setup-local.sql
+
+# Apply schema
+psql -U engagium_user -d engagium -f schema.sql
+```
+
+#### 2. Seed with Test Data
+```bash
+# Install dependencies and seed database
+npm install
+npm run seed
+
+# Verify the data
+npm run verify
+```
+
+**OR use the automated setup script:**
+
+```bash
+# Windows
+setup.bat
+
+# macOS/Linux
+chmod +x setup.sh
+./setup.sh
+```
+
+This creates:
+- 3 instructor accounts
+- 5 classes with 45 students total
+- 13 sessions with participation data
+- Tags, notes, notifications, and more
+
+See [database/SEEDING_GUIDE.md](database/SEEDING_GUIDE.md) for details.
+
+#### 3. Configure Backend
+```bash
+cd ../backend
+cp .env.example .env
+# Update DATABASE_URL if needed
+npm install
+```
+
+#### 4. Start Development Servers
 ```bash
 # Backend (terminal 1)
 cd backend
@@ -115,14 +171,21 @@ cd frontend
 npm run dev
 ```
 
-### 5. Access the Application
+### Access the Application
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:3001
 - Health Check: http://localhost:3001/health
 
-## Demo Account
+## Test Accounts
 
-For quick testing, use these credentials:
+### With Seeded Data (Option B)
+- **Email**: john.doe@university.edu
+- **Password**: Password123!
+- **Classes**: CS101 (15 students), CS201 (10 students)
+
+Other accounts: sarah.smith@university.edu, michael.johnson@university.edu
+
+### Default Demo Account (Option A)
 - **Email**: instructor@engagium.com
 - **Password**: password123
 

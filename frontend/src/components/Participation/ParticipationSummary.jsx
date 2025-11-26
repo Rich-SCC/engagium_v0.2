@@ -18,9 +18,9 @@ const ParticipationSummary = ({ summary, interactionSummary }) => {
     );
   }
 
-  const totalInteractions = summary.stats?.total_participation || 0;
-  const uniqueStudents = summary.stats?.participated_students || 0;
-  const totalStudents = summary.stats?.total_students || 0;
+  const totalInteractions = summary.stats?.total_interactions || 0;
+  const uniqueStudents = summary.stats?.unique_participants || 0;
+  const totalStudents = summary.session?.total_students || summary.stats?.total_students || 0;
   const participationRate = totalStudents > 0 
     ? ((uniqueStudents / totalStudents) * 100).toFixed(1) 
     : 0;

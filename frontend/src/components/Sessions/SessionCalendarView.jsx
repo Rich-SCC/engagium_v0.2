@@ -31,7 +31,12 @@ const SessionCalendarView = ({ sessions = [], onMonthChange }) => {
 
   const getSessionsForDate = (day) => {
     const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return sessions.filter(s => s.session_date === dateStr);
+    return sessions.filter(s => {
+      // Only show sessions that have ended (have a started_at date)
+      if (!s.started_at) return false;
+      const sessionDate = new Date(s.started_at).toISOString().split('T')[0];
+      return sessionDate === dateStr;
+    });
   };
 
   const renderCalendar = () => {
@@ -66,16 +71,15 @@ const SessionCalendarView = ({ sessions = [], onMonthChange }) => {
               <button
                 key={session.id}
                 onClick={() => navigate(`/app/sessions/${session.id}`)}
-                className={`w-full text-left text-xs p-1 rounded cursor-pointer hover:opacity-80 ${
-                  session.status === 'active' ? 'bg-green-500 text-white' :
-                  session.status === 'ended' ? 'bg-gray-400 text-white' :
-                  'bg-blue-500 text-white'
-                }`}
+                className="w-full text-left text-xs p-1 rounded cursor-pointer hover:opacity-80 bg-gray-500 text-white"
               >
-                <div className="font-medium truncate">{session.title}</div>
-                {session.session_time && (
+                <div className="font-medium truncate">{session.title || session.topic || session.class_name || 'Untitled Session'}</div>
+                {session.started_at && (
                   <div className="text-[10px] opacity-90">
-                    {session.session_time.substring(0, 5)}
+                    {new Date(session.started_at).toLocaleTimeString('en-US', { 
+                      hour: '2-digit', 
+                      minute: '2-digit' 
+                    })}
                   </div>
                 )}
               </button>
@@ -131,16 +135,8 @@ const SessionCalendarView = ({ sessions = [], onMonthChange }) => {
       {/* Legend */}
       <div className="p-4 border-t flex gap-4 text-sm">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-blue-500 rounded" />
-          <span className="text-gray-600">Scheduled</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-green-500 rounded" />
-          <span className="text-gray-600">Active</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-gray-400 rounded" />
-          <span className="text-gray-600">Ended</span>
+          <div className="w-3 h-3 bg-gray-500 rounded" />
+          <span className="text-gray-600">Completed Sessions</span>
         </div>
       </div>
     </div>
