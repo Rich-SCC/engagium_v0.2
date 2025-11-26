@@ -20,6 +20,7 @@ const LoginModal = ({ onClose, onSwitchToSignUp, onSwitchToForgotPassword }) => 
     e.preventDefault();
     const result = await login(formData);
     if (result.success) {
+      onClose();
       navigate('/app/dashboard');
     }
   };
@@ -89,7 +90,7 @@ const LoginModal = ({ onClose, onSwitchToSignUp, onSwitchToForgotPassword }) => 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-gray-300 hover:bg-gray-400 text-gray-900 font-bold py-4 rounded-2xl transition text-xl disabled:opacity-50"
+            className="w-full bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 rounded-2xl transition text-xl disabled:opacity-50 shadow-md"
           >
             {isLoading ? 'Logging in...' : 'Log In'}
           </button>

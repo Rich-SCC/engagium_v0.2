@@ -209,23 +209,81 @@ const ClassDetailsPage = () => {
           <div>
             <h3 className="font-semibold text-gray-700 mb-2">Description</h3>
             <p className="text-gray-600">{classInfo.description || 'No description'}</p>
-          </div>
-          {classInfo.schedule && classInfo.schedule.days && classInfo.schedule.days.length > 0 && (
-            <div>
-              <h3 className="font-semibold text-gray-700 mb-2">Schedule</h3>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {classInfo.schedule.days.map(day => (
-                  <span
-                    key={day}
-                    className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm"
-                  >
-                    {day}
-                  </span>
-                ))}
+            
+            {/* Meeting Links */}
+            {classInfo.links && classInfo.links.length > 0 && (
+              <div className="mt-4">
+                <h3 className="font-semibold text-gray-700 mb-2">Meeting Links</h3>
+                <div className="space-y-2">
+                  {classInfo.links.map((link) => (
+                    <a
+                      key={link.id}
+                      href={link.link_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm text-accent-600 hover:text-accent-700 hover:underline"
+                    >
+                      <LinkIcon className="w-4 h-4 flex-shrink-0" />
+                      <span className="truncate">
+                        {link.label || (link.link_type === 'zoom' ? 'Zoom Meeting' : 'Google Meet')}
+                        {link.is_primary && <span className="ml-2 text-xs bg-accent-100 text-accent-700 px-2 py-0.5 rounded">Primary</span>}
+                      </span>
+                    </a>
+                  ))}
+                </div>
               </div>
-              {classInfo.schedule.time && (
-                <p className="text-gray-600">{classInfo.schedule.time}</p>
-              )}
+            )}
+          </div>
+          {classInfo.schedule && (
+            <div>
+              <h3 className="font-semibold text-gray-700 mb-3">
+                Schedule{(Array.isArray(classInfo.schedule) && classInfo.schedule.length > 1) ? 's' : ''}
+              </h3>
+              <div className="space-y-3">
+                {/* New format: schedule is an array */}
+                {Array.isArray(classInfo.schedule) && classInfo.schedule.length > 0 ? (
+                  classInfo.schedule.map((schedule, idx) => (
+                    <div key={idx} className="border-l-3 border-accent-500 pl-3">
+                      <div className="flex flex-wrap gap-2 mb-1">
+                        {schedule.days && schedule.days.map(day => (
+                          <span
+                            key={day}
+                            className="px-3 py-1 bg-accent-50 text-accent-700 rounded-full text-sm font-medium"
+                          >
+                            {day.substring(0, 3)}
+                          </span>
+                        ))}
+                      </div>
+                      {(schedule.startTime || schedule.endTime) && (
+                        <p className="text-gray-700 font-medium text-sm mt-1">
+                          {schedule.startTime && new Date(`1970-01-01T${schedule.startTime}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                          {schedule.startTime && schedule.endTime && ' - '}
+                          {schedule.endTime && new Date(`1970-01-01T${schedule.endTime}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                        </p>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  /* Old format: schedule is an object - for backward compatibility */
+                  classInfo.schedule.days?.length > 0 && (
+                    <div className="border-l-3 border-accent-500 pl-3">
+                      <div className="flex flex-wrap gap-2 mb-1">
+                        {classInfo.schedule.days.map(day => (
+                          <span
+                            key={day}
+                            className="px-3 py-1 bg-accent-50 text-accent-700 rounded-full text-sm font-medium"
+                          >
+                            {day.substring(0, 3)}
+                          </span>
+                        ))}
+                      </div>
+                      {classInfo.schedule.time && (
+                        <p className="text-gray-700 font-medium text-sm mt-1">{classInfo.schedule.time}</p>
+                      )}
+                    </div>
+                  )
+                )}
+              </div>
             </div>
           )}
         </div>

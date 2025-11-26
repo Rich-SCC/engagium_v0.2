@@ -8,9 +8,20 @@ const getClasses = async (req, res) => {
     const includeArchived = req.query.include_archived === 'true';
     const classes = await Class.findByInstructorId(req.user.id, includeArchived);
 
+    // Fetch session links for each class
+    const classesWithLinks = await Promise.all(
+      classes.map(async (classItem) => {
+        const links = await SessionLink.findByClassId(classItem.id);
+        return {
+          ...classItem,
+          links
+        };
+      })
+    );
+
     res.json({
       success: true,
-      data: classes
+      data: classesWithLinks
     });
   } catch (error) {
     console.error('Get classes error:', error);
@@ -43,9 +54,15 @@ const getClass = async (req, res) => {
       });
     }
 
+    // Fetch session links for this class
+    const links = await SessionLink.findByClassId(id);
+
     res.json({
       success: true,
-      data: classData
+      data: {
+        ...classData,
+        links
+      }
     });
   } catch (error) {
     console.error('Get class error:', error);

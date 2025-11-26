@@ -5,6 +5,7 @@ import Layout from '@/components/Layout';
 
 // Auth pages
 import LandingPage from '@/pages/LandingPage';
+import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
 
 // Main pages
@@ -52,6 +53,16 @@ function App() {
       {/* Landing Page - Public */}
       <Route path="/" element={<LandingPage />} />
 
+      {/* Forgot Password - Public */}
+      <Route
+        path="/forgot-password"
+        element={
+          <PublicRoute>
+            <ForgotPassword />
+          </PublicRoute>
+        }
+      />
+
       {/* Reset Password route - needs token from email */}
       <Route
         path="/reset-password"
@@ -80,25 +91,6 @@ function App() {
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<Settings />} />
       </Route>
-
-      {/* 404 route */}
-      <Route
-        path="*"
-        element={
-          <div className="min-h-screen flex items-center justify-center bg-gray-50">
-            <div className="text-center">
-              <h1 className="text-4xl font-bold text-gray-900 mb-4">404</h1>
-              <p className="text-gray-600 mb-8">Page not found</p>
-              <a
-                href="/app/dashboard"
-                className="btn-primary"
-              >
-                Go to Dashboard
-              </a>
-            </div>
-          </div>
-        }
-      />
     </Routes>
   );
 }

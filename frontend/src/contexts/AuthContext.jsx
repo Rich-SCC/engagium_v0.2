@@ -100,6 +100,12 @@ const authReducer = (state, action) => {
         error: null,
       };
 
+    case 'INIT_COMPLETE':
+      return {
+        ...state,
+        isLoading: false,
+      };
+
     default:
       return state;
   }
@@ -110,7 +116,7 @@ const initialState = {
   isAuthenticated: false,
   user: null,
   token: null,
-  isLoading: false,
+  isLoading: true, // Start as true to prevent premature redirects
   error: null,
 };
 
@@ -138,12 +144,14 @@ export const AuthProvider = ({ children }) => {
         } catch (error) {
           // Token is invalid, remove it
           removeTokens();
-          dispatch({ type: 'LOGOUT' });
+          dispatch({ type: 'INIT_COMPLETE' });
         }
       } else {
-        // Remove invalid token
-        removeTokens();
-        dispatch({ type: 'LOGOUT' });
+        // No token or invalid token
+        if (token) {
+          removeTokens();
+        }
+        dispatch({ type: 'INIT_COMPLETE' });
       }
     };
 

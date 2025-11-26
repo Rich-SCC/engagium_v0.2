@@ -9,7 +9,14 @@ const {
   endSession,
   deleteSession,
   getSessionStats,
-  getSessionStudents
+  getSessionStudents,
+  getSessionWithAttendance,
+  submitBulkAttendance,
+  getSessionAttendance,
+  getAttendanceStats,
+  getSessionsByDateRange,
+  getCalendarData,
+  getClassSessions
 } = require('../controllers/sessionController');
 
 const router = express.Router();
@@ -20,10 +27,13 @@ router.use(instructorAuth);
 // Session collection routes
 router.get('/', getSessions);
 router.get('/stats', getSessionStats);
+router.get('/date-range', getSessionsByDateRange);
+router.get('/calendar', getCalendarData);
 router.post('/', createSession);
 
 // Individual session routes
 router.get('/:id', getSession);
+router.get('/:id/full', getSessionWithAttendance);
 router.put('/:id', updateSession);
 router.delete('/:id', deleteSession);
 
@@ -33,5 +43,10 @@ router.put('/:id/end', endSession);
 
 // Session student management
 router.get('/:id/students', getSessionStudents);
+
+// Attendance routes
+router.post('/:id/attendance/bulk', submitBulkAttendance);
+router.get('/:id/attendance', getSessionAttendance);
+router.get('/:id/attendance/stats', getAttendanceStats);
 
 module.exports = router;

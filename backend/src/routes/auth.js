@@ -8,7 +8,8 @@ const {
   logout,
   refreshToken,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  generateExtensionToken
 } = require('../controllers/authController');
 
 const router = express.Router();
@@ -24,5 +25,6 @@ router.post('/reset-password', resetPassword);
 router.get('/profile', auth, getProfile);
 router.put('/profile', auth, updateProfile);
 router.post('/logout', auth, logout);
+router.post('/generate-extension-token', auth, generateExtensionToken);
 
 module.exports = router;

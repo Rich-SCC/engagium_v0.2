@@ -49,6 +49,9 @@ const {
   deleteNote,
   getRecentClassNotes
 } = require('../controllers/studentNoteController');
+const {
+  getClassSessions
+} = require('../controllers/sessionController');
 
 const router = express.Router();
 
@@ -77,6 +80,9 @@ router.delete('/:id/links/:linkId', deleteClassLink);
 router.get('/:id/exemptions', getExemptedAccounts);
 router.post('/:id/exemptions', addExemptedAccount);
 router.delete('/:id/exemptions/:exemptionId', deleteExemptedAccount);
+
+// Class sessions
+router.get('/:classId/sessions', getClassSessions);
 
 // Student routes within classes
 router.get('/:classId/students', getStudents);

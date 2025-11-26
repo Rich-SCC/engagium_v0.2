@@ -21,6 +21,7 @@ describe('ClassController', () => {
     req = {
       body: {},
       params: {},
+      query: {},
       user: { id: 1, role: 'instructor' }
     };
 
@@ -38,10 +39,11 @@ describe('ClassController', () => {
       ];
 
       Class.findByInstructorId.mockResolvedValue(mockClasses);
+      req.query = { include_archived: 'false' };
 
       await getClasses(req, res);
 
-      expect(Class.findByInstructorId).toHaveBeenCalledWith(1);
+      expect(Class.findByInstructorId).toHaveBeenCalledWith(1, false);
       expect(res.json).toHaveBeenCalledWith({
         success: true,
         data: mockClasses

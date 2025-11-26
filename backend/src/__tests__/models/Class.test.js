@@ -17,7 +17,8 @@ describe('Class Model', () => {
         name: 'Computer Science 101',
         subject: 'Computer Science',
         section: 'A',
-        description: 'Introduction to CS'
+        description: 'Introduction to CS',
+        schedule: { days: ['Monday', 'Wednesday'], time: '10:00 AM' }
       };
 
       const mockClass = {
@@ -34,7 +35,7 @@ describe('Class Model', () => {
       expect(result).toEqual(mockClass);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO classes'),
-        [classData.instructor_id, classData.name, classData.subject, classData.section, classData.description]
+        [classData.instructor_id, classData.name, classData.subject, classData.section, classData.description, JSON.stringify(classData.schedule)]
       );
     });
   });
@@ -117,7 +118,9 @@ describe('Class Model', () => {
         name: 'Updated Class Name',
         subject: 'Updated Subject',
         section: 'B',
-        description: 'Updated description'
+        description: 'Updated description',
+        schedule: { days: ['Tuesday', 'Thursday'], time: '2:00 PM' },
+        status: 'active'
       };
 
       const mockUpdatedClass = {
@@ -134,7 +137,7 @@ describe('Class Model', () => {
       expect(result).toEqual(mockUpdatedClass);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('UPDATE classes'),
-        [updateData.name, updateData.subject, updateData.section, updateData.description, 1]
+        [updateData.name, updateData.subject, updateData.section, updateData.description, JSON.stringify(updateData.schedule), updateData.status, 1]
       );
     });
   });

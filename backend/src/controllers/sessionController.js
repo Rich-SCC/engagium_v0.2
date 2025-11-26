@@ -1,6 +1,7 @@
 const Session = require('../models/Session');
 const Class = require('../models/Class');
 const Student = require('../models/Student');
+const AttendanceRecord = require('../models/AttendanceRecord');
 
 // Get all sessions for current instructor
 const getSessions = async (req, res) => {
@@ -58,7 +59,7 @@ const getSession = async (req, res) => {
 // Create new session
 const createSession = async (req, res) => {
   try {
-    const { class_id, title, meeting_link } = req.body;
+    const { class_id, title, meeting_link, session_date, session_time, topic, description } = req.body;
 
     // Validation
     if (!class_id || !title) {
@@ -87,7 +88,11 @@ const createSession = async (req, res) => {
     const session = await Session.create({
       class_id,
       title,
-      meeting_link
+      meeting_link,
+      session_date,
+      session_time,
+      topic,
+      description
     });
 
     res.status(201).json({
@@ -107,7 +112,7 @@ const createSession = async (req, res) => {
 const updateSession = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, meeting_link } = req.body;
+    const { title, meeting_link, session_date, session_time, topic, description } = req.body;
 
     // First get the session to check access
     const existingSession = await Session.findById(id);
@@ -145,7 +150,11 @@ const updateSession = async (req, res) => {
 
     const updatedSession = await Session.update(id, {
       title,
-      meeting_link
+      meeting_link,
+      session_date,
+      session_time,
+      topic,
+      description
     });
 
     res.json({
@@ -380,6 +389,265 @@ const getSessionStudents = async (req, res) => {
   }
 };
 
+// Get session with full attendance data
+const getSessionWithAttendance = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const session = await Session.findWithAttendance(id);
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    // Check access
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: session
+    });
+  } catch (error) {
+    console.error('Get session with attendance error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Bulk submit attendance (from extension)
+const submitBulkAttendance = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { attendance } = req.body;
+
+    // Validate input
+    if (!attendance || !Array.isArray(attendance)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Attendance array is required'
+      });
+    }
+
+    // Get session and verify access
+    const session = await Session.findById(id);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Add session_id to each record
+    const attendanceWithSessionId = attendance.map(record => ({
+      ...record,
+      session_id: id
+    }));
+
+    // Bulk upsert attendance records
+    const records = await AttendanceRecord.bulkUpsert(attendanceWithSessionId);
+
+    res.json({
+      success: true,
+      data: records,
+      message: `${records.length} attendance records processed`
+    });
+  } catch (error) {
+    console.error('Submit bulk attendance error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get attendance records for a session
+const getSessionAttendance = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get session and verify access
+    const session = await Session.findById(id);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const attendance = await AttendanceRecord.findBySessionId(id);
+
+    res.json({
+      success: true,
+      data: attendance
+    });
+  } catch (error) {
+    console.error('Get session attendance error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get attendance statistics for a session
+const getAttendanceStats = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get session and verify access
+    const session = await Session.findById(id);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const stats = await Session.getAttendanceStats(id);
+
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('Get attendance stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get sessions by date range (for calendar)
+const getSessionsByDateRange = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Start date and end date are required'
+      });
+    }
+
+    const sessions = await Session.findByDateRange(req.user.id, startDate, endDate);
+
+    res.json({
+      success: true,
+      data: sessions
+    });
+  } catch (error) {
+    console.error('Get sessions by date range error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get calendar data for a specific month
+const getCalendarData = async (req, res) => {
+  try {
+    const { year, month } = req.query;
+
+    if (!year || !month) {
+      return res.status(400).json({
+        success: false,
+        error: 'Year and month are required'
+      });
+    }
+
+    const sessions = await Session.getCalendarData(
+      req.user.id,
+      parseInt(year),
+      parseInt(month)
+    );
+
+    res.json({
+      success: true,
+      data: sessions
+    });
+  } catch (error) {
+    console.error('Get calendar data error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get sessions for a specific class
+const getClassSessions = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { startDate, endDate, status } = req.query;
+
+    // Verify class exists and user has access
+    const classData = await Class.findById(classId);
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const sessions = await Session.findByClassId(classId, {
+      startDate,
+      endDate,
+      status
+    });
+
+    res.json({
+      success: true,
+      data: sessions
+    });
+  } catch (error) {
+    console.error('Get class sessions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   getSessions,
   getSession,
@@ -389,5 +657,12 @@ module.exports = {
   endSession,
   deleteSession,
   getSessionStats,
-  getSessionStudents
+  getSessionStudents,
+  getSessionWithAttendance,
+  submitBulkAttendance,
+  getSessionAttendance,
+  getAttendanceStats,
+  getSessionsByDateRange,
+  getCalendarData,
+  getClassSessions
 };

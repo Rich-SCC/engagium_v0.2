@@ -70,9 +70,9 @@ api.interceptors.response.use(
       const refreshToken = getRefreshToken();
 
       if (!refreshToken) {
-        // No refresh token, redirect to login
+        // No refresh token, redirect to landing page
         removeTokens();
-        window.location.href = '/login';
+        window.location.href = '/';
         return Promise.reject(error);
       }
 
@@ -93,10 +93,10 @@ api.interceptors.response.use(
         
         return axios(originalRequest);
       } catch (refreshError) {
-        // Refresh failed, redirect to login
+        // Refresh failed, redirect to landing page
         processQueue(refreshError, null);
         removeTokens();
-        window.location.href = '/login';
+        window.location.href = '/';
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -201,6 +201,9 @@ export const classesAPI = {
     api.delete(`/classes/${classId}/students/${studentId}/notes/${noteId}`),
   getRecentNotes: (classId, limit = 10) =>
     api.get(`/classes/${classId}/notes/recent`, { params: { limit } }),
+
+  // Class sessions
+  getSessions: (classId, params) => api.get(`/classes/${classId}/sessions`, { params }),
 };
 
 // Sessions API
@@ -208,12 +211,25 @@ export const sessionsAPI = {
   getAll: () => api.get('/sessions'),
   getStats: () => api.get('/sessions/stats'),
   getById: (id) => api.get(`/sessions/${id}`),
+  getWithAttendance: (id) => api.get(`/sessions/${id}/full`),
   create: (sessionData) => api.post('/sessions', sessionData),
   update: (id, sessionData) => api.put(`/sessions/${id}`, sessionData),
   delete: (id) => api.delete(`/sessions/${id}`),
   start: (id) => api.put(`/sessions/${id}/start`),
   end: (id) => api.put(`/sessions/${id}/end`),
   getStudents: (id) => api.get(`/sessions/${id}/students`),
+  
+  // Date range and calendar
+  getByDateRange: (startDate, endDate) =>
+    api.get('/sessions/date-range', { params: { startDate, endDate } }),
+  getCalendarData: (year, month) =>
+    api.get('/sessions/calendar', { params: { year, month } }),
+  
+  // Attendance
+  submitBulkAttendance: (id, attendance) =>
+    api.post(`/sessions/${id}/attendance/bulk`, { attendance }),
+  getAttendance: (id) => api.get(`/sessions/${id}/attendance`),
+  getAttendanceStats: (id) => api.get(`/sessions/${id}/attendance/stats`),
 };
 
 // Participation API

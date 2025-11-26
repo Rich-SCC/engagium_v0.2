@@ -1,0 +1,244 @@
+const db = require('../config/database');
+
+class AttendanceRecord {
+  // Create single attendance record
+  static async create(attendanceData) {
+    const { session_id, student_id, status, joined_at, left_at } = attendanceData;
+
+    const query = `
+      INSERT INTO attendance_records (session_id, student_id, status, joined_at, left_at)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (session_id, student_id)
+      DO UPDATE SET
+        status = EXCLUDED.status,
+        joined_at = EXCLUDED.joined_at,
+        left_at = EXCLUDED.left_at,
+        updated_at = NOW()
+      RETURNING *
+    `;
+
+    const result = await db.query(query, [
+      session_id,
+      student_id,
+      status || 'present',
+      joined_at || null,
+      left_at || null
+    ]);
+
+    return result.rows[0];
+  }
+
+  // Bulk create/update attendance records (from extension)
+  static async bulkUpsert(attendanceArray) {
+    if (!attendanceArray || attendanceArray.length === 0) {
+      return [];
+    }
+
+    const values = [];
+    const placeholders = [];
+    
+    attendanceArray.forEach((record, index) => {
+      const offset = index * 5;
+      placeholders.push(
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`
+      );
+      values.push(
+        record.session_id,
+        record.student_id,
+        record.status || 'present',
+        record.joined_at || null,
+        record.left_at || null
+      );
+    });
+
+    const query = `
+      INSERT INTO attendance_records (session_id, student_id, status, joined_at, left_at)
+      VALUES ${placeholders.join(', ')}
+      ON CONFLICT (session_id, student_id)
+      DO UPDATE SET
+        status = EXCLUDED.status,
+        joined_at = EXCLUDED.joined_at,
+        left_at = EXCLUDED.left_at,
+        updated_at = NOW()
+      RETURNING *
+    `;
+
+    const result = await db.query(query, values);
+    return result.rows;
+  }
+
+  // Find attendance records by session
+  static async findBySessionId(sessionId) {
+    const query = `
+      SELECT 
+        ar.*,
+        s.first_name,
+        s.last_name,
+        s.email,
+        s.student_id as student_number
+      FROM attendance_records ar
+      JOIN students s ON ar.student_id = s.id
+      WHERE ar.session_id = $1
+      ORDER BY s.last_name ASC, s.first_name ASC
+    `;
+
+    const result = await db.query(query, [sessionId]);
+    return result.rows;
+  }
+
+  // Find attendance records by student
+  static async findByStudentId(studentId, options = {}) {
+    const { limit = 50 } = options;
+
+    const query = `
+      SELECT 
+        ar.*,
+        ses.title as session_title,
+        ses.topic as session_topic,
+        ses.session_date,
+        ses.session_time,
+        c.name as class_name
+      FROM attendance_records ar
+      JOIN sessions ses ON ar.session_id = ses.id
+      JOIN classes c ON ses.class_id = c.id
+      WHERE ar.student_id = $1
+      ORDER BY ses.session_date DESC, ses.session_time DESC
+      LIMIT $2
+    `;
+
+    const result = await db.query(query, [studentId, limit]);
+    return result.rows;
+  }
+
+  // Get attendance statistics for a student
+  static async getStudentStats(studentId) {
+    const query = `
+      SELECT
+        COUNT(*) as total_sessions,
+        COUNT(CASE WHEN status = 'present' THEN 1 END) as present_count,
+        COUNT(CASE WHEN status = 'absent' THEN 1 END) as absent_count,
+        ROUND(
+          (COUNT(CASE WHEN status = 'present' THEN 1 END)::numeric / 
+           NULLIF(COUNT(*), 0) * 100), 2
+        ) as attendance_rate
+      FROM attendance_records
+      WHERE student_id = $1
+    `;
+
+    const result = await db.query(query, [studentId]);
+    return result.rows[0];
+  }
+
+  // Get attendance statistics for a class
+  static async getClassStats(classId, options = {}) {
+    const { startDate, endDate } = options;
+
+    let query = `
+      SELECT
+        COUNT(DISTINCT ar.session_id) as total_sessions,
+        COUNT(DISTINCT ar.student_id) as total_students,
+        COUNT(CASE WHEN ar.status = 'present' THEN 1 END) as total_present,
+        COUNT(CASE WHEN ar.status = 'absent' THEN 1 END) as total_absent,
+        ROUND(
+          (COUNT(CASE WHEN ar.status = 'present' THEN 1 END)::numeric / 
+           NULLIF(COUNT(*), 0) * 100), 2
+        ) as overall_attendance_rate
+      FROM attendance_records ar
+      JOIN sessions s ON ar.session_id = s.id
+      WHERE s.class_id = $1
+    `;
+
+    const params = [classId];
+
+    if (startDate) {
+      params.push(startDate);
+      query += ` AND s.session_date >= $${params.length}`;
+    }
+
+    if (endDate) {
+      params.push(endDate);
+      query += ` AND s.session_date <= $${params.length}`;
+    }
+
+    const result = await db.query(query, params);
+    return result.rows[0];
+  }
+
+  // Get attendance trends over time for a class
+  static async getAttendanceTrends(classId, options = {}) {
+    const { startDate, endDate, limit = 10 } = options;
+
+    let query = `
+      SELECT
+        s.id as session_id,
+        s.title,
+        s.topic,
+        s.session_date,
+        s.session_time,
+        COUNT(*) as total_students,
+        COUNT(CASE WHEN ar.status = 'present' THEN 1 END) as present_count,
+        COUNT(CASE WHEN ar.status = 'absent' THEN 1 END) as absent_count,
+        ROUND(
+          (COUNT(CASE WHEN ar.status = 'present' THEN 1 END)::numeric / 
+           NULLIF(COUNT(*), 0) * 100), 2
+        ) as attendance_rate
+      FROM sessions s
+      LEFT JOIN attendance_records ar ON s.id = ar.session_id
+      WHERE s.class_id = $1
+    `;
+
+    const params = [classId];
+
+    if (startDate) {
+      params.push(startDate);
+      query += ` AND s.session_date >= $${params.length}`;
+    }
+
+    if (endDate) {
+      params.push(endDate);
+      query += ` AND s.session_date <= $${params.length}`;
+    }
+
+    query += `
+      GROUP BY s.id, s.title, s.topic, s.session_date, s.session_time
+      ORDER BY s.session_date DESC, s.session_time DESC
+      LIMIT $${params.length + 1}
+    `;
+    params.push(limit);
+
+    const result = await db.query(query, params);
+    return result.rows;
+  }
+
+  // Update attendance record
+  static async update(id, updates) {
+    const { status, joined_at, left_at } = updates;
+
+    const query = `
+      UPDATE attendance_records
+      SET status = COALESCE($1, status),
+          joined_at = COALESCE($2, joined_at),
+          left_at = COALESCE($3, left_at),
+          updated_at = NOW()
+      WHERE id = $4
+      RETURNING *
+    `;
+
+    const result = await db.query(query, [status, joined_at, left_at, id]);
+    return result.rows[0];
+  }
+
+  // Delete attendance record
+  static async delete(id) {
+    const query = 'DELETE FROM attendance_records WHERE id = $1';
+    await db.query(query, [id]);
+  }
+
+  // Delete all attendance records for a session
+  static async deleteBySessionId(sessionId) {
+    const query = 'DELETE FROM attendance_records WHERE session_id = $1';
+    await db.query(query, [sessionId]);
+  }
+}
+
+module.exports = AttendanceRecord;

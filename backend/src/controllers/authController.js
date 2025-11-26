@@ -439,6 +439,51 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// Generate extension token - POST /api/auth/generate-extension-token
+const generateExtensionToken = async (req, res) => {
+  try {
+    const user = req.user;
+    
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+    }
+    
+    // Generate long-lived JWT token for extension (30 days)
+    const token = jwt.sign(
+      { 
+        id: user.id,
+        type: 'extension'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+    
+    res.json({
+      success: true,
+      data: {
+        token,
+        expires_in: '30 days',
+        user: {
+          id: user.id,
+          email: user.email,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          role: user.role
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Generate extension token error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -447,5 +492,6 @@ module.exports = {
   logout,
   refreshToken,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  generateExtensionToken
 };

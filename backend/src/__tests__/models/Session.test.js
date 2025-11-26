@@ -15,7 +15,11 @@ describe('Session Model', () => {
       const sessionData = {
         class_id: 1,
         title: 'Week 1 Lecture',
-        meeting_link: 'https://meet.example.com/test'
+        meeting_link: 'https://meet.example.com/test',
+        session_date: '2025-12-01',
+        session_time: '10:00:00',
+        topic: 'Introduction',
+        description: 'First lecture'
       };
 
       const mockSession = {
@@ -34,7 +38,7 @@ describe('Session Model', () => {
       expect(result).toEqual(mockSession);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO sessions'),
-        [sessionData.class_id, sessionData.title, sessionData.meeting_link]
+        [sessionData.class_id, sessionData.title, sessionData.meeting_link, sessionData.session_date, sessionData.session_time, sessionData.topic, sessionData.description]
       );
     });
   });
@@ -128,7 +132,11 @@ describe('Session Model', () => {
     it('should update session information', async () => {
       const updateData = {
         title: 'Updated Title',
-        meeting_link: 'https://meet.example.com/updated'
+        meeting_link: 'https://meet.example.com/updated',
+        session_date: '2025-12-02',
+        session_time: '11:00:00',
+        topic: 'Updated Topic',
+        description: 'Updated description'
       };
 
       const mockUpdatedSession = {
@@ -145,7 +153,7 @@ describe('Session Model', () => {
       expect(result).toEqual(mockUpdatedSession);
       expect(db.query).toHaveBeenCalledWith(
         expect.stringContaining('UPDATE sessions'),
-        [updateData.title, updateData.meeting_link, 1]
+        [updateData.title, updateData.meeting_link, updateData.session_date, updateData.session_time, updateData.topic, updateData.description, 1]
       );
     });
   });

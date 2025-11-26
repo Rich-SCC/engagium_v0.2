@@ -78,7 +78,7 @@ const SignUpModal = ({ onClose, onSwitchToLogin }) => {
                 value={formData.first_name}
                 onChange={handleChange}
                 placeholder="John"
-                className="w-full px-4 py-3 rounded-2xl border-2 border-gray-300 focus:border-teal-600 focus:outline-none text-gray-700"
+                className="w-full px-4 py-3 rounded-2xl border-2 border-gray-300 focus:border-accent-500 focus:outline-none text-gray-700"
                 required
               />
               {errors.first_name && <p className="text-red-600 text-sm mt-1">{errors.first_name}</p>}
@@ -95,7 +95,7 @@ const SignUpModal = ({ onClose, onSwitchToLogin }) => {
                 value={formData.last_name}
                 onChange={handleChange}
                 placeholder="Doe"
-                className="w-full px-4 py-3 rounded-2xl border-2 border-gray-300 focus:border-teal-600 focus:outline-none text-gray-700"
+                className="w-full px-4 py-3 rounded-2xl border-2 border-gray-300 focus:border-accent-500 focus:outline-none text-gray-700"
                 required
               />
               {errors.last_name && <p className="text-red-600 text-sm mt-1">{errors.last_name}</p>}
@@ -113,7 +113,7 @@ const SignUpModal = ({ onClose, onSwitchToLogin }) => {
               value={formData.email}
               onChange={handleChange}
               placeholder="profeasestclare.scc@gmail.com"
-              className="w-full px-6 py-4 rounded-2xl border-2 border-gray-300 focus:border-teal-600 focus:outline-none text-gray-700"
+              className="w-full px-6 py-4 rounded-2xl border-2 border-gray-300 focus:border-accent-500 focus:outline-none text-gray-700"
               required
             />
             {errors.email && <p className="text-red-600 text-sm mt-1">{errors.email}</p>}
@@ -130,7 +130,7 @@ const SignUpModal = ({ onClose, onSwitchToLogin }) => {
               value={formData.password}
               onChange={handleChange}
               placeholder="**************"
-              className="w-full px-6 py-4 rounded-2xl border-2 border-gray-300 focus:border-teal-600 focus:outline-none text-gray-700"
+              className="w-full px-6 py-4 rounded-2xl border-2 border-gray-300 focus:border-accent-500 focus:outline-none text-gray-700"
               required
             />
             {errors.password && <p className="text-red-600 text-sm mt-1">{errors.password}</p>}
@@ -147,7 +147,7 @@ const SignUpModal = ({ onClose, onSwitchToLogin }) => {
               value={formData.confirmPassword}
               onChange={handleChange}
               placeholder="**************"
-              className="w-full px-6 py-4 rounded-2xl border-2 border-gray-300 focus:border-teal-600 focus:outline-none text-gray-700"
+              className="w-full px-6 py-4 rounded-2xl border-2 border-gray-300 focus:border-accent-500 focus:outline-none text-gray-700"
               required
             />
             {errors.confirmPassword && <p className="text-red-600 text-sm mt-1">{errors.confirmPassword}</p>}
@@ -156,7 +156,7 @@ const SignUpModal = ({ onClose, onSwitchToLogin }) => {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-gray-300 hover:bg-gray-400 text-gray-900 font-bold py-4 rounded-2xl transition text-xl disabled:opacity-50"
+            className="w-full bg-accent-500 hover:bg-accent-600 text-white font-bold py-4 rounded-2xl transition text-xl disabled:opacity-50"
           >
             {isLoading ? 'Signing up...' : 'Sign Up'}
           </button>

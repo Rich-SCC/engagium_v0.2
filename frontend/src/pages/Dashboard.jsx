@@ -13,31 +13,33 @@ const Dashboard = () => {
     queryFn: () => sessionsAPI.getAll(),
   });
 
+  // Fetch session stats
+  const { data: sessionStatsData } = useQuery({
+    queryKey: ['sessionStats'],
+    queryFn: () => sessionsAPI.getStats(),
+  });
+
   // Fetch classes for summary
   const { data: classesData, isLoading: classesLoading } = useQuery({
     queryKey: ['classes'],
     queryFn: () => classesAPI.getAll(),
   });
 
+  // Fetch class stats
+  const { data: classStatsData } = useQuery({
+    queryKey: ['classStats'],
+    queryFn: () => classesAPI.getStats(),
+  });
+
   const sessions = sessionsData?.data || [];
   const classes = classesData?.data || [];
+  const sessionStats = sessionStatsData?.data || {};
+  const classStats = classStatsData?.data || {};
 
   // Get recent sessions (last 11)
   const recentSessions = sessions
-    .sort((a, b) => new Date(b.start_time || b.created_at) - new Date(a.start_time || a.created_at))
+    .sort((a, b) => new Date(b.started_at || b.created_at) - new Date(a.started_at || a.created_at))
     .slice(0, 11);
-
-  // Calculate class summary stats
-  const classStats = classes.slice(0, 3).map((cls, idx) => {
-    const avgScores = [90, 66, 55];
-    const statuses = ['Highly Engaged', 'Good Participation', 'Attention Needed'];
-    return {
-      ...cls,
-      code: cls.name || `Class ${idx + 1}`,
-      avgScore: avgScores[idx] || 50,
-      status: statuses[idx] || 'Pending'
-    };
-  });
 
   // Calendar logic
   const getDaysInMonth = (date) => {
@@ -71,15 +73,22 @@ const Dashboard = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
   };
 
-  const formatDuration = (duration) => {
-    if (!duration) return '0 min 0s';
-    const hrs = Math.floor(duration / 60);
-    const mins = duration % 60;
-    const secs = Math.floor(Math.random() * 60);
+  const formatDuration = (startTime, endTime) => {
+    if (!startTime) return 'N/A';
+    if (!endTime) return 'In Progress';
+    
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    const durationMs = end - start;
+    const durationMinutes = Math.floor(durationMs / 60000);
+    
+    const hrs = Math.floor(durationMinutes / 60);
+    const mins = durationMinutes % 60;
+    
     if (hrs > 0) {
-      return `${hrs} hr ${mins} min ${secs}s`;
+      return `${hrs} hr ${mins} min`;
     }
-    return `${mins} min ${secs}s`;
+    return `${mins} min`;
   };
 
   const formatDate = (dateString) => {
@@ -97,17 +106,17 @@ const Dashboard = () => {
   return (
     <div className="space-y-6">
       {/* Recent Activity Table */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Activity Table</h2>
+      <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
+        <h2 className="text-2xl font-bold text-gray-900 mb-6">Recent Activity</h2>
         <div className="overflow-x-auto">
           <table className="min-w-full">
-            <thead className="bg-gray-200">
+            <thead className="bg-accent-50">
               <tr>
-                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">#</th>
-                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Date/Time</th>
-                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Duration</th>
-                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Subject</th>
-                <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Total Participation</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">#</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Date/Time</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Duration</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Subject</th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Total Participation</th>
               </tr>
             </thead>
             <tbody>
@@ -127,16 +136,16 @@ const Dashboard = () => {
                 recentSessions.map((session, index) => {
                   const classInfo = classes.find(c => c.id === session.class_id);
                   return (
-                    <tr key={session.id} className="border-b hover:bg-gray-50">
+                    <tr key={session.id} className="border-b border-gray-100 hover:bg-accent-50 transition-colors">
                       <td className="px-4 py-3 text-sm">{index + 1}</td>
                       <td className="px-4 py-3 text-sm">
-                        {formatDate(session.start_time || session.created_at)} - {formatTime(session.start_time || session.created_at)}
+                        {formatDate(session.started_at || session.created_at)} - {formatTime(session.started_at || session.created_at)}
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        {formatDuration(session.duration || Math.floor(Math.random() * 120) + 30)}
+                        {formatDuration(session.started_at, session.ended_at)}
                       </td>
                       <td className="px-4 py-3 text-sm font-medium">{classInfo?.name || session.title || 'N/A'}</td>
-                      <td className="px-4 py-3 text-sm">{Math.floor(Math.random() * 50) + 10}</td>
+                      <td className="px-4 py-3 text-sm">{session.participation_count || 0}</td>
                     </tr>
                   );
                 })
@@ -144,75 +153,68 @@ const Dashboard = () => {
             </tbody>
           </table>
         </div>
-        <div className="mt-4 text-center">
-          <Link to="/app/sessions" className="text-sm text-gray-600 hover:text-gray-900 font-medium">
-            View All Activity
+        <div className="mt-6 text-center">
+          <Link to="/app/sessions" className="text-sm text-accent-600 hover:text-accent-700 font-semibold">
+            View All Activity →
           </Link>
         </div>
       </div>
 
-      {/* Bottom Row: Class Summary, Calendar, Notifications */}
+      {/* Bottom Row: Class Summary, Calendar, Session Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Class Summary */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">Class Summary</h3>
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
+          <h3 className="text-xl font-bold text-gray-900 mb-6">Class Summary</h3>
           <div className="space-y-4">
             {classesLoading ? (
               <p className="text-gray-500">Loading...</p>
-            ) : classStats.length === 0 ? (
+            ) : classes.length === 0 ? (
               <p className="text-gray-500">No classes yet</p>
             ) : (
-              classStats.map((cls) => (
-                <div key={cls.id} className="border-b pb-3">
-                  <div className="flex justify-between items-start mb-1">
-                    <span className="font-semibold text-sm">{cls.code}</span>
-                    <span className="text-sm font-bold">{cls.avgScore}%</span>
+              classes.slice(0, 3).map((cls) => (
+                <div key={cls.id} className="border-b border-gray-100 pb-4 last:border-0">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="font-semibold text-sm text-gray-900">{cls.name}</span>
+                    <span className="text-sm text-accent-600 font-medium">{cls.student_count || 0} students</span>
                   </div>
-                  <p className="text-xs text-gray-600">{cls.status}</p>
+                  <p className="text-xs text-gray-500">
+                    {cls.status === 'active' ? 'Active' : 'Archived'} • {cls.section || 'No section'}
+                  </p>
                 </div>
               ))
             )}
           </div>
-          {/* Pie Chart Placeholder */}
-          <div className="mt-6 flex justify-center">
-            <div className="relative w-48 h-48">
-              <svg viewBox="0 0 100 100" className="transform -rotate-90">
-                <circle cx="50" cy="50" r="40" fill="none" stroke="#e5e7eb" strokeWidth="20" />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  fill="none"
-                  stroke="#374151"
-                  strokeWidth="20"
-                  strokeDasharray={`${(classStats[0]?.avgScore || 0) * 2.51} 251`}
-                />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">
-                25%
-              </div>
+          {/* Stats Display */}
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <div className="text-center">
+              <div className="text-3xl font-bold text-accent-600">{classStats.totalClasses || 0}</div>
+              <div className="text-sm text-gray-600 mt-2">Total Classes</div>
+            </div>
+            <div className="text-center mt-6">
+              <div className="text-2xl font-bold text-gray-700">{classStats.totalStudents || 0}</div>
+              <div className="text-xs text-gray-500 mt-2">Total Students</div>
             </div>
           </div>
         </div>
 
         {/* Calendar */}
-        <div className="bg-gray-200 rounded-lg shadow p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-gray-900">
+        <div className="bg-gradient-to-br from-accent-50 to-gray-50 rounded-xl shadow-md p-6 border border-accent-100">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-bold text-gray-900">
               {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
             </h3>
             <div className="flex space-x-2">
               <button
                 onClick={previousMonth}
-                className="p-1 hover:bg-gray-300 rounded"
+                className="p-1 hover:bg-accent-100 rounded transition-colors"
               >
-                <ChevronLeftIcon className="w-5 h-5" />
+                <ChevronLeftIcon className="w-5 h-5 text-accent-600" />
               </button>
               <button
                 onClick={nextMonth}
-                className="p-1 hover:bg-gray-300 rounded"
+                className="p-1 hover:bg-accent-100 rounded transition-colors"
               >
-                <ChevronRightIcon className="w-5 h-5" />
+                <ChevronRightIcon className="w-5 h-5 text-accent-600" />
               </button>
             </div>
           </div>
@@ -229,56 +231,31 @@ const Dashboard = () => {
                     : day === new Date().getDate() &&
                       currentDate.getMonth() === new Date().getMonth() &&
                       currentDate.getFullYear() === new Date().getFullYear()
-                    ? 'bg-gray-700 text-white rounded-full font-bold'
-                    : 'hover:bg-gray-300 rounded-full cursor-pointer'
+                    ? 'bg-accent-500 text-white rounded-full font-bold'
+                    : 'hover:bg-accent-100 rounded-full cursor-pointer text-gray-700'
                 }`}
               >
                 {day}
               </div>
             ))}
           </div>
-          
-          {/* Code Section */}
-          <div className="mt-6 bg-gray-300 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-semibold">Code</span>
-              <button className="text-gray-600 hover:text-gray-900">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
-              </button>
-            </div>
-            <p className="text-lg font-bold">nrs-oxnj-njd</p>
-            <p className="text-2xl font-bold">868 0678 3998</p>
-          </div>
         </div>
 
-        {/* Notification */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-gray-900">Notification</h3>
-            <button className="text-sm text-gray-600 hover:text-gray-900">•••</button>
-          </div>
-          <div className="space-y-4">
-            <div className="border-b pb-4">
-              <div className="flex justify-between items-start mb-2">
-                <h4 className="font-semibold text-sm">Upcoming Class</h4>
-                <button className="text-gray-400 hover:text-gray-600">•••</button>
-              </div>
-              <p className="text-xs text-gray-600 mb-1">
-                1st Year - D (CS101 Functions in Python)
-              </p>
-              <p className="text-xs text-gray-500">📅 Thu, 24 Nov · ⏰ 08:00 AM</p>
+        {/* Session Stats */}
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
+          <h3 className="text-xl font-bold text-gray-900 mb-6">Session Stats</h3>
+          <div className="space-y-6">
+            <div className="text-center p-4 bg-accent-50 rounded-xl">
+              <div className="text-3xl font-bold text-accent-600">{sessionStats.totalSessions || sessions.length}</div>
+              <div className="text-sm text-gray-600 mt-2">Total Sessions</div>
             </div>
-            <div className="pb-4">
-              <div className="flex justify-between items-start mb-2">
-                <h4 className="font-semibold text-sm">Upcoming Class</h4>
-                <button className="text-gray-400 hover:text-gray-600">•••</button>
-              </div>
-              <p className="text-xs text-gray-600 mb-1">
-                3rd Year - A (CS305 Calculus III)
-              </p>
-              <p className="text-xs text-gray-500">📅 Thu, 24 Nov · ⏰ 10:30 AM</p>
+            <div className="text-center p-4 bg-gray-50 rounded-xl">
+              <div className="text-2xl font-bold text-gray-700">{sessionStats.activeSessions || 0}</div>
+              <div className="text-sm text-gray-600 mt-2">Active Now</div>
+            </div>
+            <div className="text-center p-4 bg-gray-50 rounded-xl">
+              <div className="text-2xl font-bold text-gray-700">{sessionStats.completedToday || 0}</div>
+              <div className="text-sm text-gray-600 mt-2">Completed Today</div>
             </div>
           </div>
         </div>

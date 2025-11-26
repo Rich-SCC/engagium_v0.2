@@ -1,0 +1,24 @@
+{
+  "name": "engagium-extension",
+  "version": "1.0.0",
+  "description": "Browser extension for Engagium attendance tracking",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "vite build",
+    "preview": "vite preview",
+    "postbuild": "cp manifest.json dist/ && cp -r assets dist/ && cp popup/index.html dist/popup/ && cp options/index.html dist/options/ && cp options/callback.html dist/options/ && cp content/loader.js dist/content/"
+  },
+  "dependencies": {
+    "date-fns": "^2.30.0",
+    "idb": "^7.1.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.254",
+    "@vitejs/plugin-react": "^5.1.1",
+    "vite": "^7.2.4"
+  }
+}

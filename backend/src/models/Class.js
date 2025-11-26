@@ -16,7 +16,9 @@ class Class {
   }
 
   static async findByInstructorId(instructorId, includeArchived = false) {
-    const statusFilter = includeArchived ? '' : "AND c.status = 'active'";
+    // When includeArchived is true, show ONLY archived classes
+    // When includeArchived is false, show ONLY active classes
+    const statusFilter = includeArchived ? "AND c.status = 'archived'" : "AND c.status = 'active'";
     
     const query = `
       SELECT c.*,
