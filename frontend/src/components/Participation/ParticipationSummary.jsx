@@ -105,7 +105,7 @@ const ParticipationSummary = ({ summary, interactionSummary }) => {
             {mostActive ? (
               <>
                 <p className="text-lg font-semibold text-gray-900">
-                  {mostActive.first_name} {mostActive.last_name}
+                  {mostActive.full_name}
                 </p>
                 <p className="text-sm text-gray-500 mt-1">
                   {mostActive.total_interactions} interaction{mostActive.total_interactions !== 1 ? 's' : ''}

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Engagium Attendance Tracker",
   "version": "1.0.0",
-  "description": "Automatically track student attendance and participation during online meetings (Zoom, Google Meet)",
+  "description": "Automatically track student attendance and participation during Google Meet meetings",
   
   "icons": {
     "16": "assets/icons/icon16.png",

@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { sessionsAPI, participationAPI } from '../services/api';
 
 const WebSocketContext = createContext(null);
 
@@ -18,6 +19,96 @@ export const WebSocketProvider = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [activeSessions, setActiveSessions] = useState([]);
   const [recentEvents, setRecentEvents] = useState([]);
+  const [isLoadingActiveSessions, setIsLoadingActiveSessions] = useState(false);
+  const [isLoadingRecentEvents, setIsLoadingRecentEvents] = useState(false);
+
+  // Fetch active sessions from the backend
+  const fetchActiveSessions = useCallback(async () => {
+    if (!user || !token) return;
+    
+    setIsLoadingActiveSessions(true);
+    try {
+      const response = await sessionsAPI.getActive();
+      if (response.success && response.data) {
+        // Transform to match the expected format
+        const sessions = response.data.map(session => ({
+          session_id: session.id,
+          class_id: session.class_id,
+          class_name: session.class_name,
+          subject: session.subject,
+          meeting_link: session.meeting_link,
+          started_at: session.started_at
+        }));
+        setActiveSessions(sessions);
+        console.log('[WebSocket] ✅ Loaded active sessions from server:', sessions.length, 'sessions');
+      }
+    } catch (error) {
+      console.error('[WebSocket] ❌ Failed to fetch active sessions:', error);
+    } finally {
+      setIsLoadingActiveSessions(false);
+    }
+  }, [user, token]);
+
+  // Fetch recent events for all active sessions
+  const fetchRecentEvents = useCallback(async (sessions) => {
+    if (!user || !token || !sessions || sessions.length === 0) return;
+    
+    setIsLoadingRecentEvents(true);
+    console.log('[WebSocket] 📥 Fetching recent events for', sessions.length, 'active sessions...');
+    
+    try {
+      const allEvents = [];
+      
+      for (const session of sessions) {
+        try {
+          // Fetch last 30 minutes of activity for each active session
+          const response = await participationAPI.getRecentActivity(session.session_id, 30);
+          if (response.success && response.data) {
+            const events = response.data.map(log => ({
+              id: `participation-${log.id || Date.now()}-${Math.random()}`,
+              type: 'participation',
+              session_id: session.session_id,
+              student_name: log.student_name || log.full_name,
+              interaction_type: log.interaction_type,
+              timestamp: log.timestamp,
+              message: `${log.student_name || log.full_name} - ${log.interaction_type}`
+            }));
+            allEvents.push(...events);
+            console.log('[WebSocket] ✅ Loaded', events.length, 'events for session', session.session_id);
+          }
+        } catch (sessionError) {
+          console.warn('[WebSocket] ⚠️ Failed to fetch events for session', session.session_id, sessionError);
+        }
+      }
+      
+      // Sort by timestamp descending and limit to 50
+      allEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      const limitedEvents = allEvents.slice(0, 50);
+      
+      setRecentEvents(limitedEvents);
+      console.log('[WebSocket] ✅ Total recent events loaded:', limitedEvents.length);
+    } catch (error) {
+      console.error('[WebSocket] ❌ Failed to fetch recent events:', error);
+    } finally {
+      setIsLoadingRecentEvents(false);
+    }
+  }, [user, token]);
+
+  // Fetch active sessions on mount when user is authenticated
+  useEffect(() => {
+    if (user && token) {
+      fetchActiveSessions().then(() => {
+        // Fetch recent events after we have active sessions
+      });
+    }
+  }, [user, token, fetchActiveSessions]);
+
+  // Fetch recent events when active sessions change
+  useEffect(() => {
+    if (activeSessions.length > 0 && !isLoadingActiveSessions) {
+      fetchRecentEvents(activeSessions);
+    }
+  }, [activeSessions, isLoadingActiveSessions, fetchRecentEvents]);
 
   useEffect(() => {
     if (!user || !token) {
@@ -26,6 +117,7 @@ export const WebSocketProvider = ({ children }) => {
         socket.disconnect();
         setSocket(null);
         setIsConnected(false);
+        setActiveSessions([]);
       }
       return;
     }
@@ -42,27 +134,42 @@ export const WebSocketProvider = ({ children }) => {
 
     // Connection event handlers
     newSocket.on('connect', () => {
-      console.log('[WebSocket] Connected');
+      console.log('[WebSocket] ✅ Connected to server');
+      console.log('[WebSocket] Socket ID:', newSocket.id);
       setIsConnected(true);
       
       // Join instructor-specific room
+      console.log('[WebSocket] 📤 Joining instructor room for user:', user.id);
       newSocket.emit('join_instructor_room', { user_id: user.id });
     });
 
     newSocket.on('disconnect', () => {
-      console.log('[WebSocket] Disconnected');
+      console.log('[WebSocket] ❌ Disconnected from server');
       setIsConnected(false);
     });
 
     newSocket.on('connect_error', (error) => {
-      console.error('[WebSocket] Connection error:', error);
+      console.error('[WebSocket] ❌ Connection error:', error.message);
       setIsConnected(false);
     });
 
     // Session event handlers
     newSocket.on('session:started', (data) => {
-      console.log('[WebSocket] Session started:', data);
-      setActiveSessions(prev => [...prev, data]);
+      console.log('\\n========================================');
+      console.log('[WebSocket] 📥 RECEIVED: session:started');
+      console.log('========================================');
+      console.log('[WebSocket] Data:', JSON.stringify(data, null, 2));
+      console.log('========================================\\n');
+      
+      setActiveSessions(prev => {
+        // Avoid duplicates
+        if (prev.some(s => s.session_id === data.session_id)) {
+          console.log('[WebSocket] ⚠️ Session already exists, skipping duplicate');
+          return prev;
+        }
+        console.log('[WebSocket] ✅ Adding new active session');
+        return [...prev, data];
+      });
       
       // Add to recent events feed
       setRecentEvents(prev => [{
@@ -76,7 +183,12 @@ export const WebSocketProvider = ({ children }) => {
     });
 
     newSocket.on('session:ended', (data) => {
-      console.log('[WebSocket] Session ended:', data);
+      console.log('\\n========================================');
+      console.log('[WebSocket] 📥 RECEIVED: session:ended');
+      console.log('========================================');
+      console.log('[WebSocket] Data:', JSON.stringify(data, null, 2));
+      console.log('========================================\\n');
+      
       setActiveSessions(prev => prev.filter(s => s.session_id !== data.session_id));
       
       setRecentEvents(prev => [{
@@ -89,7 +201,15 @@ export const WebSocketProvider = ({ children }) => {
     });
 
     newSocket.on('participation:logged', (data) => {
-      console.log('[WebSocket] Participation logged:', data);
+      console.log('\\n========================================');
+      console.log('[WebSocket] 📥 RECEIVED: participation:logged');
+      console.log('========================================');
+      console.log('[WebSocket] Session ID:', data.session_id);
+      console.log('[WebSocket] Student:', data.student_name);
+      console.log('[WebSocket] Type:', data.interaction_type);
+      console.log('[WebSocket] Timestamp:', data.timestamp);
+      console.log('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
+      console.log('========================================\\n');
       
       setRecentEvents(prev => [{
         id: `participation-${Date.now()}-${Math.random()}`,
@@ -100,10 +220,19 @@ export const WebSocketProvider = ({ children }) => {
         timestamp: data.timestamp,
         message: `${data.student_name} - ${data.interaction_type}`
       }, ...prev].slice(0, 50));
+      
+      console.log('[WebSocket] ✅ Added participation event to feed');
     });
 
     newSocket.on('attendance:updated', (data) => {
-      console.log('[WebSocket] Attendance updated:', data);
+      console.log('\\n========================================');
+      console.log('[WebSocket] 📥 RECEIVED: attendance:updated');
+      console.log('========================================');
+      console.log('[WebSocket] Session ID:', data.session_id);
+      console.log('[WebSocket] Student:', data.student_name);
+      console.log('[WebSocket] Action:', data.action);
+      console.log('[WebSocket] Timestamp:', data.timestamp);
+      console.log('========================================\\n');
       
       setRecentEvents(prev => [{
         id: `attendance-${Date.now()}-${Math.random()}`,
@@ -114,6 +243,8 @@ export const WebSocketProvider = ({ children }) => {
         timestamp: data.timestamp,
         message: `${data.student_name} ${data.action}`
       }, ...prev].slice(0, 50));
+      
+      console.log('[WebSocket] ✅ Added attendance event to feed');
     });
 
     setSocket(newSocket);
@@ -129,6 +260,10 @@ export const WebSocketProvider = ({ children }) => {
     isConnected,
     activeSessions,
     recentEvents,
+    isLoadingActiveSessions,
+    isLoadingRecentEvents,
+    refreshActiveSessions: fetchActiveSessions,
+    refreshRecentEvents: () => fetchRecentEvents(activeSessions),
     clearEvents: () => setRecentEvents([])
   };
 

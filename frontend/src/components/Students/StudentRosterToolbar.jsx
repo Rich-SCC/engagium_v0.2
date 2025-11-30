@@ -23,10 +23,8 @@ const StudentRosterToolbar = ({
   const [showFilters, setShowFilters] = useState(false);
 
   const sortOptions = [
-    { value: 'last_name', label: 'Last Name (A-Z)' },
-    { value: 'first_name', label: 'First Name (A-Z)' },
+    { value: 'full_name', label: 'Name (A-Z)' },
     { value: 'student_id', label: 'Student ID' },
-    { value: 'email', label: 'Email' },
     { value: 'participation_count', label: 'Participation Count' },
     { value: 'notes_count', label: 'Notes Count' }
   ];

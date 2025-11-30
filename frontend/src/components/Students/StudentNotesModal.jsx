@@ -92,7 +92,7 @@ const StudentNotesModal = ({ isOpen, onClose, classId, student }) => {
               <h2 className="text-xl font-bold">Student Notes</h2>
             </div>
             <p className="text-sm text-gray-600 mt-1">
-              {student.first_name} {student.last_name}
+              {student.full_name}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">

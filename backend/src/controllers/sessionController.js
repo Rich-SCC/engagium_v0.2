@@ -2,6 +2,7 @@ const Session = require('../models/Session');
 const Class = require('../models/Class');
 const Student = require('../models/Student');
 const AttendanceRecord = require('../models/AttendanceRecord');
+const AttendanceInterval = require('../models/AttendanceInterval');
 
 // Get all sessions for current instructor
 const getSessions = async (req, res) => {
@@ -14,6 +15,24 @@ const getSessions = async (req, res) => {
     });
   } catch (error) {
     console.error('Get sessions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get active sessions for current instructor
+const getActiveSessions = async (req, res) => {
+  try {
+    const sessions = await Session.findActiveByInstructorId(req.user.id);
+
+    res.json({
+      success: true,
+      data: sessions
+    });
+  } catch (error) {
+    console.error('Get active sessions error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'
@@ -658,6 +677,23 @@ const endSessionWithTimestamp = async (req, res) => {
       });
     }
 
+    // Close all open attendance intervals with the session end time
+    await AttendanceInterval.closeAllOpenIntervals(id, ended_at);
+
+    // Recalculate total durations for all participants and update attendance records
+    const summary = await AttendanceInterval.getSessionAttendanceSummary(id);
+    for (const participant of summary) {
+      await AttendanceRecord.updateDuration(
+        id, 
+        participant.participant_name, 
+        participant.total_duration_minutes, 
+        ended_at
+      );
+    }
+
+    // Mark students who are in the class roster but didn't attend as absent
+    await AttendanceRecord.markAbsentStudents(id, session.class_id);
+
     const updatedSession = await Session.updateEndTime(id, ended_at);
 
     // Emit socket event
@@ -681,8 +717,459 @@ const endSessionWithTimestamp = async (req, res) => {
   }
 };
 
+// Handle live events from extension (real-time participant updates)
+const handleLiveEvent = async (req, res) => {
+  try {
+    const { eventType, sessionId, data, timestamp } = req.body;
+
+    console.log('\n========================================');
+    console.log('[LiveEvent] 📥 RECEIVED FROM EXTENSION');
+    console.log('========================================');
+    console.log('[LiveEvent] Event Type:', eventType);
+    console.log('[LiveEvent] Session ID:', sessionId);
+    console.log('[LiveEvent] Timestamp:', timestamp || new Date().toISOString());
+    console.log('[LiveEvent] Data:', JSON.stringify(data, null, 2));
+    console.log('========================================\n');
+
+    if (!eventType || !sessionId) {
+      console.error('[LiveEvent] ❌ Missing required fields: eventType or sessionId');
+      return res.status(400).json({
+        success: false,
+        error: 'eventType and sessionId are required'
+      });
+    }
+
+    // Verify session exists and user has access
+    const session = await Session.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Get the io instance
+    const io = global.io || req.app.get('io');
+    
+    if (!io) {
+      console.warn('[LiveEvent] ⚠️ Socket.io not available - cannot broadcast');
+      return res.json({ success: true, broadcasted: false });
+    }
+
+    console.log('[LiveEvent] ✅ Socket.io available, preparing to broadcast...');
+
+    // Broadcast event to session room and instructor room
+    const eventData = {
+      ...data,
+      sessionId,
+      timestamp: timestamp || new Date().toISOString()
+    };
+
+    // Map extension event types to frontend event types
+    switch (eventType) {
+      case 'participant:joined':
+        console.log('[LiveEvent] 📤 Broadcasting participant:joined to:', {
+          sessionRoom: `session:${sessionId}`,
+          instructorRoom: `instructor_${req.user.id}`,
+          participantName: data.participant?.name
+        });
+        io.to(`session:${sessionId}`).emit('participant:joined', {
+          session_id: sessionId,
+          participant: data.participant,
+          timestamp: eventData.timestamp
+        });
+        io.to(`instructor_${req.user.id}`).emit('attendance:updated', {
+          session_id: sessionId,
+          student_name: data.participant?.name || 'Unknown',
+          action: 'joined',
+          timestamp: eventData.timestamp
+        });
+        console.log('[LiveEvent] ✅ Broadcasted participant:joined');
+        break;
+
+      case 'participant:left':
+        io.to(`session:${sessionId}`).emit('participant:left', {
+          session_id: sessionId,
+          participantId: data.participantId,
+          leftAt: data.leftAt,
+          timestamp: eventData.timestamp
+        });
+        break;
+
+      case 'attendance:update':
+        io.to(`session:${sessionId}`).emit('attendance:updated', {
+          session_id: sessionId,
+          student_id: data.studentId,
+          student_name: data.studentName,
+          status: data.status,
+          joined_at: data.joinedAt,
+          left_at: data.leftAt,
+          timestamp: eventData.timestamp
+        });
+        io.to(`instructor_${req.user.id}`).emit('attendance:updated', {
+          session_id: sessionId,
+          student_name: data.studentName,
+          action: data.status,
+          timestamp: eventData.timestamp
+        });
+        break;
+
+      case 'participation:logged':
+        console.log('[LiveEvent] 📤 Broadcasting participation:logged to rooms:', {
+          sessionRoom: `session:${sessionId}`,
+          instructorRoom: `instructor_${req.user.id}`,
+          data: {
+            studentName: data.studentName,
+            interactionType: data.interactionType
+          }
+        });
+        
+        // Check room membership
+        const sessionRoomMembers = io.sockets.adapter.rooms.get(`session:${sessionId}`)?.size || 0;
+        const instructorRoomMembers = io.sockets.adapter.rooms.get(`instructor_${req.user.id}`)?.size || 0;
+        console.log('[LiveEvent] Room membership:', {
+          sessionRoom: sessionRoomMembers,
+          instructorRoom: instructorRoomMembers
+        });
+        
+        io.to(`session:${sessionId}`).emit('participation:logged', {
+          session_id: sessionId,
+          student_id: data.studentId,
+          student_name: data.studentName,
+          interaction_type: data.interactionType,
+          metadata: data.metadata,
+          timestamp: eventData.timestamp
+        });
+        io.to(`instructor_${req.user.id}`).emit('participation:logged', {
+          session_id: sessionId,
+          student_name: data.studentName,
+          interaction_type: data.interactionType,
+          timestamp: eventData.timestamp
+        });
+        console.log('[LiveEvent] ✅ Broadcasted participation:logged to', sessionRoomMembers + instructorRoomMembers, 'clients');
+        break;
+
+      case 'chat:message':
+        io.to(`session:${sessionId}`).emit('chat:message', {
+          session_id: sessionId,
+          sender: data.sender,
+          message: data.message,
+          timestamp: eventData.timestamp
+        });
+        break;
+
+      case 'session:extension_connected':
+        io.to(`instructor_${req.user.id}`).emit('session:extension_connected', {
+          session_id: sessionId,
+          timestamp: eventData.timestamp
+        });
+        console.log(`[LiveEvent] Extension connected to session ${sessionId}`);
+        break;
+
+      case 'session:extension_disconnected':
+        io.to(`instructor_${req.user.id}`).emit('session:extension_disconnected', {
+          session_id: sessionId,
+          timestamp: eventData.timestamp
+        });
+        console.log(`[LiveEvent] Extension disconnected from session ${sessionId}`);
+        break;
+
+      default:
+        console.log('[LiveEvent] 📤 Broadcasting unknown event type:', eventType);
+        // Forward unknown events as-is
+        io.to(`session:${sessionId}`).emit(eventType, eventData);
+    }
+
+    console.log('[LiveEvent] ✅ Response: Broadcasting complete for', eventType);
+    res.json({
+      success: true,
+      broadcasted: true,
+      eventType
+    });
+
+  } catch (error) {
+    console.error('Handle live event error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process live event'
+    });
+  }
+};
+
+// Record participant join (extension calls this when participant detected)
+const recordParticipantJoin = async (req, res) => {
+  try {
+    const { id: sessionId } = req.params;
+    const { participant_name, joined_at, student_id = null } = req.body;
+
+    if (!participant_name) {
+      return res.status(400).json({
+        success: false,
+        error: 'participant_name is required'
+      });
+    }
+
+    // Verify session exists and user has access
+    const session = await Session.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Try to auto-match to student if not provided
+    let matchedStudentId = student_id;
+    if (!matchedStudentId) {
+      const matchedStudent = await Student.findByClassIdAndName(session.class_id, participant_name);
+      if (matchedStudent) {
+        matchedStudentId = matchedStudent.id;
+      }
+    }
+
+    // Create or update attendance record
+    await AttendanceRecord.upsertFromParticipant(sessionId, participant_name, matchedStudentId);
+
+    // Create attendance interval for this join
+    const interval = await AttendanceInterval.create({
+      session_id: sessionId,
+      student_id: matchedStudentId,
+      participant_name,
+      joined_at: joined_at || new Date()
+    });
+
+    // Emit socket event for real-time updates
+    const io = global.io || req.app.get('io');
+    if (io) {
+      io.to(`session:${sessionId}`).emit('participant:joined', {
+        session_id: sessionId,
+        participant_name,
+        student_id: matchedStudentId,
+        joined_at: interval.joined_at,
+        is_matched: !!matchedStudentId
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        interval,
+        is_matched: !!matchedStudentId,
+        student_id: matchedStudentId
+      }
+    });
+  } catch (error) {
+    console.error('Record participant join error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to record participant join'
+    });
+  }
+};
+
+// Record participant leave (extension calls this when participant leaves)
+const recordParticipantLeave = async (req, res) => {
+  try {
+    const { id: sessionId } = req.params;
+    const { participant_name, left_at } = req.body;
+
+    if (!participant_name) {
+      return res.status(400).json({
+        success: false,
+        error: 'participant_name is required'
+      });
+    }
+
+    // Verify session exists and user has access
+    const session = await Session.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Close the open interval for this participant
+    const interval = await AttendanceInterval.closeInterval(sessionId, participant_name, left_at || new Date());
+
+    if (!interval) {
+      return res.status(404).json({
+        success: false,
+        error: 'No open interval found for this participant'
+      });
+    }
+
+    // Calculate updated total duration
+    const totalDuration = await AttendanceInterval.calculateTotalDuration(sessionId, participant_name);
+    
+    // Update the attendance record with new duration
+    await AttendanceRecord.updateDuration(sessionId, participant_name, totalDuration, left_at || new Date());
+
+    // Emit socket event for real-time updates
+    const io = global.io || req.app.get('io');
+    if (io) {
+      io.to(`session:${sessionId}`).emit('participant:left', {
+        session_id: sessionId,
+        participant_name,
+        left_at: interval.left_at,
+        total_duration_minutes: totalDuration
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        interval,
+        total_duration_minutes: totalDuration
+      }
+    });
+  } catch (error) {
+    console.error('Record participant leave error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to record participant leave'
+    });
+  }
+};
+
+// Get full attendance data with intervals
+const getSessionAttendanceWithIntervals = async (req, res) => {
+  try {
+    const { id: sessionId } = req.params;
+
+    // Verify session exists and user has access
+    const session = await Session.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Get attendance records with intervals
+    const attendance = await AttendanceRecord.findBySessionIdWithIntervals(sessionId);
+    const summary = await AttendanceRecord.getSessionSummary(sessionId);
+
+    res.json({
+      success: true,
+      data: {
+        session,
+        attendance,
+        summary
+      }
+    });
+  } catch (error) {
+    console.error('Get session attendance with intervals error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get attendance data'
+    });
+  }
+};
+
+// Link an unmatched participant to a student (creates student if needed)
+const linkParticipantToStudent = async (req, res) => {
+  try {
+    const { id: sessionId } = req.params;
+    const { participant_name, student_id, create_student = false } = req.body;
+
+    if (!participant_name) {
+      return res.status(400).json({
+        success: false,
+        error: 'participant_name is required'
+      });
+    }
+
+    // Verify session exists and user has access
+    const session = await Session.findById(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    let targetStudentId = student_id;
+
+    // Create new student from participant if requested
+    if (create_student && !student_id) {
+      const newStudent = await Student.createFromParticipant(session.class_id, participant_name);
+      targetStudentId = newStudent.id;
+    }
+
+    if (!targetStudentId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Either student_id or create_student must be provided'
+      });
+    }
+
+    // Link attendance record to student
+    const attendanceRecord = await AttendanceRecord.linkToStudent(sessionId, participant_name, targetStudentId);
+
+    // Link all intervals to student
+    await AttendanceInterval.linkToStudent(sessionId, participant_name, targetStudentId);
+
+    // Get the student info
+    const student = await Student.findById(targetStudentId);
+
+    res.json({
+      success: true,
+      data: {
+        attendance_record: attendanceRecord,
+        student
+      },
+      message: create_student 
+        ? `Created student "${participant_name}" and linked attendance`
+        : `Linked attendance to student "${student.full_name}"`
+    });
+  } catch (error) {
+    console.error('Link participant to student error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to link participant to student'
+    });
+  }
+};
+
 module.exports = {
   getSessions,
+  getActiveSessions,
   getSession,
   // createSession - DEPRECATED: Use startSessionFromMeeting instead
   // startSession - DEPRECATED: Sessions auto-start via extension
@@ -699,5 +1186,10 @@ module.exports = {
   getCalendarData,
   getClassSessions,
   startSessionFromMeeting, // PRIMARY session creation method
-  endSessionWithTimestamp // PRIMARY session end method (from extension)
+  endSessionWithTimestamp, // PRIMARY session end method (from extension)
+  handleLiveEvent, // Real-time events from extension
+  recordParticipantJoin,
+  recordParticipantLeave,
+  getSessionAttendanceWithIntervals,
+  linkParticipantToStudent
 };

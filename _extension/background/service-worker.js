@@ -11,6 +11,7 @@ import {
   getStudentsByClass,
   submitBulkAttendance,
   submitBulkParticipation,
+  createStudentsBulk,
   startSession as apiStartSession,
   endSession as apiEndSession,
   isAuthenticated
@@ -21,12 +22,18 @@ import {
   getParticipantsBySession,
   getEventsBySession,
   clearSessionData,
+  clearAllData,
   getSetting,
   setSetting
 } from '../utils/storage.js';
 import { now } from '../utils/date-utils.js';
+import { debug } from '../utils/debug-logger.js';
 
 console.log('[Background] Service worker started');
+// Use setTimeout to ensure storage is ready before logging
+setTimeout(() => {
+  debug.info('background', 'SERVICE_WORKER_START', 'Service worker initialized').catch(() => {});
+}, 100);
 
 // Meeting detection state
 let currentMeetingDetection = null; // { meeting_id, platform, tab_id }
@@ -37,13 +44,16 @@ let currentMeetingDetection = null; // { meeting_id, platform, tab_id }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('[Background] Message received:', message.type);
+  debug.receive('background', message.type, { data: message, sender: sender?.tab?.id });
 
   handleMessage(message, sender)
     .then(response => {
+      debug.success('background', `${message.type}_RESPONSE`, response);
       sendResponse({ success: true, data: response });
     })
     .catch(error => {
       console.error('[Background] Error handling message:', error);
+      debug.error('background', `${message.type}_ERROR`, { error: error.message, stack: error.stack });
       sendResponse({ success: false, error: error.message });
     });
 
@@ -77,6 +87,11 @@ async function handleMessage(message, sender) {
       
     case MESSAGE_TYPES.PLATFORM_SWITCH:
       return await handlePlatformSwitch(data);
+      
+    case MESSAGE_TYPES.MEETING_LEFT:
+      // Meeting left - automatically end session if one is active
+      console.log('[Background] Meeting left:', data.meetingId);
+      return await handleMeetingLeft(data);
 
     // ========== From Popup ==========
     case MESSAGE_TYPES.START_SESSION:
@@ -102,7 +117,9 @@ async function handleMessage(message, sender) {
 
     // ========== Other ==========
     case 'GET_CLASSES':
-      return await getClasses();
+      // getClasses() already returns the data array, so return it directly
+      const classes = await getClasses();
+      return classes;
 
     case 'GET_STUDENTS':
       return await getStudentsByClass(data.classId);
@@ -115,6 +132,13 @@ async function handleMessage(message, sender) {
 
     case 'IS_AUTHENTICATED':
       return await isAuthenticated();
+
+    case 'CLEAR_ALL_SESSIONS':
+      // For debugging/recovery - clears all local session data
+      await clearAllData();
+      sessionManager.activeSessionId = null;
+      console.log('[Background] All session data cleared');
+      return { cleared: true };
 
     default:
       throw new Error(`Unknown message type: ${type}`);
@@ -163,8 +187,7 @@ async function handleGetMeetingStatus() {
   try {
     const authenticated = await isAuthenticated();
     if (authenticated) {
-      const response = await getClasses();
-      classes = response.data || response.classes || [];
+      classes = await getClasses(); // Already returns array
     }
   } catch (error) {
     console.error('[Background] Failed to fetch classes:', error);
@@ -207,19 +230,55 @@ async function handlePlatformSwitch(data) {
   return { logged: true };
 }
 
+/**
+ * Handle meeting left - auto-end session if active
+ */
+async function handleMeetingLeft(data) {
+  const { meetingId } = data;
+  
+  // Check if there's an active session for this meeting
+  const session = await sessionManager.getActiveSession();
+  
+  if (!session) {
+    console.log('[Background] No active session to end');
+    // Clear meeting detection state if any
+    if (currentMeetingDetection?.meeting_id === meetingId) {
+      currentMeetingDetection = null;
+    }
+    return { acknowledged: true, sessionEnded: false };
+  }
+  
+  // Check if this is the same meeting
+  if (session.meeting_id !== meetingId) {
+    console.log('[Background] Meeting ID mismatch, not ending session');
+    return { acknowledged: true, sessionEnded: false };
+  }
+  
+  console.log('[Background] Auto-ending session due to meeting exit:', session.id);
+  
+  try {
+    // End the session (this handles all cleanup and sync)
+    await handleEndSession({ sessionId: session.id });
+    console.log('[Background] Session auto-ended successfully');
+    return { acknowledged: true, sessionEnded: true };
+  } catch (error) {
+    console.error('[Background] Failed to auto-end session:', error);
+    return { acknowledged: true, sessionEnded: false, error: error.message };
+  }
+}
+
 // ============================================================================
 // Session Control
 // ============================================================================
 
 async function handleStartSession(data) {
-  const { class_id, meeting_id, platform } = data;
+  const { class_id, meeting_id, platform, save_meeting_link } = data;
 
   try {
     // Fetch class name if not provided
     let className = data.class_name;
     if (!className) {
-      const classesResponse = await getClasses();
-      const classes = classesResponse.data || classesResponse.classes || [];
+      const classes = await getClasses(); // Already returns array
       const matchedClass = classes.find(c => c.id === class_id);
       className = matchedClass?.name || 'Unknown Class';
     }
@@ -232,27 +291,41 @@ async function handleStartSession(data) {
       meeting_platform: platform
     });
 
+    // Save meeting link to class if requested (for future auto-mapping)
+    if (save_meeting_link && meeting_id) {
+      try {
+        const { addClassLink } = await import('./api-client.js');
+        await addClassLink(class_id, {
+          link: meeting_id,
+          platform: platform || 'google-meet',
+          is_active: true
+        });
+        console.log('[Background] Meeting link saved to class');
+      } catch (linkError) {
+        // Don't fail the session start if link save fails
+        console.warn('[Background] Failed to save meeting link:', linkError);
+      }
+    }
+
     // Load student roster for matching
     const students = await getStudentsByClass(class_id);
     sessionManager.setStudentRoster(students);
 
-    // Update badge
-    updateBadge('active');
-
-    // Clear meeting detection state
-    currentMeetingDetection = null;
-
-    // Notify content script to start tracking
+    // Notify content script to start tracking BEFORE clearing detection state
     if (currentMeetingDetection?.tab_id) {
       try {
-        chrome.tabs.sendMessage(currentMeetingDetection.tab_id, {
+        await chrome.tabs.sendMessage(currentMeetingDetection.tab_id, {
           type: MESSAGE_TYPES.SESSION_STARTED,
           sessionId: session.id
         });
+        console.log('[Background] Notified content script to start tracking');
       } catch (error) {
         console.error('[Background] Failed to notify content script:', error);
       }
     }
+
+    // Clear meeting detection state AFTER notifying content script
+    currentMeetingDetection = null;
 
     console.log('[Background] Session started:', session.id);
     return session;
@@ -266,39 +339,58 @@ async function handleStartSession(data) {
 async function handleEndSession(data) {
   const { sessionId } = data;
 
-  // End session locally
-  const session = await sessionManager.endSession(sessionId);
-
-  // Aggregate and submit data
   try {
-    await submitSessionData(sessionId);
+    // Get session info before ending (need class_id)
+    const sessionInfo = await getSession(sessionId);
     
-    // Mark as synced
-    await updateSession(sessionId, {
-      status: SESSION_STATUS.SYNCED
-    });
+    // End session locally
+    const session = await sessionManager.endSession(sessionId);
 
-    // Clear local data
-    await clearSessionData(sessionId);
+    // Aggregate and submit data
+    try {
+      // First, add unmapped participants as students to the class
+      await addUnmappedParticipantsAsStudents(sessionId, sessionInfo?.class_id);
+      
+      await submitSessionData(sessionId);
+      
+      // Mark as synced
+      await updateSession(sessionId, {
+        status: SESSION_STATUS.SYNCED
+      });
 
-    console.log('[Background] Session ended and synced:', sessionId);
+      // Clear local data
+      await clearSessionData(sessionId);
+
+      console.log('[Background] Session ended and synced:', sessionId);
+    } catch (error) {
+      console.error('[Background] Failed to sync session data:', error);
+      
+      // Add to sync queue for retry
+      try {
+        const attendancePayload = await buildAttendancePayload(sessionId);
+        const participationPayload = await buildParticipationPayload(sessionId);
+
+        await syncQueueManager.enqueue('attendance', sessionId, attendancePayload);
+        await syncQueueManager.enqueue('participation', sessionId, participationPayload);
+
+        console.log('[Background] Session data queued for retry');
+      } catch (queueError) {
+        console.error('[Background] Failed to queue session data:', queueError);
+      }
+      
+      // Clear local data even if sync failed (data is in queue)
+      try {
+        await clearSessionData(sessionId);
+      } catch (clearError) {
+        console.error('[Background] Failed to clear session data:', clearError);
+      }
+    }
+
+    return session;
   } catch (error) {
-    console.error('[Background] Failed to sync session data:', error);
-    
-    // Add to sync queue for retry
-    const attendancePayload = await buildAttendancePayload(sessionId);
-    const participationPayload = await buildParticipationPayload(sessionId);
-
-    await syncQueueManager.enqueue('attendance', sessionId, attendancePayload);
-    await syncQueueManager.enqueue('participation', sessionId, participationPayload);
-
-    console.log('[Background] Session data queued for retry');
+    console.error('[Background] Failed to end session:', error);
+    throw error;
   }
-
-  // Update badge
-  updateBadge('idle');
-
-  return session;
 }
 
 async function handleGetSessionStatus() {
@@ -348,6 +440,73 @@ async function handleGetParticipants(data) {
 // ============================================================================
 // Data Submission
 // ============================================================================
+
+/**
+ * Add unmapped participants as students to the class
+ * This ensures all participants get tracked even if not in the roster
+ */
+async function addUnmappedParticipantsAsStudents(sessionId, classId) {
+  if (!classId) {
+    console.warn('[Background] No class ID for adding unmapped participants');
+    return;
+  }
+
+  try {
+    const participants = await getParticipantsBySession(sessionId);
+    
+    // Find unmapped participants
+    const unmappedParticipants = participants.filter(p => !p.matched_student_id);
+    
+    if (unmappedParticipants.length === 0) {
+      console.log('[Background] No unmapped participants to add');
+      return;
+    }
+
+    console.log('[Background] Adding', unmappedParticipants.length, 'unmapped participants as students');
+
+    // Convert participants to student format
+    const studentsToAdd = unmappedParticipants.map(p => ({
+      name: p.name,
+      email: p.email
+    }));
+
+    // Bulk create students in backend
+    const result = await createStudentsBulk(classId, studentsToAdd);
+    
+    console.log('[Background] Added students:', result?.added || 0, 'of', studentsToAdd.length);
+
+    // Update local participant records with new student IDs
+    // This allows their attendance and participation to be properly tracked
+    if (result?.students) {
+      for (const newStudent of result.students) {
+        // Find matching participant by name
+        const matchingParticipant = unmappedParticipants.find(p => {
+          const participantName = p.name.toLowerCase();
+          const studentName = `${newStudent.first_name} ${newStudent.last_name}`.toLowerCase();
+          return participantName.includes(newStudent.first_name.toLowerCase()) ||
+                 participantName.includes(newStudent.last_name.toLowerCase()) ||
+                 studentName.includes(participantName.split(' ')[0]);
+        });
+
+        if (matchingParticipant) {
+          // Import updateParticipant if not already done
+          const { updateParticipant } = await import('../utils/storage.js');
+          await updateParticipant(matchingParticipant.id, {
+            matched_student_id: newStudent.id,
+            matched_student_name: `${newStudent.first_name} ${newStudent.last_name}`,
+            match_confidence: 1.0,
+            match_method: 'auto_created'
+          });
+          console.log('[Background] Linked participant', matchingParticipant.name, 'to new student', newStudent.id);
+        }
+      }
+    }
+
+  } catch (error) {
+    console.error('[Background] Failed to add unmapped participants as students:', error);
+    // Don't throw - this is a nice-to-have feature, shouldn't block session end
+  }
+}
 
 async function submitSessionData(sessionId) {
   console.log('[Background] Submitting session data:', sessionId);
@@ -411,17 +570,6 @@ async function buildParticipationPayload(sessionId) {
 // ============================================================================
 // Badge Management
 // ============================================================================
-
-function updateBadge(status) {
-  if (status === 'active') {
-    chrome.action.setBadgeText({ text: '●' });
-    chrome.action.setBadgeBackgroundColor({ color: '#10b981' }); // Green
-    chrome.action.setTitle({ title: 'Engagium Tracker - Session Active' });
-  } else {
-    chrome.action.setBadgeText({ text: '' });
-    chrome.action.setTitle({ title: 'Engagium Tracker' });
-  }
-}
 
 // ============================================================================
 // Installation & Updates

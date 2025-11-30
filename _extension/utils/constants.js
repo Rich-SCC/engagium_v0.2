@@ -1,9 +1,8 @@
 // Shared constants for the extension
 
+// Only Google Meet is supported (Zoom browser has inaccessible DOM)
 export const PLATFORMS = {
-  ZOOM: 'zoom',
-  GOOGLE_MEET: 'google-meet',
-  MS_TEAMS: 'ms-teams'
+  GOOGLE_MEET: 'google-meet'
 };
 
 export const MESSAGE_TYPES = {
@@ -17,6 +16,7 @@ export const MESSAGE_TYPES = {
   HAND_RAISE: 'HAND_RAISE',
   MIC_TOGGLE: 'MIC_TOGGLE',
   CAMERA_TOGGLE: 'CAMERA_TOGGLE',
+  SCREEN_SHARE: 'SCREEN_SHARE',
   PLATFORM_SWITCH: 'PLATFORM_SWITCH',
   
   // From popup to background
@@ -70,18 +70,21 @@ export const STORAGE_KEYS = {
   LAST_SYNC: 'last_sync'
 };
 
-export const API_BASE_URL = 
-  process.env.NODE_ENV === 'production' 
-    ? 'https://engagium.app/api' 
-    : 'http://localhost:3001/api';
+// Detect dev vs production using chrome.runtime.getManifest()
+// Dev builds don't have 'update_url', production builds do
+const isDev = !('update_url' in chrome.runtime.getManifest());
+export const API_BASE_URL = isDev
+  ? 'http://localhost:3001/api' 
+  : 'https://engagium.app/api';
 
 export const DB_NAME = 'EngagiumExtension';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2; // Bumped for attendance_intervals store
 
 export const DB_STORES = {
   ACTIVE_SESSIONS: 'active_sessions',
   TRACKED_PARTICIPANTS: 'tracked_participants',
   PARTICIPATION_EVENTS: 'participation_events',
+  ATTENDANCE_INTERVALS: 'attendance_intervals', // NEW: Track join/leave intervals
   SYNC_QUEUE: 'sync_queue',
   SETTINGS: 'settings'
 };

@@ -130,7 +130,7 @@ class StudentTag {
       FROM students s
       JOIN student_tag_assignments sta ON s.id = sta.student_id
       WHERE sta.tag_id = $1
-      ORDER BY s.last_name, s.first_name
+      ORDER BY s.full_name
     `;
 
     const result = await db.query(query, [tagId]);

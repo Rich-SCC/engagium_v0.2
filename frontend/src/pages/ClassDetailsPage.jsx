@@ -41,7 +41,7 @@ const ClassDetailsPage = () => {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('last_name');
+  const [sortBy, setSortBy] = useState('full_name');
 
   // Debounce search term
   useEffect(() => {

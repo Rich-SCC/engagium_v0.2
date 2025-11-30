@@ -56,7 +56,7 @@ const getStudents = async (req, res) => {
     if (search || sortBy || tagIds || hasNotes !== undefined) {
       const options = {
         search,
-        sortBy: sortBy || 'last_name',
+        sortBy: sortBy || 'full_name',
         sortOrder: sortOrder || 'ASC',
         tagIds: tagIds ? (Array.isArray(tagIds) ? tagIds : [tagIds]) : [],
         hasNotes: hasNotes !== undefined ? hasNotes === 'true' : null,
@@ -86,7 +86,7 @@ const getStudents = async (req, res) => {
 const addStudent = async (req, res) => {
   try {
     const { classId } = req.params;
-    const { first_name, last_name, email, student_id } = req.body;
+    const { full_name, student_id } = req.body;
 
     // Verify class exists and user has access
     const classData = await Class.findById(classId);
@@ -105,18 +105,16 @@ const addStudent = async (req, res) => {
     }
 
     // Validation
-    if (!first_name || !last_name) {
+    if (!full_name) {
       return res.status(400).json({
         success: false,
-        error: 'First name and last name are required'
+        error: 'Full name is required'
       });
     }
 
     const student = await Student.create({
       class_id: classId,
-      first_name,
-      last_name,
-      email,
+      full_name,
       student_id
     });
 
@@ -145,7 +143,7 @@ const addStudent = async (req, res) => {
 const updateStudent = async (req, res) => {
   try {
     const { classId, studentId } = req.params;
-    const { first_name, last_name, email, student_id: new_student_id } = req.body;
+    const { full_name, student_id: new_student_id } = req.body;
 
     // Verify student exists and has access to class
     const student = await Student.findById(studentId);
@@ -173,17 +171,15 @@ const updateStudent = async (req, res) => {
     }
 
     // Validation
-    if (!first_name || !last_name) {
+    if (!full_name) {
       return res.status(400).json({
         success: false,
-        error: 'First name and last name are required'
+        error: 'Full name is required'
       });
     }
 
     const updatedStudent = await Student.update(studentId, {
-      first_name,
-      last_name,
-      email,
+      full_name,
       student_id: new_student_id
     });
 
@@ -303,12 +299,12 @@ const importStudents = async (req, res) => {
           const mappedRow = {};
           Object.keys(row).forEach(key => {
             const lowerKey = key.toLowerCase().trim();
-            if (lowerKey.includes('first') && lowerKey.includes('name')) {
+            if (lowerKey === 'full_name' || lowerKey === 'fullname' || lowerKey === 'name') {
+              mappedRow.full_name = row[key];
+            } else if (lowerKey.includes('first') && lowerKey.includes('name')) {
               mappedRow.first_name = row[key];
             } else if (lowerKey.includes('last') && lowerKey.includes('name')) {
               mappedRow.last_name = row[key];
-            } else if (lowerKey.includes('email')) {
-              mappedRow.email = row[key];
             } else if (lowerKey.includes('student') && lowerKey.includes('id')) {
               mappedRow.student_id = row[key];
             } else if (lowerKey === 'first name' || lowerKey === 'firstname') {
@@ -320,20 +316,30 @@ const importStudents = async (req, res) => {
             }
           });
 
+          // Build full_name from available columns
+          let fullName;
+          if (mappedRow.full_name) {
+            fullName = mappedRow.full_name.trim();
+          } else if (mappedRow.first_name && mappedRow.last_name) {
+            fullName = `${mappedRow.first_name.trim()} ${mappedRow.last_name.trim()}`;
+          } else if (mappedRow.first_name) {
+            fullName = mappedRow.first_name.trim();
+          } else if (mappedRow.last_name) {
+            fullName = mappedRow.last_name.trim();
+          }
+
           // Validate required fields
-          if (mappedRow.first_name && mappedRow.last_name) {
+          if (fullName) {
             students.push({
               class_id: classId,
-              first_name: mappedRow.first_name.trim(),
-              last_name: mappedRow.last_name.trim(),
-              email: mappedRow.email ? mappedRow.email.trim() : null,
+              full_name: fullName,
               student_id: mappedRow.student_id ? mappedRow.student_id.trim() : null
             });
           } else {
             errors.push({
               row: students.length + errors.length + 1,
               data: row,
-              error: 'Missing required fields: first_name and last_name'
+              error: 'Missing required field: full_name (or first_name/last_name)'
             });
           }
         })
@@ -527,7 +533,7 @@ const getStudentDetails = async (req, res) => {
 const checkDuplicates = async (req, res) => {
   try {
     const { classId } = req.params;
-    const { email, student_id } = req.query;
+    const { full_name, student_id } = req.query;
 
     // Verify class exists and user has access
     const classData = await Class.findById(classId);
@@ -545,7 +551,7 @@ const checkDuplicates = async (req, res) => {
       });
     }
 
-    const duplicates = await Student.findDuplicates(classId, email, student_id);
+    const duplicates = await Student.findDuplicates(classId, full_name, student_id);
 
     res.json({
       success: true,
@@ -684,6 +690,138 @@ const bulkUpdateStudents = async (req, res) => {
   }
 };
 
+// Bulk add students (for extension - unmapped participants)
+const bulkAddStudents = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { students } = req.body;
+
+    if (!students || !Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'students array is required'
+      });
+    }
+
+    // Verify class exists and user has access
+    const classData = await Class.findById(classId);
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Map participants to students using full_name
+    const studentsData = students.map(s => {
+      let fullName;
+      
+      if (s.full_name) {
+        // Already has full_name
+        fullName = s.full_name;
+      } else if (s.name) {
+        // Use name field directly as full_name (Google Meet display name)
+        fullName = s.name.trim();
+      } else if (s.first_name && s.last_name) {
+        // Legacy format - combine into full_name
+        fullName = `${s.first_name} ${s.last_name}`.trim();
+      } else {
+        fullName = 'Unknown Participant';
+      }
+      
+      return {
+        class_id: classId,
+        full_name: fullName,
+        student_id: s.student_id || null
+      };
+    });
+
+    // Bulk create students, skipping duplicates
+    const results = await Student.bulkCreate(studentsData);
+
+    const successful = results.filter(r => r.success);
+    const failed = results.filter(r => !r.success);
+
+    res.status(201).json({
+      success: true,
+      data: {
+        added: successful.length,
+        failed: failed.length,
+        students: successful.map(r => r.data),
+        errors: failed
+      }
+    });
+  } catch (error) {
+    console.error('Bulk add students error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Create student from unmatched participant (quick add to roster)
+const createFromParticipant = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { participant_name, session_id } = req.body;
+
+    if (!participant_name) {
+      return res.status(400).json({
+        success: false,
+        error: 'participant_name is required'
+      });
+    }
+
+    // Verify class exists and user has access
+    const classData = await Class.findById(classId);
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Create student from participant name
+    const result = await Student.createFromParticipant(classId, participant_name);
+
+    // If session_id provided, retroactively link attendance intervals/records
+    if (session_id && result.created) {
+      const AttendanceInterval = require('../models/AttendanceInterval');
+      await AttendanceInterval.linkToStudent(session_id, participant_name, result.student.id);
+    }
+
+    res.status(result.created ? 201 : 200).json({
+      success: true,
+      data: result.student,
+      created: result.created,
+      message: result.created 
+        ? 'Student created and added to roster' 
+        : 'Student already exists in roster'
+    });
+  } catch (error) {
+    console.error('Create from participant error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   getStudents,
   getStudentDetails,
@@ -696,5 +834,7 @@ module.exports = {
   checkDuplicates,
   mergeStudents,
   bulkUpdateStudents,
+  bulkAddStudents,
+  createFromParticipant,
   upload
 };

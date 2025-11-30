@@ -157,6 +157,19 @@ class Session {
     return parseInt(result.rows[0].count);
   }
 
+  static async findActiveByInstructorId(instructorId) {
+    const query = `
+      SELECT s.*, c.name as class_name, c.subject
+      FROM sessions s
+      JOIN classes c ON s.class_id = c.id
+      WHERE c.instructor_id = $1 AND s.status = 'active'
+      ORDER BY s.started_at DESC
+    `;
+
+    const result = await db.query(query, [instructorId]);
+    return result.rows;
+  }
+
   static async getSessionStats(sessionId) {
     const query = `
       SELECT
@@ -186,15 +199,15 @@ class Session {
           SELECT json_agg(json_build_object(
             'id', ar.id,
             'student_id', ar.student_id,
-            'first_name', st.first_name,
-            'last_name', st.last_name,
-            'email', st.email,
+            'participant_name', ar.participant_name,
+            'full_name', st.full_name,
             'status', ar.status,
-            'joined_at', ar.joined_at,
-            'left_at', ar.left_at
+            'first_joined_at', ar.first_joined_at,
+            'last_left_at', ar.last_left_at,
+            'total_duration_minutes', ar.total_duration_minutes
           ))
           FROM attendance_records ar
-          JOIN students st ON ar.student_id = st.id
+          LEFT JOIN students st ON ar.student_id = st.id
           WHERE ar.session_id = s.id
         ) as attendance
       FROM sessions s

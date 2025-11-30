@@ -25,7 +25,7 @@ class ParticipationLog {
     const { limit = 100, offset = 0, interaction_type = null } = options;
 
     let query = `
-      SELECT pl.*, s.first_name, s.last_name, s.student_id
+      SELECT pl.*, s.full_name, s.student_id
       FROM participation_logs pl
       JOIN students s ON pl.student_id = s.id
       WHERE pl.session_id = $1
@@ -55,7 +55,7 @@ class ParticipationLog {
 
     // Get paginated results
     const dataQuery = `
-      SELECT pl.*, s.first_name, s.last_name, s.student_id
+      SELECT pl.*, s.full_name, s.student_id
       FROM participation_logs pl
       JOIN students s ON pl.student_id = s.id
       WHERE pl.session_id = $1
@@ -114,8 +114,7 @@ class ParticipationLog {
     const query = `
       SELECT
         s.id as student_id,
-        s.first_name,
-        s.last_name,
+        s.full_name,
         s.student_id,
         COUNT(pl.id) as total_interactions,
         COUNT(CASE WHEN pl.interaction_type = 'manual_entry' THEN 1 END) as manual_entries,
@@ -125,8 +124,8 @@ class ParticipationLog {
       FROM students s
       LEFT JOIN participation_logs pl ON s.id = pl.student_id AND pl.session_id = $1
       WHERE s.class_id = (SELECT class_id FROM sessions WHERE id = $1)
-      GROUP BY s.id, s.first_name, s.last_name, s.student_id
-      ORDER BY s.last_name, s.first_name
+      GROUP BY s.id, s.full_name, s.student_id
+      ORDER BY s.full_name
     `;
 
     const result = await db.query(query, [sessionId]);
@@ -141,15 +140,20 @@ class ParticipationLog {
 
   static async getRecentActivity(sessionId, minutes = 5) {
     const query = `
-      SELECT pl.*, s.first_name, s.last_name, s.student_id
+      SELECT 
+        pl.*, 
+        s.full_name, 
+        s.student_id,
+        s.full_name as student_name
       FROM participation_logs pl
       JOIN students s ON pl.student_id = s.id
       WHERE pl.session_id = $1
-        AND pl.timestamp >= NOW() - INTERVAL '${minutes} minutes'
+        AND pl.timestamp >= NOW() - INTERVAL '1 minute' * $2
       ORDER BY pl.timestamp DESC
+      LIMIT 100
     `;
 
-    const result = await db.query(query, [sessionId]);
+    const result = await db.query(query, [sessionId, minutes]);
     return result.rows;
   }
 

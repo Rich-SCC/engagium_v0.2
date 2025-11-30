@@ -9,7 +9,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const ActiveSessionCard = () => {
-  const { activeSessions, isConnected } = useWebSocket();
+  const { activeSessions, isConnected, isLoadingActiveSessions } = useWebSocket();
   const [durations, setDurations] = useState({});
 
   // Update session durations every second
@@ -69,7 +69,17 @@ const ActiveSessionCard = () => {
 
       {/* Content */}
       <div className="p-6">
-        {activeSessions.length === 0 ? (
+        {isLoadingActiveSessions ? (
+          <div className="text-center py-12">
+            <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center animate-pulse">
+              <SignalIcon className="w-8 h-8 text-gray-400" />
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Loading sessions...</h3>
+            <p className="text-sm text-gray-500">
+              Checking for active sessions
+            </p>
+          </div>
+        ) : activeSessions.length === 0 ? (
           <div className="text-center py-12">
             <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
               <SignalIcon className="w-8 h-8 text-gray-400" />

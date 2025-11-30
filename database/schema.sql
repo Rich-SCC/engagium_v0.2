@@ -1,3 +1,4 @@
+-- Active: 1763973062283@@127.0.0.1@5432@engagium
 -- Engagium Database Schema
 -- PostgreSQL Schema for Phase 1 MVP
 -- Migration-ready: Can be run multiple times safely with IF NOT EXISTS
@@ -13,13 +14,13 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE session_status AS ENUM ('active', 'ended');
+    CREATE TYPE session_status AS ENUM ('scheduled', 'active', 'ended');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE interaction_type AS ENUM ('manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'platform_switch');
+    CREATE TYPE interaction_type AS ENUM ('manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'platform_switch', 'hand_raise');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
@@ -57,9 +58,7 @@ CREATE TABLE IF NOT EXISTS classes (
 CREATE TABLE IF NOT EXISTS students (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-    first_name VARCHAR(100) NOT NULL,
-    last_name VARCHAR(100) NOT NULL,
-    email VARCHAR(255),
+    full_name VARCHAR(255) NOT NULL,
     student_id VARCHAR(50),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(class_id, student_id) -- Student ID should be unique within a class
@@ -73,8 +72,38 @@ CREATE TABLE IF NOT EXISTS sessions (
     meeting_link VARCHAR(500),
     started_at TIMESTAMP WITH TIME ZONE,
     ended_at TIMESTAMP WITH TIME ZONE,
-    status session_status DEFAULT 'active' NOT NULL,
+    status session_status DEFAULT 'scheduled' NOT NULL,
+    session_date DATE,
+    session_time TIME,
+    topic VARCHAR(255),
+    description TEXT,
     additional_data JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Attendance records table (final status per student per session)
+CREATE TABLE IF NOT EXISTS attendance_records (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    student_id UUID REFERENCES students(id) ON DELETE SET NULL,
+    participant_name VARCHAR(255) NOT NULL,
+    status VARCHAR(20) DEFAULT 'present' CHECK (status IN ('present', 'absent', 'late')),
+    total_duration_minutes INTEGER DEFAULT 0,
+    first_joined_at TIMESTAMP WITH TIME ZONE,
+    last_left_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(session_id, participant_name)
+);
+
+-- Attendance intervals table (tracks each join/leave for duration calculation)
+CREATE TABLE IF NOT EXISTS attendance_intervals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    student_id UUID REFERENCES students(id) ON DELETE SET NULL,
+    participant_name VARCHAR(255) NOT NULL,
+    joined_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    left_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -172,6 +201,12 @@ CREATE INDEX IF NOT EXISTS idx_student_tag_assignments_tag_id ON student_tag_ass
 CREATE INDEX IF NOT EXISTS idx_student_notes_student_id ON student_notes(student_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_session_id ON attendance_records(session_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_student_id ON attendance_records(student_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_participant_name ON attendance_records(participant_name);
+CREATE INDEX IF NOT EXISTS idx_attendance_intervals_session_id ON attendance_intervals(session_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_intervals_student_id ON attendance_intervals(student_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_intervals_participant_name ON attendance_intervals(participant_name);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -193,4 +228,8 @@ CREATE TRIGGER update_classes_updated_at BEFORE UPDATE ON classes
 
 DROP TRIGGER IF EXISTS update_session_links_updated_at ON session_links;
 CREATE TRIGGER update_session_links_updated_at BEFORE UPDATE ON session_links
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_attendance_records_updated_at ON attendance_records;
+CREATE TRIGGER update_attendance_records_updated_at BEFORE UPDATE ON attendance_records
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

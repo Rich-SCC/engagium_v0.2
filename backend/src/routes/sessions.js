@@ -3,6 +3,7 @@ const { instructorAuth } = require('../middleware/auth');
 const { flexibleAuth } = require('../middleware/flexibleAuth');
 const {
   getSessions,
+  getActiveSessions,
   getSession,
   updateSession,
   endSession,
@@ -17,7 +18,12 @@ const {
   getCalendarData,
   getClassSessions,
   startSessionFromMeeting,
-  endSessionWithTimestamp
+  endSessionWithTimestamp,
+  handleLiveEvent,
+  recordParticipantJoin,
+  recordParticipantLeave,
+  getSessionAttendanceWithIntervals,
+  linkParticipantToStudent
 } = require('../controllers/sessionController');
 
 const router = express.Router();
@@ -26,12 +32,20 @@ const router = express.Router();
 router.get('/stats', instructorAuth, getSessionStats);
 router.get('/date-range', instructorAuth, getSessionsByDateRange);
 router.get('/calendar', instructorAuth, getCalendarData);
+router.get('/active', instructorAuth, getActiveSessions);
 
 // Routes that work with both web app (JWT) and extension (extension token)
 router.post('/start-from-meeting', flexibleAuth, startSessionFromMeeting);
 router.put('/:id/end-with-timestamp', flexibleAuth, endSessionWithTimestamp);
+router.post('/live-event', flexibleAuth, handleLiveEvent); // Real-time events from extension
 router.get('/:id', flexibleAuth, getSession);
 router.get('/:id/students', flexibleAuth, getSessionStudents);
+
+// Attendance interval tracking (extension-compatible)
+router.post('/:id/attendance/join', flexibleAuth, recordParticipantJoin);
+router.post('/:id/attendance/leave', flexibleAuth, recordParticipantLeave);
+router.get('/:id/attendance/full', flexibleAuth, getSessionAttendanceWithIntervals);
+router.post('/:id/attendance/link', flexibleAuth, linkParticipantToStudent);
 
 // All other routes require instructor authentication (web app only)
 router.use(instructorAuth);

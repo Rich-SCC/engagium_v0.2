@@ -82,15 +82,14 @@ const StudentMergeModal = ({ isOpen, onClose, classId, students }) => {
                 <option value="">Select student to keep...</option>
                 {students.map((student) => (
                   <option key={student.id} value={student.id}>
-                    {student.last_name}, {student.first_name}
+                    {student.full_name}
                     {student.student_id && ` (${student.student_id})`}
                   </option>
                 ))}
               </select>
               {keepStudent && (
                 <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
-                  <p><strong>Name:</strong> {keepStudent.first_name} {keepStudent.last_name}</p>
-                  {keepStudent.email && <p><strong>Email:</strong> {keepStudent.email}</p>}
+                  <p><strong>Name:</strong> {keepStudent.full_name}</p>
                   {keepStudent.student_id && <p><strong>ID:</strong> {keepStudent.student_id}</p>}
                   <p className="text-green-700 mt-2">✓ This record will be kept</p>
                 </div>
@@ -114,15 +113,14 @@ const StudentMergeModal = ({ isOpen, onClose, classId, students }) => {
                     value={student.id}
                     disabled={student.id === keepStudentId}
                   >
-                    {student.last_name}, {student.first_name}
+                    {student.full_name}
                     {student.student_id && ` (${student.student_id})`}
                   </option>
                 ))}
               </select>
               {mergeStudent && (
                 <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm">
-                  <p><strong>Name:</strong> {mergeStudent.first_name} {mergeStudent.last_name}</p>
-                  {mergeStudent.email && <p><strong>Email:</strong> {mergeStudent.email}</p>}
+                  <p><strong>Name:</strong> {mergeStudent.full_name}</p>
                   {mergeStudent.student_id && <p><strong>ID:</strong> {mergeStudent.student_id}</p>}
                   <p className="text-red-700 mt-2">✗ This record will be deleted</p>
                 </div>
@@ -135,10 +133,10 @@ const StudentMergeModal = ({ isOpen, onClose, classId, students }) => {
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <h4 className="font-semibold text-blue-900 mb-2">What will happen:</h4>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• All participation logs from {mergeStudent.first_name} will be transferred to {keepStudent.first_name}</li>
-                <li>• All notes about {mergeStudent.first_name} will be transferred to {keepStudent.first_name}</li>
-                <li>• All tags assigned to {mergeStudent.first_name} will be merged with {keepStudent.first_name}'s tags</li>
-                <li>• The record for {mergeStudent.first_name} {mergeStudent.last_name} will be permanently deleted</li>
+                <li>• All participation logs from {mergeStudent.full_name} will be transferred to {keepStudent.full_name}</li>
+                <li>• All notes about {mergeStudent.full_name} will be transferred to {keepStudent.full_name}</li>
+                <li>• All tags assigned to {mergeStudent.full_name} will be merged with {keepStudent.full_name}'s tags</li>
+                <li>• The record for {mergeStudent.full_name} will be permanently deleted</li>
               </ul>
             </div>
           )}

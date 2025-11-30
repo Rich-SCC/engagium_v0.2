@@ -49,7 +49,8 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     // Handle 401 unauthorized - token expired or invalid
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Skip for login endpoint as 401 there means invalid credentials, not expired token
+    if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.url.includes('/auth/login')) {
       if (isRefreshing) {
         // If we're already refreshing, queue this request
         return new Promise((resolve, reject) => {
@@ -209,6 +210,7 @@ export const classesAPI = {
 // Sessions API
 export const sessionsAPI = {
   getAll: () => api.get('/sessions'),
+  getActive: () => api.get('/sessions/active'),
   getStats: () => api.get('/sessions/stats'),
   getById: (id) => api.get(`/sessions/${id}`),
   getWithAttendance: (id) => api.get(`/sessions/${id}/full`),
@@ -236,6 +238,13 @@ export const sessionsAPI = {
     api.post(`/sessions/${id}/attendance/bulk`, { attendance }),
   getAttendance: (id) => api.get(`/sessions/${id}/attendance`),
   getAttendanceStats: (id) => api.get(`/sessions/${id}/attendance/stats`),
+};
+
+// Students API
+export const studentsAPI = {
+  // Create student from unmatched participant
+  createFromParticipant: (classId, participantName) =>
+    api.post(`/classes/${classId}/students/from-participant`, { participant_name: participantName }),
 };
 
 // Participation API

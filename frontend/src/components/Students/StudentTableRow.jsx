@@ -33,7 +33,7 @@ const StudentTableRow = ({
       <td className="px-6 py-4">
         <div>
           <div className="font-medium text-gray-900">
-            {student.first_name} {student.last_name}
+            {student.full_name}
           </div>
           {/* Tags */}
           {student.tag_names && student.tag_names.length > 0 && (
@@ -53,9 +53,6 @@ const StudentTableRow = ({
             </div>
           )}
         </div>
-      </td>
-      <td className="px-6 py-4 text-sm text-gray-600">
-        {student.email || '-'}
       </td>
       <td className="px-6 py-4 text-sm text-gray-600">
         {student.student_id || '-'}

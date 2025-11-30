@@ -6,7 +6,8 @@ const activeSessions = new Map(); // sessionId -> Set of socket ids
 const socketSessions = new Map(); // socketId -> session data
 
 const socketHandler = (io) => {
-  // Store io instance on app for controllers to access
+  // Store io instance globally and on app for controllers to access
+  global.io = io;
   if (global.app) {
     global.app.set('io', io);
   }
@@ -35,7 +36,21 @@ const socketHandler = (io) => {
   });
 
   io.on('connection', (socket) => {
-    console.log(`🔌 User connected: ${socket.user.email} (${socket.id})`);
+    console.log(`\n🔌 ========================================`);
+    console.log(`🔌 User connected: ${socket.user.email}`);
+    console.log(`🔌 Socket ID: ${socket.id}`);
+    console.log(`🔌 ========================================\n`);
+
+    // Join instructor-specific room (for receiving events from extension)
+    socket.on('join_instructor_room', (data) => {
+      const roomName = `instructor_${socket.user.id}`;
+      socket.join(roomName);
+      console.log(`📱 ========================================`);
+      console.log(`📱 User ${socket.user.email} joined instructor room`);
+      console.log(`📱 Room Name: ${roomName}`);
+      console.log(`📱 Room Members: ${io.sockets.adapter.rooms.get(roomName)?.size || 0}`);
+      console.log(`📱 ========================================\n`);
+    });
 
     // Join session room
     socket.on('join:session', async (data) => {

@@ -3,7 +3,7 @@
  * Settings and configuration for the extension
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { STORAGE_KEYS } from '../utils/constants.js';
 import './options.css';
@@ -18,6 +18,7 @@ function OptionsApp() {
   const [autoStart, setAutoStart] = useState(false);
   const [matchThreshold, setMatchThreshold] = useState(0.7);
   const [isLoading, setIsLoading] = useState(true);
+  const [isVerifyingAuth, setIsVerifyingAuth] = useState(false);
   const [message, setMessage] = useState(null);
 
   // Load settings on mount
@@ -39,6 +40,7 @@ function OptionsApp() {
 
   async function loadSettings() {
     try {
+      setIsVerifyingAuth(true);
       const storage = await chrome.storage.local.get([
         STORAGE_KEYS.AUTH_TOKEN,
         STORAGE_KEYS.USER_INFO,
@@ -49,23 +51,61 @@ function OptionsApp() {
 
       if (storage[STORAGE_KEYS.AUTH_TOKEN]) {
         setAuthToken(storage[STORAGE_KEYS.AUTH_TOKEN]);
-        setIsAuthenticated(true);
         
-        if (storage[STORAGE_KEYS.USER_INFO]) {
-          setUserInfo(storage[STORAGE_KEYS.USER_INFO]);
+        // Verify token is still valid
+        try {
+          const isDev = !('update_url' in chrome.runtime.getManifest());
+          const baseUrl = isDev ? 'http://localhost:3001' : 'https://engagium.app';
+          
+          const response = await fetch(`${baseUrl}/api/extension-tokens/verify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ token: storage[STORAGE_KEYS.AUTH_TOKEN] })
+          });
+
+          const data = await response.json();
+
+          if (data.success) {
+            setIsAuthenticated(true);
+            
+            if (data.data?.user) {
+              setUserInfo(data.data.user);
+              // Update stored user info if it changed
+              await chrome.storage.local.set({
+                [STORAGE_KEYS.USER_INFO]: data.data.user
+              });
+            } else if (storage[STORAGE_KEYS.USER_INFO]) {
+              setUserInfo(storage[STORAGE_KEYS.USER_INFO]);
+            }
+            
+            // Load classes
+            await loadClasses();
+          } else {
+            // Token invalid, clear it
+            setIsAuthenticated(false);
+            await chrome.storage.local.remove([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.USER_INFO]);
+          }
+        } catch (error) {
+          console.error('Error verifying token:', error);
+          // Keep existing auth state on error (might be offline)
+          setIsAuthenticated(true);
+          if (storage[STORAGE_KEYS.USER_INFO]) {
+            setUserInfo(storage[STORAGE_KEYS.USER_INFO]);
+          }
         }
-        
-        // Load classes
-        await loadClasses();
       }
 
       setMeetingMappings(storage[STORAGE_KEYS.MEETING_MAPPINGS] || {});
       setAutoStart(storage[STORAGE_KEYS.AUTO_START] || false);
       setMatchThreshold(storage[STORAGE_KEYS.MATCH_THRESHOLD] || 0.7);
 
+      setIsVerifyingAuth(false);
       setIsLoading(false);
     } catch (error) {
       console.error('Error loading settings:', error);
+      setIsVerifyingAuth(false);
       setIsLoading(false);
     }
   }
@@ -74,6 +114,7 @@ function OptionsApp() {
     try {
       const response = await sendMessage('GET_CLASSES');
       if (response.success && response.data) {
+        // response.data is already the classes array
         setClasses(response.data);
       }
     } catch (error) {
@@ -265,6 +306,12 @@ function OptionsApp() {
           >
             Preferences
           </button>
+          <button 
+            className={`tab ${activeTab === 'debug' ? 'active' : ''}`}
+            onClick={() => setActiveTab('debug')}
+          >
+            🔧 Debug
+          </button>
         </div>
 
         {/* Tab Content */}
@@ -277,7 +324,14 @@ function OptionsApp() {
                 Connect your Engagium account to enable data syncing.
               </p>
 
-              {!isAuthenticated ? (
+              {isVerifyingAuth ? (
+                <div className="card">
+                  <div className="loading" style={{padding: '2rem'}}>
+                    <div className="spinner"></div>
+                    <p>Verifying authentication...</p>
+                  </div>
+                </div>
+              ) : !isAuthenticated ? (
                 <div className="card">
                   <h3>Connect with Engagium</h3>
                   <p className="help-text">
@@ -432,6 +486,11 @@ function OptionsApp() {
               </div>
             </div>
           )}
+
+          {/* Debug Tab */}
+          {activeTab === 'debug' && (
+            <DebugDashboard />
+          )}
         </div>
       </div>
     </div>
@@ -476,7 +535,7 @@ function MappingForm({ classes, onAdd }) {
           <option value="">Select a class...</option>
           {classes.map(c => (
             <option key={c.id} value={c.id}>
-              {c.name} ({c.code})
+              {c.name}{c.section ? ` (${c.section})` : ''}
             </option>
           ))}
         </select>
@@ -486,6 +545,477 @@ function MappingForm({ classes, onAdd }) {
       </button>
     </form>
   );
+}
+
+// ============================================================================
+// Debug Dashboard Component
+// ============================================================================
+
+function DebugDashboard() {
+  const [logs, setLogs] = useState([]);
+  const [sessionStatus, setSessionStatus] = useState(null);
+  const [meetingStatus, setMeetingStatus] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Source exclusion filters
+  const [excludeSources, setExcludeSources] = useState({
+    background: false,
+    content: false,
+    socket: false,
+    api: false
+  });
+
+  // Load logs from storage
+  const loadLogs = useCallback(async () => {
+    try {
+      const result = await chrome.storage.local.get('debug_logs');
+      setLogs(result.debug_logs || []);
+    } catch (error) {
+      console.error('Failed to load debug logs:', error);
+    }
+  }, []);
+
+  // Load session status
+  const loadStatus = useCallback(async () => {
+    try {
+      const sessionResponse = await sendMessageAsync('GET_SESSION_STATUS');
+      // Response is wrapped in { success: true, data: {...} }
+      setSessionStatus(sessionResponse?.data || sessionResponse);
+      
+      const meetingResponse = await sendMessageAsync('GET_MEETING_STATUS');
+      setMeetingStatus(meetingResponse?.data || meetingResponse);
+    } catch (error) {
+      console.error('Failed to load status:', error);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    Promise.all([loadLogs(), loadStatus()]).finally(() => setIsLoading(false));
+  }, [loadLogs, loadStatus]);
+
+  // Listen for new debug logs
+  useEffect(() => {
+    const handleMessage = (message) => {
+      if (message.type === 'DEBUG_LOG_ADDED' && autoRefresh) {
+        setLogs(prev => [message.entry, ...prev].slice(0, 500));
+      }
+    };
+    
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, [autoRefresh]);
+
+  // Auto-refresh status
+  useEffect(() => {
+    if (!autoRefresh) return;
+    
+    const interval = setInterval(() => {
+      loadStatus();
+    }, 2000);
+    
+    return () => clearInterval(interval);
+  }, [autoRefresh, loadStatus]);
+
+  // Clear logs
+  const handleClearLogs = async () => {
+    await chrome.storage.local.set({ debug_logs: [] });
+    setLogs([]);
+  };
+
+  // Export logs
+  const handleExportLogs = () => {
+    const data = JSON.stringify(logs, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `engagium-debug-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Test functions
+  const handleTestEvent = async (eventType) => {
+    try {
+      const response = await sendMessageAsync(eventType);
+      console.log('Test response:', response);
+    } catch (error) {
+      console.error('Test failed:', error);
+    }
+  };
+  
+  // Toggle source exclusion
+  const toggleExcludeSource = (source) => {
+    setExcludeSources(prev => ({
+      ...prev,
+      [source]: !prev[source]
+    }));
+  };
+
+  // Filter logs with exclusions
+  const filteredLogs = logs.filter(log => {
+    // Apply source exclusions first
+    if (excludeSources[log.source]) return false;
+    
+    // Then apply type/source filter
+    if (filter === 'all') return true;
+    return log.source === filter || log.type === filter;
+  });
+
+  const getLogStyle = (type) => {
+    switch (type) {
+      case 'SEND': return { color: '#3b82f6', bg: '#eff6ff' };
+      case 'RECEIVE': return { color: '#10b981', bg: '#ecfdf5' };
+      case 'ERROR': return { color: '#ef4444', bg: '#fef2f2' };
+      case 'SUCCESS': return { color: '#22c55e', bg: '#f0fdf4' };
+      case 'WARN': return { color: '#f59e0b', bg: '#fffbeb' };
+      case 'EVENT': return { color: '#8b5cf6', bg: '#f5f3ff' };
+      default: return { color: '#6b7280', bg: '#f9fafb' };
+    }
+  };
+
+  const formatTimestamp = (ts) => {
+    const date = new Date(ts);
+    return date.toLocaleTimeString('en-US', { 
+      hour12: false, 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      fractionalSecondDigits: 3
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="section">
+        <div className="loading">
+          <div className="spinner"></div>
+          <p>Loading debug data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="section">
+      <h2>🔧 Debug Dashboard</h2>
+      <p className="section-description">
+        Real-time monitoring of extension events and data flow.
+      </p>
+
+      {/* Status Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+        {/* Session Status */}
+        <div className="card" style={{ padding: '1rem' }}>
+          <h4 style={{ margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>📊 Session Status</span>
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: '12px',
+              fontSize: '0.75rem',
+              background: sessionStatus?.status === 'active' ? '#dcfce7' : '#f3f4f6',
+              color: sessionStatus?.status === 'active' ? '#166534' : '#6b7280'
+            }}>
+              {sessionStatus?.status || 'idle'}
+            </span>
+          </h4>
+          {sessionStatus?.session ? (
+            <div style={{ fontSize: '0.85rem', color: '#4b5563' }}>
+              <div><strong>Session ID:</strong> {sessionStatus.session.id?.slice(0, 8)}...</div>
+              <div><strong>Class:</strong> {sessionStatus.session.class_name}</div>
+              <div><strong>Participants:</strong> {sessionStatus.session.participant_count || 0}</div>
+              <div><strong>Matched:</strong> {sessionStatus.session.matched_count || 0}</div>
+              <div><strong>Events:</strong> {sessionStatus.session.event_count || 0}</div>
+            </div>
+          ) : (
+            <p style={{ margin: 0, color: '#9ca3af', fontSize: '0.85rem' }}>No active session</p>
+          )}
+        </div>
+
+        {/* Meeting Detection */}
+        <div className="card" style={{ padding: '1rem' }}>
+          <h4 style={{ margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>🎥 Meeting Detection</span>
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: '12px',
+              fontSize: '0.75rem',
+              background: meetingStatus?.meeting ? '#dbeafe' : '#f3f4f6',
+              color: meetingStatus?.meeting ? '#1e40af' : '#6b7280'
+            }}>
+              {meetingStatus?.meeting ? 'detected' : 'none'}
+            </span>
+          </h4>
+          {meetingStatus?.meeting ? (
+            <div style={{ fontSize: '0.85rem', color: '#4b5563' }}>
+              <div><strong>Meeting ID:</strong> {meetingStatus.meeting.meeting_id}</div>
+              <div><strong>Platform:</strong> {meetingStatus.meeting.platform}</div>
+              <div><strong>Tab ID:</strong> {meetingStatus.meeting.tab_id}</div>
+              {meetingStatus.meeting.mapped_class_name && (
+                <div><strong>Mapped to:</strong> {meetingStatus.meeting.mapped_class_name}</div>
+              )}
+            </div>
+          ) : (
+            <p style={{ margin: 0, color: '#9ca3af', fontSize: '0.85rem' }}>No meeting detected</p>
+          )}
+        </div>
+
+        {/* Quick Stats */}
+        <div className="card" style={{ padding: '1rem' }}>
+          <h4 style={{ margin: '0 0 0.5rem 0' }}>📈 Log Stats</h4>
+          <div style={{ fontSize: '0.85rem', color: '#4b5563' }}>
+            <div><strong>Total Logs:</strong> {logs.length}</div>
+            <div><strong>Errors:</strong> {logs.filter(l => l.type === 'ERROR').length}</div>
+            <div><strong>Sends:</strong> {logs.filter(l => l.type === 'SEND').length}</div>
+            <div><strong>Receives:</strong> {logs.filter(l => l.type === 'RECEIVE').length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Test Actions */}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <h4 style={{ margin: '0 0 0.75rem 0' }}>🧪 Test Actions</h4>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <button 
+            className="button button-secondary" 
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+            onClick={() => handleTestEvent('GET_SESSION_STATUS')}
+          >
+            Get Session Status
+          </button>
+          <button 
+            className="button button-secondary" 
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+            onClick={() => handleTestEvent('GET_MEETING_STATUS')}
+          >
+            Get Meeting Status
+          </button>
+          <button 
+            className="button button-secondary" 
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+            onClick={() => handleTestEvent('GET_SYNC_STATUS')}
+          >
+            Get Sync Queue
+          </button>
+          <button 
+            className="button button-secondary" 
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+            onClick={() => handleTestEvent('IS_AUTHENTICATED')}
+          >
+            Check Auth
+          </button>
+          <button 
+            className="button" 
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem', background: '#ef4444', color: 'white' }}
+            onClick={() => handleTestEvent('CLEAR_ALL_SESSIONS')}
+          >
+            Clear All Sessions
+          </button>
+        </div>
+      </div>
+
+      {/* Log Controls */}
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h4 style={{ margin: 0 }}>📋 Event Logs</h4>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85rem' }}>
+              <input 
+                type="checkbox" 
+                checked={autoRefresh} 
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+              />
+              Auto-refresh
+            </label>
+            <select 
+              value={filter} 
+              onChange={(e) => setFilter(e.target.value)}
+              style={{ padding: '0.3rem 0.5rem', borderRadius: '4px', border: '1px solid #ddd', fontSize: '0.85rem' }}
+            >
+              <option value="all">All</option>
+              <optgroup label="By Type">
+                <option value="SEND">📤 Send</option>
+                <option value="RECEIVE">📥 Receive</option>
+                <option value="ERROR">❌ Error</option>
+                <option value="SUCCESS">✅ Success</option>
+                <option value="EVENT">🎯 Event</option>
+              </optgroup>
+              <optgroup label="By Source">
+                <option value="content">Content Script</option>
+                <option value="background">Background</option>
+                <option value="socket">Socket</option>
+                <option value="api">API</option>
+              </optgroup>
+            </select>
+            <button 
+              className="button button-secondary" 
+              style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+              onClick={loadLogs}
+            >
+              Refresh
+            </button>
+            <button 
+              className="button button-secondary" 
+              style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+              onClick={handleExportLogs}
+            >
+              Export
+            </button>
+            <button 
+              className="button" 
+              style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem', background: '#ef4444', color: 'white' }}
+              onClick={handleClearLogs}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        
+        {/* Source Exclusion Filters */}
+        <div style={{ 
+          display: 'flex', 
+          gap: '1rem', 
+          marginBottom: '1rem', 
+          padding: '0.75rem', 
+          background: '#f9fafb', 
+          borderRadius: '6px',
+          flexWrap: 'wrap',
+          alignItems: 'center'
+        }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: '500', color: '#374151' }}>Hide sources:</span>
+          {[
+            { key: 'background', label: '🔧 Background', color: '#6366f1' },
+            { key: 'content', label: '📄 Content', color: '#10b981' },
+            { key: 'socket', label: '🔌 Socket', color: '#f59e0b' },
+            { key: 'api', label: '🌐 API', color: '#3b82f6' }
+          ].map(({ key, label, color }) => (
+            <label 
+              key={key}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.25rem', 
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                padding: '0.25rem 0.5rem',
+                borderRadius: '4px',
+                background: excludeSources[key] ? '#fee2e2' : 'white',
+                border: `1px solid ${excludeSources[key] ? '#fca5a5' : '#e5e7eb'}`,
+                transition: 'all 0.15s'
+              }}
+            >
+              <input 
+                type="checkbox" 
+                checked={excludeSources[key]} 
+                onChange={() => toggleExcludeSource(key)}
+                style={{ margin: 0 }}
+              />
+              <span style={{ 
+                textDecoration: excludeSources[key] ? 'line-through' : 'none',
+                color: excludeSources[key] ? '#9ca3af' : color
+              }}>
+                {label}
+              </span>
+            </label>
+          ))}
+          <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+            ({filteredLogs.length} / {logs.length} shown)
+          </span>
+        </div>
+
+        {/* Log List */}
+        <div style={{ 
+          maxHeight: '500px', 
+          overflowY: 'auto', 
+          border: '1px solid #e5e7eb', 
+          borderRadius: '6px',
+          fontSize: '0.8rem',
+          fontFamily: 'monospace'
+        }}>
+          {filteredLogs.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af' }}>
+              No logs yet. Start tracking a meeting to see events.
+            </div>
+          ) : (
+            filteredLogs.map((log) => {
+              const style = getLogStyle(log.type);
+              return (
+                <div 
+                  key={log.id} 
+                  style={{ 
+                    padding: '0.5rem 0.75rem', 
+                    borderBottom: '1px solid #f3f4f6',
+                    background: style.bg
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+                    <span style={{ color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                      {formatTimestamp(log.timestamp)}
+                    </span>
+                    <span style={{ 
+                      color: style.color, 
+                      fontWeight: 'bold',
+                      minWidth: '70px'
+                    }}>
+                      {log.type}
+                    </span>
+                    <span style={{ 
+                      color: '#6b7280',
+                      padding: '0 4px',
+                      background: '#f3f4f6',
+                      borderRadius: '3px',
+                      fontSize: '0.75rem'
+                    }}>
+                      {log.source}
+                    </span>
+                    <span style={{ color: '#374151', fontWeight: '500' }}>
+                      {log.event}
+                    </span>
+                  </div>
+                  {log.data && (
+                    <details style={{ marginTop: '0.25rem', marginLeft: '5.5rem' }}>
+                      <summary style={{ cursor: 'pointer', color: '#6b7280', fontSize: '0.75rem' }}>
+                        Show data
+                      </summary>
+                      <pre style={{ 
+                        margin: '0.25rem 0 0 0', 
+                        padding: '0.5rem', 
+                        background: '#f9fafb', 
+                        borderRadius: '4px',
+                        overflow: 'auto',
+                        maxHeight: '200px',
+                        fontSize: '0.7rem',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all'
+                      }}>
+                        {typeof log.data === 'string' ? log.data : JSON.stringify(log.data, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Helper function for async message sending
+function sendMessageAsync(type, data = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ type, ...data }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve(response);
+      }
+    });
+  });
 }
 
 // Initialize

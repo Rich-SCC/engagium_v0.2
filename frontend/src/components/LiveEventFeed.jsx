@@ -10,7 +10,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const LiveEventFeed = () => {
-  const { recentEvents, clearEvents } = useWebSocket();
+  const { recentEvents, clearEvents, isLoadingRecentEvents } = useWebSocket();
   const feedRef = useRef(null);
   const [autoScroll, setAutoScroll] = React.useState(true);
 
@@ -101,7 +101,16 @@ const LiveEventFeed = () => {
         onScroll={handleScroll}
         className="h-96 overflow-y-auto p-4 space-y-3"
       >
-        {recentEvents.length === 0 ? (
+        {isLoadingRecentEvents ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center animate-pulse">
+                <SparklesIcon className="w-8 h-8 text-gray-400" />
+              </div>
+              <p className="text-gray-500">Loading recent activity...</p>
+            </div>
+          </div>
+        ) : recentEvents.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">

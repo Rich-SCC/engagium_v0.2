@@ -2,16 +2,16 @@ const db = require('../config/database');
 
 class Student {
   static async create(studentData) {
-    const { class_id, first_name, last_name, email, student_id } = studentData;
+    const { class_id, full_name, student_id } = studentData;
 
     const query = `
-      INSERT INTO students (class_id, first_name, last_name, email, student_id)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO students (class_id, full_name, student_id)
+      VALUES ($1, $2, $3)
       RETURNING *
     `;
 
     try {
-      const result = await db.query(query, [class_id, first_name, last_name, email, student_id]);
+      const result = await db.query(query, [class_id, full_name, student_id]);
       return result.rows[0];
     } catch (error) {
       if (error.code === '23505') {
@@ -25,7 +25,7 @@ class Student {
     const query = `
       SELECT * FROM students
       WHERE class_id = $1
-      ORDER BY last_name, first_name
+      ORDER BY full_name
     `;
 
     const result = await db.query(query, [classId]);
@@ -45,17 +45,17 @@ class Student {
   }
 
   static async update(id, studentData) {
-    const { first_name, last_name, email, student_id } = studentData;
+    const { full_name, student_id } = studentData;
 
     const query = `
       UPDATE students
-      SET first_name = $1, last_name = $2, email = $3, student_id = $4
-      WHERE id = $5
+      SET full_name = $1, student_id = $2
+      WHERE id = $3
       RETURNING *
     `;
 
     try {
-      const result = await db.query(query, [first_name, last_name, email, student_id, id]);
+      const result = await db.query(query, [full_name, student_id, id]);
       return result.rows[0];
     } catch (error) {
       if (error.code === '23505') {
@@ -105,6 +105,16 @@ class Student {
     return result.rows[0];
   }
 
+  static async findByClassIdAndName(classId, fullName) {
+    const query = `
+      SELECT * FROM students
+      WHERE class_id = $1 AND LOWER(full_name) = LOWER($2)
+    `;
+
+    const result = await db.query(query, [classId, fullName]);
+    return result.rows[0];
+  }
+
   static async bulkDelete(ids) {
     // Check if any students have participation logs
     const logCheck = await db.query(
@@ -131,11 +141,12 @@ class Student {
     const header = lines[0].split(',').map(h => h.trim().toLowerCase());
     const students = [];
 
-    // Validate required columns
-    const requiredColumns = ['first_name', 'last_name'];
-    const missingColumns = requiredColumns.filter(col => !header.includes(col));
-    if (missingColumns.length > 0) {
-      throw new Error(`Missing required columns: ${missingColumns.join(', ')}`);
+    // Validate required columns - either full_name or first_name+last_name
+    const hasFullName = header.includes('full_name') || header.includes('fullname') || header.includes('name');
+    const hasFirstLast = header.includes('first_name') && header.includes('last_name');
+    
+    if (!hasFullName && !hasFirstLast) {
+      throw new Error('CSV must contain either full_name/name column or first_name and last_name columns');
     }
 
     for (let i = 1; i < lines.length; i++) {
@@ -149,7 +160,20 @@ class Student {
         student[col] = values[index] || null;
       });
 
-      students.push(student);
+      // Build full_name from available columns
+      let fullName;
+      if (student.full_name || student.fullname || student.name) {
+        fullName = student.full_name || student.fullname || student.name;
+      } else if (student.first_name && student.last_name) {
+        fullName = `${student.first_name} ${student.last_name}`.trim();
+      }
+
+      if (fullName) {
+        students.push({
+          full_name: fullName,
+          student_id: student.student_id || student.id || null
+        });
+      }
     }
 
     return students;
@@ -159,9 +183,7 @@ class Student {
     const parsedStudents = this.parseCSV(csvContent);
     const studentsData = parsedStudents.map(s => ({
       class_id: classId,
-      first_name: s.first_name,
-      last_name: s.last_name,
-      email: s.email || null,
+      full_name: s.full_name,
       student_id: s.student_id || null
     }));
 
@@ -172,12 +194,12 @@ class Student {
     const students = await this.findByClassId(classId);
     
     if (students.length === 0) {
-      return 'first_name,last_name,email,student_id\n';
+      return 'full_name,student_id\n';
     }
 
-    const header = 'first_name,last_name,email,student_id\n';
+    const header = 'full_name,student_id\n';
     const rows = students.map(s => 
-      `${s.first_name},${s.last_name},${s.email || ''},${s.student_id || ''}`
+      `${s.full_name},${s.student_id || ''}`
     ).join('\n');
 
     return header + rows;
@@ -187,7 +209,7 @@ class Student {
   static async searchAndFilter(classId, options = {}) {
     const {
       search = '',
-      sortBy = 'last_name',
+      sortBy = 'full_name',
       sortOrder = 'ASC',
       tagIds = [],
       hasNotes = null,
@@ -216,9 +238,7 @@ class Student {
     if (search) {
       paramCount++;
       query += ` AND (
-        s.first_name ILIKE $${paramCount} OR 
-        s.last_name ILIKE $${paramCount} OR 
-        s.email ILIKE $${paramCount} OR 
+        s.full_name ILIKE $${paramCount} OR 
         s.student_id ILIKE $${paramCount}
       )`;
       params.push(`%${search}%`);
@@ -243,7 +263,7 @@ class Student {
     }
 
     // Sorting
-    const validSortColumns = ['first_name', 'last_name', 'email', 'student_id', 'participation_count', 'notes_count'];
+    const validSortColumns = ['full_name', 'student_id', 'participation_count', 'notes_count'];
     const validSortOrders = ['ASC', 'DESC'];
     
     if (validSortColumns.includes(sortBy) && validSortOrders.includes(sortOrder.toUpperCase())) {
@@ -253,7 +273,7 @@ class Student {
         query += ` ORDER BY s.${sortBy} ${sortOrder}`;
       }
     } else {
-      query += ` ORDER BY s.last_name ASC, s.first_name ASC`;
+      query += ` ORDER BY s.full_name ASC`;
     }
 
     // Pagination
@@ -309,17 +329,17 @@ class Student {
     return parseInt(result.rows[0].count);
   }
 
-  // Check for duplicate students (by email or student_id)
-  static async findDuplicates(classId, email, studentId) {
+  // Check for duplicate students (by student_id or full_name)
+  static async findDuplicates(classId, fullName, studentId) {
     const query = `
       SELECT * FROM students
       WHERE class_id = $1 AND (
-        (email IS NOT NULL AND email = $2) OR
+        (full_name IS NOT NULL AND LOWER(full_name) = LOWER($2)) OR
         (student_id IS NOT NULL AND student_id = $3)
       )
     `;
 
-    const result = await db.query(query, [classId, email, studentId]);
+    const result = await db.query(query, [classId, fullName, studentId]);
     return result.rows;
   }
 
@@ -379,6 +399,23 @@ class Student {
     }
 
     return results;
+  }
+
+  // Create student from participant name (for adding unmatched participants to roster)
+  static async createFromParticipant(classId, participantName) {
+    // Check if student with this name already exists
+    const existing = await this.findByClassIdAndName(classId, participantName);
+    if (existing) {
+      return { created: false, student: existing };
+    }
+
+    const student = await this.create({
+      class_id: classId,
+      full_name: participantName,
+      student_id: null
+    });
+
+    return { created: true, student };
   }
 }
 

@@ -30,6 +30,8 @@ const {
   checkDuplicates,
   mergeStudents,
   bulkUpdateStudents,
+  bulkAddStudents,
+  createFromParticipant,
   upload
 } = require('../controllers/studentController');
 const {
@@ -66,6 +68,16 @@ router.get('/:id', flexibleAuth, getClass);
 router.get('/:classId/students', flexibleAuth, getStudents);
 router.get('/:classId/students/:studentId', flexibleAuth, getStudentDetails);
 
+// Extension-compatible route for adding unmapped participants as students
+router.post('/:classId/students/bulk', flexibleAuth, bulkAddStudents);
+
+// Create student from unmatched participant (extension-compatible)
+router.post('/:classId/students/from-participant', flexibleAuth, createFromParticipant);
+
+// Session links (extension-compatible for mapping meetings)
+router.get('/:id/links', flexibleAuth, getClassLinks);
+router.post('/:id/links', flexibleAuth, addClassLink);
+
 // All other routes require instructor authentication (web app only)
 router.use(instructorAuth);
 
@@ -78,9 +90,7 @@ router.delete('/:id', deleteClass);
 router.patch('/:id/status', updateClassStatus);
 router.patch('/:id/schedule', updateClassSchedule);
 
-// Session links
-router.get('/:id/links', getClassLinks);
-router.post('/:id/links', addClassLink);
+// Session links (update/delete require instructorAuth)
 router.put('/:id/links/:linkId', updateClassLink);
 router.delete('/:id/links/:linkId', deleteClassLink);
 

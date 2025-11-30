@@ -21,17 +21,18 @@ function PopupApp() {
   const [meetingDetected, setMeetingDetected] = useState(null); // { meeting_id, platform, mapped_class_id, mapped_class_name }
   const [availableClasses, setAvailableClasses] = useState([]);
   const [selectedClassId, setSelectedClassId] = useState(null);
+  const [rememberMeetingLink, setRememberMeetingLink] = useState(true); // Default to saving link
 
   // Load session status on mount
   useEffect(() => {
     loadSessionStatus();
     loadMeetingDetectionStatus();
     
-    // Refresh every 2 seconds
+    // Only refresh every 10 seconds for status updates (reduced from 2s)
+    // Most updates will come from user actions
     const interval = setInterval(() => {
       loadSessionStatus();
-      loadMeetingDetectionStatus();
-    }, 2000);
+    }, 10000);
     
     return () => clearInterval(interval);
   }, []);
@@ -132,7 +133,8 @@ function PopupApp() {
       const response = await sendMessage(MESSAGE_TYPES.START_SESSION, {
         class_id: classId,
         meeting_id: meetingDetected.meeting_id,
-        platform: meetingDetected.platform
+        platform: meetingDetected.platform,
+        save_meeting_link: rememberMeetingLink && !meetingDetected.mapped_class_id // Only save if unmapped
       });
       
       if (response.success) {
@@ -268,10 +270,23 @@ function PopupApp() {
                 <option value="">-- Select a class --</option>
                 {availableClasses.map(cls => (
                   <option key={cls.id} value={cls.id}>
-                    {cls.name}
+                    {cls.name}{cls.section ? ` (${cls.section})` : ''}
                   </option>
                 ))}
               </select>
+              
+              {/* Remember this meeting link checkbox */}
+              {selectedClassId && (
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={rememberMeetingLink}
+                    onChange={(e) => setRememberMeetingLink(e.target.checked)}
+                  />
+                  <span>Remember this meeting link for future sessions</span>
+                </label>
+              )}
+              
               <div className="button-group">
                 <button 
                   className="button button-primary"

@@ -3,18 +3,14 @@ import { XMarkIcon } from '@heroicons/react/24/outline';
 
 const StudentFormModal = ({ isOpen, onClose, onSubmit, initialData, isLoading }) => {
   const [formData, setFormData] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
+    full_name: '',
     student_id: ''
   });
 
   useEffect(() => {
     if (initialData) {
       setFormData({
-        first_name: initialData.first_name || '',
-        last_name: initialData.last_name || '',
-        email: initialData.email || '',
+        full_name: initialData.full_name || '',
         student_id: initialData.student_id || ''
       });
     }
@@ -54,55 +50,29 @@ const StudentFormModal = ({ isOpen, onClose, onSubmit, initialData, isLoading })
         <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              First Name *
+              Full Name *
             </label>
             <input
               type="text"
-              name="first_name"
-              value={formData.first_name}
+              name="full_name"
+              value={formData.full_name}
               onChange={handleChange}
               required
+              placeholder="e.g., John Smith"
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-gray-900"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Last Name *
-            </label>
-            <input
-              type="text"
-              name="last_name"
-              value={formData.last_name}
-              onChange={handleChange}
-              required
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email *
-            </label>
-            <input
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              required
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Student ID
+              Student ID (optional)
             </label>
             <input
               type="text"
               name="student_id"
               value={formData.student_id}
               onChange={handleChange}
+              placeholder="e.g., STU001"
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-gray-900"
             />
           </div>

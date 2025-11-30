@@ -16,7 +16,7 @@ export async function initDB() {
   if (db) return db;
 
   db = await openDB(DB_NAME, DB_VERSION, {
-    upgrade(database) {
+    upgrade(database, oldVersion, newVersion) {
       // Active sessions store
       if (!database.objectStoreNames.contains(DB_STORES.ACTIVE_SESSIONS)) {
         const sessionsStore = database.createObjectStore(DB_STORES.ACTIVE_SESSIONS, {
@@ -34,6 +34,7 @@ export async function initDB() {
         participantsStore.createIndex('session_id', 'session_id');
         participantsStore.createIndex('platform_participant_id', 'platform_participant_id');
         participantsStore.createIndex('matched_student_id', 'matched_student_id');
+        participantsStore.createIndex('name', 'name');
       }
 
       // Participation events store
@@ -44,6 +45,19 @@ export async function initDB() {
         eventsStore.createIndex('session_id', 'session_id');
         eventsStore.createIndex('participant_id', 'participant_id');
         eventsStore.createIndex('timestamp', 'timestamp');
+      }
+
+      // Attendance intervals store (new in v2)
+      if (!database.objectStoreNames.contains(DB_STORES.ATTENDANCE_INTERVALS)) {
+        const intervalsStore = database.createObjectStore(DB_STORES.ATTENDANCE_INTERVALS, {
+          keyPath: 'id'
+        });
+        intervalsStore.createIndex('session_id', 'session_id');
+        intervalsStore.createIndex('participant_name', 'participant_name');
+        intervalsStore.createIndex('student_id', 'student_id');
+        intervalsStore.createIndex('left_at', 'left_at'); // null = open interval
+        // Compound index for finding open intervals by session and participant
+        intervalsStore.createIndex('session_participant', ['session_id', 'participant_name']);
       }
 
       // Sync queue store
@@ -184,6 +198,124 @@ export async function deleteEventsBySession(sessionId) {
 }
 
 // ============================================================================
+// Attendance Intervals CRUD (New)
+// ============================================================================
+
+/**
+ * Create an attendance interval (participant join)
+ * @param {Object} intervalData - { id, session_id, participant_name, student_id?, joined_at, left_at? }
+ */
+export async function createAttendanceInterval(intervalData) {
+  const database = await initDB();
+  return await database.add(DB_STORES.ATTENDANCE_INTERVALS, intervalData);
+}
+
+/**
+ * Get all intervals for a session
+ */
+export async function getIntervalsBySession(sessionId) {
+  const database = await initDB();
+  const index = database.transaction(DB_STORES.ATTENDANCE_INTERVALS).store.index('session_id');
+  return await index.getAll(sessionId);
+}
+
+/**
+ * Get open intervals (left_at is null) for a session
+ */
+export async function getOpenIntervals(sessionId) {
+  const database = await initDB();
+  const allIntervals = await getIntervalsBySession(sessionId);
+  return allIntervals.filter(i => i.left_at === null);
+}
+
+/**
+ * Close an attendance interval (participant leave)
+ * @param {string} sessionId 
+ * @param {string} participantName 
+ * @param {string} leftAt - ISO timestamp
+ * @returns {Object|null} The closed interval or null if not found
+ */
+export async function closeAttendanceInterval(sessionId, participantName, leftAt) {
+  const database = await initDB();
+  
+  // Find open interval for this participant
+  const allIntervals = await getIntervalsBySession(sessionId);
+  const openInterval = allIntervals.find(
+    i => i.participant_name === participantName && i.left_at === null
+  );
+  
+  if (!openInterval) {
+    return null;
+  }
+  
+  // Update with left_at
+  const updated = { ...openInterval, left_at: leftAt };
+  await database.put(DB_STORES.ATTENDANCE_INTERVALS, updated);
+  return updated;
+}
+
+/**
+ * Close all open intervals for a session (when session ends)
+ * @param {string} sessionId 
+ * @param {string} endedAt - ISO timestamp
+ */
+export async function closeAllOpenIntervals(sessionId, endedAt) {
+  const database = await initDB();
+  const openIntervals = await getOpenIntervals(sessionId);
+  
+  const tx = database.transaction(DB_STORES.ATTENDANCE_INTERVALS, 'readwrite');
+  
+  for (const interval of openIntervals) {
+    const updated = { ...interval, left_at: endedAt };
+    await tx.store.put(updated);
+  }
+  
+  await tx.done;
+  return openIntervals.length;
+}
+
+/**
+ * Get intervals for a specific participant in a session
+ */
+export async function getIntervalsByParticipant(sessionId, participantName) {
+  const allIntervals = await getIntervalsBySession(sessionId);
+  return allIntervals.filter(i => i.participant_name === participantName);
+}
+
+/**
+ * Calculate total duration for a participant in a session (in minutes)
+ */
+export async function calculateParticipantDuration(sessionId, participantName) {
+  const intervals = await getIntervalsByParticipant(sessionId, participantName);
+  let totalMs = 0;
+  
+  for (const interval of intervals) {
+    if (interval.left_at) {
+      const joined = new Date(interval.joined_at).getTime();
+      const left = new Date(interval.left_at).getTime();
+      totalMs += left - joined;
+    }
+  }
+  
+  return Math.round(totalMs / 60000); // Convert to minutes
+}
+
+/**
+ * Delete intervals for a session
+ */
+export async function deleteIntervalsBySession(sessionId) {
+  const database = await initDB();
+  const intervals = await getIntervalsBySession(sessionId);
+  const tx = database.transaction(DB_STORES.ATTENDANCE_INTERVALS, 'readwrite');
+  
+  for (const interval of intervals) {
+    await tx.store.delete(interval.id);
+  }
+  
+  await tx.done;
+}
+
+// ============================================================================
 // Sync Queue CRUD
 // ============================================================================
 
@@ -243,6 +375,7 @@ export async function getAllSettings() {
 export async function clearSessionData(sessionId) {
   await deleteEventsBySession(sessionId);
   await deleteParticipantsBySession(sessionId);
+  await deleteIntervalsBySession(sessionId);
   await deleteSession(sessionId);
 }
 
@@ -253,6 +386,7 @@ export async function clearAllData() {
       DB_STORES.ACTIVE_SESSIONS,
       DB_STORES.TRACKED_PARTICIPANTS,
       DB_STORES.PARTICIPATION_EVENTS,
+      DB_STORES.ATTENDANCE_INTERVALS,
       DB_STORES.SYNC_QUEUE
     ],
     'readwrite'
@@ -261,6 +395,7 @@ export async function clearAllData() {
   await tx.objectStore(DB_STORES.ACTIVE_SESSIONS).clear();
   await tx.objectStore(DB_STORES.TRACKED_PARTICIPANTS).clear();
   await tx.objectStore(DB_STORES.PARTICIPATION_EVENTS).clear();
+  await tx.objectStore(DB_STORES.ATTENDANCE_INTERVALS).clear();
   await tx.objectStore(DB_STORES.SYNC_QUEUE).clear();
 
   await tx.done;

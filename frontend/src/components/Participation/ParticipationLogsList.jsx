@@ -25,8 +25,8 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
 
       // Handle student name sorting
       if (sortField === 'student_name') {
-        aVal = `${a.last_name} ${a.first_name}`.toLowerCase();
-        bVal = `${b.last_name} ${b.first_name}`.toLowerCase();
+        aVal = (a.full_name || a.student_name || '').toLowerCase();
+        bVal = (b.full_name || b.student_name || '').toLowerCase();
       }
 
       // Handle timestamp sorting
@@ -177,7 +177,7 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex flex-col">
                           <div className="text-sm font-medium text-gray-900">
-                            {log.last_name}, {log.first_name}
+                            {log.full_name || log.student_name}
                           </div>
                           {log.student_id && (
                             <div className="text-xs text-gray-500">{log.student_id}</div>

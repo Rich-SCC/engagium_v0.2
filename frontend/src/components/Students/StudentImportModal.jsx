@@ -164,13 +164,7 @@ const StudentImportModal = ({ isOpen, onClose, classId }) => {
                       <thead className="bg-gray-50 sticky top-0">
                         <tr>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                            First Name
-                          </th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                            Last Name
-                          </th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                            Email
+                            Full Name
                           </th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                             Student ID
@@ -180,9 +174,7 @@ const StudentImportModal = ({ isOpen, onClose, classId }) => {
                       <tbody className="bg-white divide-y divide-gray-200">
                         {parsedData.map((student, idx) => (
                           <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                            <td className="px-4 py-2 text-sm">{student.first_name}</td>
-                            <td className="px-4 py-2 text-sm">{student.last_name}</td>
-                            <td className="px-4 py-2 text-sm">{student.email || '-'}</td>
+                            <td className="px-4 py-2 text-sm">{student.full_name || student.name || `${student.first_name || ''} ${student.last_name || ''}`.trim() || '-'}</td>
                             <td className="px-4 py-2 text-sm">{student.student_id || '-'}</td>
                           </tr>
                         ))}
@@ -265,7 +257,7 @@ const StudentImportModal = ({ isOpen, onClose, classId }) => {
                             )}
                           </td>
                           <td className="px-4 py-2 text-sm">
-                            {result.data?.first_name} {result.data?.last_name}
+                            {result.data?.full_name || result.data?.name || `${result.data?.first_name || ''} ${result.data?.last_name || ''}`.trim()}
                           </td>
                           <td className="px-4 py-2 text-sm text-gray-600">
                             {result.success ? 'Imported successfully' : result.error}

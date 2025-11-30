@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sessionsAPI, participationAPI } from '@/services/api';
+import { sessionsAPI, participationAPI, classesAPI } from '@/services/api';
 import {
   ArrowLeftIcon,
   PencilIcon,
@@ -63,6 +63,23 @@ const SessionDetailPage = () => {
       setShowEditModal(false);
     }
   });
+
+  // Mutation for adding participant to roster
+  const addToRosterMutation = useMutation({
+    mutationFn: async ({ sessionId, participantName, createStudent }) => {
+      return sessionsAPI.linkParticipantToStudent(sessionId, {
+        participant_name: participantName,
+        create_student: createStudent
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['session', id]);
+    }
+  });
+
+  const handleAddToRoster = async ({ sessionId, participantName, createStudent }) => {
+    await addToRosterMutation.mutateAsync({ sessionId, participantName, createStudent });
+  };
 
   const deleteSessionMutation = useMutation({
     mutationFn: () => sessionsAPI.delete(id),
@@ -288,7 +305,12 @@ const SessionDetailPage = () => {
 
         <div className="p-6">
           {activeTab === 'attendance' && (
-            <AttendanceRoster attendance={session.attendance || []} />
+            <AttendanceRoster 
+              attendance={session.attendance || []} 
+              sessionId={session.id}
+              classId={session.class_id}
+              onAddToRoster={handleAddToRoster}
+            />
           )}
 
           {activeTab === 'participation' && (
@@ -317,7 +339,7 @@ const SessionDetailPage = () => {
                 logs={participationLogs.filter(log => {
                   // Filter by search term
                   if (searchTerm) {
-                    const fullName = `${log.first_name} ${log.last_name}`.toLowerCase();
+                    const fullName = (log.full_name || log.student_name || '').toLowerCase();
                     if (!fullName.includes(searchTerm.toLowerCase())) {
                       return false;
                     }

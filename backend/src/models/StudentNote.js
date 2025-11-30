@@ -83,8 +83,7 @@ class StudentNote {
   static async getRecentByClassId(classId, limit = 10) {
     const query = `
       SELECT sn.*, 
-             s.first_name as student_first_name,
-             s.last_name as student_last_name,
+             s.full_name as student_full_name,
              u.first_name as creator_first_name,
              u.last_name as creator_last_name
       FROM student_notes sn
@@ -103,8 +102,7 @@ class StudentNote {
   static async searchByText(classId, searchText) {
     const query = `
       SELECT sn.*, 
-             s.first_name as student_first_name,
-             s.last_name as student_last_name,
+             s.full_name as student_full_name,
              u.first_name as creator_first_name,
              u.last_name as creator_last_name
       FROM student_notes sn

@@ -14,7 +14,7 @@ export default defineConfig({
         'options/index': resolve(__dirname, 'options/index.html'),
         'options/callback': resolve(__dirname, 'options/callback.html'),
         'background/service-worker': resolve(__dirname, 'background/service-worker.js'),
-        'content/google-meet': resolve(__dirname, 'content/google-meet.js'),
+        'content/google-meet': resolve(__dirname, 'content/google-meet/index.js'),
       },
       output: {
         entryFileNames: (chunkInfo) => {

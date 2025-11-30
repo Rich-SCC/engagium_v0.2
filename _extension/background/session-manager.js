@@ -1,6 +1,6 @@
 /**
  * Session Manager
- * Manages active tracking sessions
+ * Manages active tracking sessions with attendance interval tracking
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -17,11 +17,22 @@ import {
   createParticipant,
   updateParticipant,
   getParticipantsBySession,
-  createEvent
+  createEvent,
+  createAttendanceInterval,
+  closeAttendanceInterval,
+  getOpenIntervals,
+  closeAllOpenIntervals
 } from '../utils/storage.js';
 import { now } from '../utils/date-utils.js';
 import { matchParticipant } from '../utils/student-matcher.js';
-import { startSessionFromMeeting, endSessionWithTimestamp } from './api-client.js';
+import { 
+  startSessionFromMeeting, 
+  endSessionWithTimestamp,
+  recordParticipantJoin,
+  recordParticipantLeave
+} from './api-client.js';
+import { socketClient } from './socket-client.js';
+import { debug } from '../utils/debug-logger.js';
 
 class SessionManager {
   constructor() {
@@ -50,11 +61,21 @@ class SessionManager {
         platform: sessionData.meeting_platform
       });
 
+      console.log('[SessionManager] API response:', JSON.stringify(response));
+
       if (!response.success) {
-        throw new Error(response.message || 'Failed to start session');
+        throw new Error(response.message || response.error || 'Failed to start session');
       }
 
-      const backendSession = response.data.session;
+      // Backend returns { success: true, data: session } (session object directly in data)
+      const backendSession = response.data;
+      
+      console.log('[SessionManager] Backend session:', JSON.stringify(backendSession));
+      
+      if (!backendSession || !backendSession.id) {
+        console.error('[SessionManager] Invalid response structure:', response);
+        throw new Error('Invalid session response from server - missing session ID');
+      }
 
       // Store session locally for offline sync
       const session = {
@@ -72,6 +93,14 @@ class SessionManager {
       await createSession(session);
       this.activeSessionId = session.id;
 
+      // Connect to WebSocket for real-time updates
+      try {
+        await socketClient.connect(backendSession.id);
+        console.log('[SessionManager] WebSocket connected for session:', backendSession.id);
+      } catch (wsError) {
+        console.warn('[SessionManager] WebSocket connection failed (will sync offline):', wsError);
+      }
+
       console.log('[SessionManager] Session started:', session.id, '(backend:', backendSession.id, ')');
       return session;
 
@@ -83,7 +112,7 @@ class SessionManager {
 
   /**
    * End the active session
-   * Calls backend API with ended_at timestamp
+   * Closes all open intervals and calls backend API with ended_at timestamp
    * @param {string} sessionId 
    * @returns {Promise<Object>} Updated session
    */
@@ -100,7 +129,19 @@ class SessionManager {
     const endedAt = now();
 
     try {
-      // Call backend API to end session
+      // Disconnect WebSocket first
+      try {
+        await socketClient.disconnect();
+        console.log('[SessionManager] WebSocket disconnected');
+      } catch (wsError) {
+        console.warn('[SessionManager] WebSocket disconnect failed:', wsError);
+      }
+
+      // Close all open attendance intervals locally
+      const closedCount = await closeAllOpenIntervals(sessionId, endedAt);
+      console.log(`[SessionManager] Closed ${closedCount} open attendance intervals`);
+
+      // Call backend API to end session (this will also close intervals server-side)
       if (session.backend_id) {
         await endSessionWithTimestamp(session.backend_id, endedAt);
       }
@@ -120,7 +161,10 @@ class SessionManager {
 
     } catch (error) {
       console.error('[SessionManager] Failed to end session:', error);
-      // Still mark as ended locally even if API call fails
+      
+      // Still close intervals and mark as ended locally even if API call fails
+      await closeAllOpenIntervals(sessionId, endedAt);
+      
       const updatedSession = await updateSession(sessionId, {
         ended_at: endedAt,
         status: SESSION_STATUS.ENDED
@@ -163,86 +207,186 @@ class SessionManager {
 
   /**
    * Handle participant joined event
-   * @param {Object} data - { platform, meeting_id, participant }
+   * Creates an attendance interval for tracking duration
+   * @param {Object} data - { platform, meeting_id, participant, name, timestamp, source }
    */
   async handleParticipantJoined(data) {
     const session = await this.getActiveSession();
     if (!session) {
-      console.warn('[SessionManager] No active session for participant join');
+      // Don't log every time - this can happen frequently when no session
       return;
     }
 
-    const { participant } = data;
-
-    // Check if already tracked (rejoining)
-    const participants = await getParticipantsBySession(session.id);
-    const existing = participants.find(
-      p => p.platform_participant_id === participant.id
-    );
-
-    if (existing) {
-      // Participant rejoined - update left_at to null
-      await updateParticipant(existing.id, {
-        left_at: null
-      });
-      console.log('[SessionManager] Participant rejoined:', participant.name);
+    // Get participant name - support both old and new format
+    const participantName = data.name || data.participant?.name;
+    const joinedAt = data.timestamp || data.participant?.joinedAt || now();
+    
+    if (!participantName) {
+      console.warn('[SessionManager] No participant name in join event:', data);
       return;
     }
+
+    // Check if already has an open interval (rejoining quickly)
+    const openIntervals = await getOpenIntervals(session.id);
+    const existingOpen = openIntervals.find(i => i.participant_name === participantName);
+    
+    if (existingOpen) {
+      // Silently skip - this is expected with multiple event sources
+      return;
+    }
+
+    debug.receive('background', 'PARTICIPANT_JOINED', { name: participantName });
 
     // Match to student roster
     const match = this.studentRoster.length > 0
-      ? matchParticipant(participant, this.studentRoster)
+      ? matchParticipant({ name: participantName }, this.studentRoster)
       : null;
 
-    // Create new participant record
-    const trackedParticipant = {
+    // Create local attendance interval
+    const interval = {
       id: uuidv4(),
       session_id: session.id,
-      platform_participant_id: participant.id,
-      name: participant.name,
-      email: participant.email || null,
-      matched_student_id: match ? match.student.id : null,
-      matched_student_name: match ? match.student.name : null,
-      match_confidence: match ? match.score : 0,
-      match_method: match ? match.method : null,
-      joined_at: participant.joinedAt || now(),
-      left_at: null
+      participant_name: participantName,
+      student_id: match ? match.student.id : null,
+      joined_at: joinedAt,
+      left_at: null // Open interval
     };
 
-    await createParticipant(trackedParticipant);
+    await createAttendanceInterval(interval);
+    
+    // Also track in participants for backwards compatibility
+    const participants = await getParticipantsBySession(session.id);
+    const existingParticipant = participants.find(p => p.name === participantName);
+    
+    if (!existingParticipant) {
+      // Create participant record
+      await createParticipant({
+        id: uuidv4(),
+        session_id: session.id,
+        platform_participant_id: data.participant?.id || participantName,
+        name: participantName,
+        email: null, // No longer available from Google Meet
+        matched_student_id: match ? match.student.id : null,
+        matched_student_name: match ? match.student.name : null,
+        match_confidence: match ? match.score : 0,
+        match_method: match ? match.method : null,
+        joined_at: joinedAt,
+        left_at: null
+      });
+    } else if (existingParticipant.left_at) {
+      // Participant rejoining - update left_at to null
+      await updateParticipant(existingParticipant.id, {
+        left_at: null
+      });
+    }
 
-    console.log('[SessionManager] Participant tracked:', {
-      name: participant.name,
-      matched: !!match,
-      confidence: match?.score
+    debug.success('background', 'PARTICIPANT_TRACKED', { 
+      name: participantName, 
+      matched: !!match, 
+      matchedTo: match?.student?.name 
     });
 
-    return trackedParticipant;
+    // Call backend API to record the join
+    if (session.backend_id) {
+      try {
+        await recordParticipantJoin(session.backend_id, {
+          participant_name: participantName,
+          joined_at: joinedAt,
+          student_id: match?.student?.id || null
+        });
+        debug.success('background', 'JOIN_SYNCED_TO_BACKEND', { name: participantName });
+      } catch (apiError) {
+        console.warn('[SessionManager] Failed to sync join to backend:', apiError);
+        debug.error('background', 'JOIN_SYNC_FAILED', { error: apiError.message });
+        // Continue - will be synced later
+      }
+    }
+
+    // Emit real-time event via WebSocket
+    if (socketClient.isSessionConnected()) {
+      try {
+        await socketClient.emitParticipantJoined({
+          id: data.participant?.id || participantName,
+          name: participantName,
+          joinedAt: joinedAt,
+          isMatched: !!match,
+          studentId: match?.student?.id,
+          studentName: match?.student?.name
+        });
+      } catch (wsError) {
+        // Silent fail for WebSocket - non-critical
+      }
+    }
+
+    debug.success('background', 'PARTICIPANT_TRACKED', { 
+      name: participantName,
+      matched: !!match
+    });
+
+    return interval;
   }
 
   /**
    * Handle participant left event
-   * @param {Object} data - { platform, meeting_id, participant_id, left_at }
+   * Closes the open attendance interval
+   * @param {Object} data - { platform, meeting_id, participant_id, left_at, name, timestamp }
    */
   async handleParticipantLeft(data) {
     const session = await this.getActiveSession();
     if (!session) return;
 
-    const participants = await getParticipantsBySession(session.id);
-    const participant = participants.find(
-      p => p.platform_participant_id === data.participantId
-    );
+    // Get participant name - support both old and new format
+    const participantName = data.name || data.participantId;
+    const leftAt = data.timestamp || data.leftAt || now();
+    
+    if (!participantName) {
+      return; // Silent skip - malformed event
+    }
 
-    if (!participant) {
-      console.warn('[SessionManager] Participant not found for left event');
+    // Close local attendance interval
+    const closedInterval = await closeAttendanceInterval(session.id, participantName, leftAt);
+    
+    if (!closedInterval) {
+      // No open interval - might have already been closed or never opened
+      // This is expected when receiving duplicate leave events
       return;
     }
 
-    await updateParticipant(participant.id, {
-      left_at: data.leftAt || now()
-    });
+    // Update participant record
+    const participants = await getParticipantsBySession(session.id);
+    const participant = participants.find(p => p.name === participantName);
 
-    console.log('[SessionManager] Participant left:', participant.name);
+    if (participant) {
+      await updateParticipant(participant.id, {
+        left_at: leftAt
+      });
+    }
+
+    // Call backend API to record the leave
+    if (session.backend_id) {
+      try {
+        await recordParticipantLeave(session.backend_id, {
+          participant_name: participantName,
+          left_at: leftAt
+        });
+        debug.success('background', 'LEAVE_SYNCED_TO_BACKEND', { name: participantName });
+      } catch (apiError) {
+        console.warn('[SessionManager] Failed to sync leave to backend:', apiError);
+        debug.error('background', 'LEAVE_SYNC_FAILED', { error: apiError.message });
+        // Continue - will be synced later
+      }
+    }
+
+    // Emit real-time event via WebSocket
+    if (socketClient.isSessionConnected()) {
+      try {
+        await socketClient.emitParticipantLeft(participantName, leftAt);
+      } catch (wsError) {
+        console.warn('[SessionManager] WebSocket emit failed:', wsError);
+      }
+    }
+
+    console.log('[SessionManager] Participant left:', participantName);
   }
 
   /**
@@ -250,8 +394,14 @@ class SessionManager {
    * @param {Object} data - { type, platform, meeting_id, participant_id, ... }
    */
   async handleParticipationEvent(data) {
+    console.log('[SessionManager] handleParticipationEvent called with type:', data.type);
+    debug.receive('background', 'PARTICIPATION_EVENT', { type: data.type, data });
+    
     const session = await this.getActiveSession();
-    if (!session) return;
+    if (!session) {
+      debug.warn('background', 'NO_ACTIVE_SESSION', 'Participation event ignored - no active session');
+      return;
+    }
 
     const participants = await getParticipantsBySession(session.id);
     const participant = participants.find(
@@ -259,20 +409,52 @@ class SessionManager {
     );
 
     if (!participant) {
-      console.warn('[SessionManager] Participant not found for event');
+      console.warn('[SessionManager] Participant not found for event:', data.participantId, 'type:', data.type);
+      debug.warn('background', 'PARTICIPANT_NOT_FOUND', { participantId: data.participantId, type: data.type });
       return;
     }
 
+    const eventType = this.mapEventType(data.type);
     const event = {
       id: uuidv4(),
       session_id: session.id,
       participant_id: participant.id,
-      event_type: this.mapEventType(data.type),
+      event_type: eventType,
       event_data: this.extractEventData(data),
       timestamp: data.timestamp || now()
     };
 
     await createEvent(event);
+    debug.success('background', 'EVENT_STORED_LOCALLY', { eventId: event.id, type: eventType });
+
+    // Emit real-time event via WebSocket
+    if (socketClient.isSessionConnected()) {
+      try {
+        // Chat messages get their own emit
+        if (eventType === 'chat') {
+          await socketClient.emitChatMessage({
+            sender: participant.matched_student_name || participant.name,
+            message: data.message,
+            timestamp: event.timestamp
+          });
+          debug.send('background', 'CHAT_MESSAGE_EMITTED', { sender: participant.name });
+        }
+        
+        // All events also emit as participation
+        await socketClient.emitParticipation({
+          studentId: participant.matched_student_id,
+          studentName: participant.matched_student_name || participant.name,
+          type: eventType,
+          metadata: event.event_data
+        });
+        debug.success('background', 'PARTICIPATION_EMITTED', { type: eventType, student: participant.matched_student_name || participant.name });
+      } catch (wsError) {
+        console.warn('[SessionManager] WebSocket emit failed:', wsError);
+        debug.error('background', 'WEBSOCKET_EMIT_FAILED', { error: wsError.message, type: eventType });
+      }
+    } else {
+      debug.warn('background', 'SOCKET_NOT_CONNECTED', { message: 'Event stored locally but not sent in real-time' });
+    }
 
     console.log('[SessionManager] Event recorded:', {
       type: event.event_type,
@@ -282,17 +464,20 @@ class SessionManager {
 
   /**
    * Map message type to event type
+   * Must match database ENUM: 'manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'platform_switch', 'hand_raise'
    */
   mapEventType(messageType) {
     const mapping = {
       [MESSAGE_TYPES.CHAT_MESSAGE]: 'chat',
       [MESSAGE_TYPES.REACTION]: 'reaction',
       [MESSAGE_TYPES.HAND_RAISE]: 'hand_raise',
-      [MESSAGE_TYPES.MIC_TOGGLE]: 'mic_on',
-      [MESSAGE_TYPES.CAMERA_TOGGLE]: 'camera_on',
+      [MESSAGE_TYPES.MIC_TOGGLE]: 'mic_toggle',
+      [MESSAGE_TYPES.CAMERA_TOGGLE]: 'camera_toggle',
       [MESSAGE_TYPES.PLATFORM_SWITCH]: 'platform_switch'
     };
-    return mapping[messageType] || 'other';
+    const result = mapping[messageType] || 'manual_entry';
+    console.log('[SessionManager] mapEventType:', messageType, '->', result);
+    return result;
   }
 
   /**

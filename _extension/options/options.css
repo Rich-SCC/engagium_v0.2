@@ -467,3 +467,30 @@ body {
   color: #9ca3af;
   font-size: 14px;
 }
+
+/* Debug Dashboard Styles */
+.debug-log-entry {
+  transition: background-color 0.2s;
+}
+
+.debug-log-entry:hover {
+  background-color: rgba(0, 0, 0, 0.02) !important;
+}
+
+details summary {
+  user-select: none;
+}
+
+details summary::-webkit-details-marker {
+  display: none;
+}
+
+details summary::before {
+  content: '▶ ';
+  font-size: 0.7em;
+  vertical-align: middle;
+}
+
+details[open] summary::before {
+  content: '▼ ';
+}
