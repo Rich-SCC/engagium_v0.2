@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
+import { formatClassDisplay } from '@/utils/classFormatter';
+import { normalizeMeetingUrl } from '@/utils/urlUtils';
 
 const SessionFormModal = ({ isOpen, onClose, onSubmit, initialData = null, classes = [], isLoading = false }) => {
   const [formData, setFormData] = useState({
@@ -65,7 +67,13 @@ const SessionFormModal = ({ isOpen, onClose, onSubmit, initialData = null, class
       return;
     }
 
-    onSubmit(formData);
+    // Normalize meeting link if provided
+    const submitData = {
+      ...formData,
+      meeting_link: formData.meeting_link ? normalizeMeetingUrl(formData.meeting_link) : ''
+    };
+
+    onSubmit(submitData);
   };
 
   const handleChange = (e) => {
@@ -119,7 +127,7 @@ const SessionFormModal = ({ isOpen, onClose, onSubmit, initialData = null, class
               <option value="">Select a class</option>
               {classes.map((cls) => (
                 <option key={cls.id} value={cls.id}>
-                  {cls.name} {cls.section && `- Section ${cls.section}`}
+                  {formatClassDisplay(cls)}
                 </option>
               ))}
             </select>
@@ -223,16 +231,16 @@ const SessionFormModal = ({ isOpen, onClose, onSubmit, initialData = null, class
               Meeting Link
             </label>
             <input
-              type="url"
+              type="text"
               name="meeting_link"
               value={formData.meeting_link}
               onChange={handleChange}
               disabled={isLoading}
-              placeholder="https://zoom.us/j/... or https://meet.google.com/..."
+              placeholder="meet.google.com/abc-defg-hij or zoom.us/j/123456789"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900"
             />
             <p className="mt-1 text-sm text-gray-500">
-              Optional: Add a Zoom or Google Meet link
+              Optional: Add a meeting link (protocol is optional)
             </p>
           </div>
 

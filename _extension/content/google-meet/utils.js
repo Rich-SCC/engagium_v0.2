@@ -74,20 +74,25 @@ export function waitForElement(selector, callback, timeout = 10000) {
  * Safely sends a message to the background script
  * @param {string} type - Message type
  * @param {Object} data - Message data
- * @param {Function} [onError] - Optional error callback
+ * @returns {Promise} Promise that resolves with the response
  */
-export function sendMessage(type, data, onError) {
-  chrome.runtime.sendMessage({ type, ...data }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.error('[GoogleMeet] Error sending message:', chrome.runtime.lastError);
-      if (onError) onError(chrome.runtime.lastError);
-      return;
-    }
-    
-    if (response && !response.success) {
-      console.error('[GoogleMeet] Background error:', response.error);
-      if (onError) onError(response.error);
-    }
+export function sendMessage(type, data = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ type, ...data }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('[GoogleMeet] Error sending message:', chrome.runtime.lastError);
+        reject(chrome.runtime.lastError);
+        return;
+      }
+      
+      if (response && !response.success) {
+        console.error('[GoogleMeet] Background error:', response.error);
+        reject(new Error(response.error));
+        return;
+      }
+      
+      resolve(response);
+    });
   });
 }
 

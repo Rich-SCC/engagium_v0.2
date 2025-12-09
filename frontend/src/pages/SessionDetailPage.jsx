@@ -19,6 +19,7 @@ import SessionFormModal from '@/components/Sessions/SessionFormModal';
 import ParticipationSummary from '@/components/Participation/ParticipationSummary';
 import ParticipationFilters from '@/components/Participation/ParticipationFilters';
 import ParticipationLogsList from '@/components/Participation/ParticipationLogsList';
+import { formatMeetingLinkForDisplay, getMeetingLinkText } from '@/utils/urlUtils';
 
 const SessionDetailPage = () => {
   const { id } = useParams();
@@ -67,13 +68,33 @@ const SessionDetailPage = () => {
   // Mutation for adding participant to roster
   const addToRosterMutation = useMutation({
     mutationFn: async ({ sessionId, participantName, createStudent }) => {
+      console.log('[SessionDetail] Adding participant to roster:', { sessionId, participantName, createStudent });
       return sessionsAPI.linkParticipantToStudent(sessionId, {
         participant_name: participantName,
         create_student: createStudent
       });
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('[SessionDetail] Successfully added to roster:', data);
       queryClient.invalidateQueries(['session', id]);
+      
+      const message = data?.data?.created_new 
+        ? `Successfully created new student: ${data?.data?.student?.full_name || 'Unknown'}`
+        : `Successfully linked to existing student: ${data?.data?.student?.full_name || 'Unknown'}`;
+      
+      alert(message);
+    },
+    onError: (error) => {
+      console.error('[SessionDetail] Failed to add to roster:', error);
+      
+      let errorMessage = 'Failed to add participant to roster';
+      if (error.response?.data?.error) {
+        errorMessage += ': ' + error.response.data.error;
+      } else if (error.message) {
+        errorMessage += ': ' + error.message;
+      }
+      
+      alert(errorMessage);
     }
   });
 
@@ -240,12 +261,12 @@ const SessionDetailPage = () => {
               <div>
                 <div className="text-sm text-gray-600 mb-1">Meeting Link</div>
                 <a
-                  href={session.meeting_link}
+                  href={formatMeetingLinkForDisplay(session.meeting_link)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-800 font-semibold text-sm"
+                  className="text-blue-600 hover:text-blue-800 font-semibold text-sm break-all"
                 >
-                  Join Meeting →
+                  {getMeetingLinkText(session.meeting_link)} →
                 </a>
               </div>
             </div>

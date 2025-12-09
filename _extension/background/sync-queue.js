@@ -12,7 +12,12 @@ import {
   removeSyncQueueItem
 } from '../utils/storage.js';
 import { now } from '../utils/date-utils.js';
-import { submitBulkAttendance, submitBulkParticipation } from './api-client.js';
+import { 
+  submitBulkAttendance, 
+  submitBulkParticipation,
+  recordParticipantJoin,
+  recordParticipantLeave
+} from './api-client.js';
 
 class SyncQueueManager {
   constructor() {
@@ -109,6 +114,10 @@ class SyncQueueManager {
         await submitBulkAttendance(item.session_id, item.payload.attendance);
       } else if (item.type === 'participation') {
         await submitBulkParticipation(item.session_id, item.payload.logs);
+      } else if (item.type === 'join') {
+        await recordParticipantJoin(item.session_id, item.payload);
+      } else if (item.type === 'leave') {
+        await recordParticipantLeave(item.session_id, item.payload);
       }
 
       // Success - remove from queue

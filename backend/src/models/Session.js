@@ -24,7 +24,14 @@ class Session {
 
   static async findByInstructorId(instructorId) {
     const query = `
-      SELECT s.*, c.name as class_name, c.subject
+      SELECT s.*, 
+        CASE 
+          WHEN c.section IS NOT NULL AND c.subject IS NOT NULL THEN c.section || ' ' || c.subject || ' - ' || c.name
+          WHEN c.section IS NOT NULL THEN c.section || ' - ' || c.name
+          WHEN c.subject IS NOT NULL THEN c.subject || ' - ' || c.name
+          ELSE c.name
+        END as class_name,
+        c.subject
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       WHERE c.instructor_id = $1
@@ -37,7 +44,14 @@ class Session {
 
   static async findById(id) {
     const query = `
-      SELECT s.*, c.name as class_name, c.subject, c.instructor_id
+      SELECT s.*, 
+        CASE 
+          WHEN c.section IS NOT NULL AND c.subject IS NOT NULL THEN c.section || ' ' || c.subject || ' - ' || c.name
+          WHEN c.section IS NOT NULL THEN c.section || ' - ' || c.name
+          WHEN c.subject IS NOT NULL THEN c.subject || ' - ' || c.name
+          ELSE c.name
+        END as class_name,
+        c.subject, c.instructor_id
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       WHERE s.id = $1
@@ -159,7 +173,14 @@ class Session {
 
   static async findActiveByInstructorId(instructorId) {
     const query = `
-      SELECT s.*, c.name as class_name, c.subject
+      SELECT s.*, 
+        CASE 
+          WHEN c.section IS NOT NULL AND c.subject IS NOT NULL THEN c.section || ' ' || c.subject || ' - ' || c.name
+          WHEN c.section IS NOT NULL THEN c.section || ' - ' || c.name
+          WHEN c.subject IS NOT NULL THEN c.subject || ' - ' || c.name
+          ELSE c.name
+        END as class_name,
+        c.subject
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       WHERE c.instructor_id = $1 AND s.status = 'active'
@@ -192,7 +213,12 @@ class Session {
     const query = `
       SELECT 
         s.*,
-        c.name as class_name,
+        CASE 
+          WHEN c.section IS NOT NULL AND c.subject IS NOT NULL THEN c.section || ' ' || c.subject || ' - ' || c.name
+          WHEN c.section IS NOT NULL THEN c.section || ' - ' || c.name
+          WHEN c.subject IS NOT NULL THEN c.subject || ' - ' || c.name
+          ELSE c.name
+        END as class_name,
         c.subject,
         c.instructor_id,
         (
@@ -221,7 +247,14 @@ class Session {
 
   static async findByDateRange(instructorId, startDate, endDate) {
     const query = `
-      SELECT s.*, c.name as class_name, c.subject
+      SELECT s.*, 
+        CASE 
+          WHEN c.section IS NOT NULL AND c.subject IS NOT NULL THEN c.section || ' ' || c.subject || ' - ' || c.name
+          WHEN c.section IS NOT NULL THEN c.section || ' - ' || c.name
+          WHEN c.subject IS NOT NULL THEN c.subject || ' - ' || c.name
+          ELSE c.name
+        END as class_name,
+        c.subject
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       WHERE c.instructor_id = $1
@@ -245,7 +278,12 @@ class Session {
         s.ended_at,
         s.status,
         c.id as class_id,
-        c.name as class_name,
+        CASE 
+          WHEN c.section IS NOT NULL AND c.subject IS NOT NULL THEN c.section || ' ' || c.subject || ' - ' || c.name
+          WHEN c.section IS NOT NULL THEN c.section || ' - ' || c.name
+          WHEN c.subject IS NOT NULL THEN c.subject || ' - ' || c.name
+          ELSE c.name
+        END as class_name,
         c.subject
       FROM sessions s
       JOIN classes c ON s.class_id = c.id

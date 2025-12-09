@@ -9,8 +9,32 @@ import {
 } from '@heroicons/react/24/outline';
 
 const ActiveSessionCard = () => {
-  const { activeSessions, isConnected, isLoadingActiveSessions } = useWebSocket();
+  const { activeSessions, isConnected, isLoadingActiveSessions, recentEvents } = useWebSocket();
   const [durations, setDurations] = useState({});
+  const [participantCounts, setParticipantCounts] = useState({});
+
+  // Track participant counts from join/leave events
+  useEffect(() => {
+    const counts = {};
+    
+    activeSessions.forEach(session => {
+      // Count unique participants by tracking joins and leaves
+      const sessionEvents = recentEvents.filter(e => e.session_id === session.session_id);
+      const joinedParticipants = new Set();
+      
+      sessionEvents.forEach(event => {
+        if (event.type === 'participant_joined') {
+          joinedParticipants.add(event.participant_name);
+        } else if (event.type === 'participant_left') {
+          joinedParticipants.delete(event.participant_name);
+        }
+      });
+      
+      counts[session.session_id] = joinedParticipants.size;
+    });
+    
+    setParticipantCounts(counts);
+  }, [activeSessions, recentEvents]);
 
   // Update session durations every second
   useEffect(() => {
@@ -112,12 +136,10 @@ const ActiveSessionCard = () => {
                         <ClockIcon className="w-4 h-4" />
                         <span>{durations[session.session_id] || '0s'}</span>
                       </div>
-                      {session.participant_count !== undefined && (
-                        <div className="flex items-center gap-1">
-                          <UserGroupIcon className="w-4 h-4" />
-                          <span>{session.participant_count} participants</span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1">
+                        <UserGroupIcon className="w-4 h-4" />
+                        <span>{participantCounts[session.session_id] || 0} participants</span>
+                      </div>
                     </div>
                   </div>
                   

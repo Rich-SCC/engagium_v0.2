@@ -237,7 +237,9 @@ export const sessionsAPI = {
   submitBulkAttendance: (id, attendance) =>
     api.post(`/sessions/${id}/attendance/bulk`, { attendance }),
   getAttendance: (id) => api.get(`/sessions/${id}/attendance`),
+  getAttendanceWithIntervals: (id) => api.get(`/sessions/${id}/attendance/full`),
   getAttendanceStats: (id) => api.get(`/sessions/${id}/attendance/stats`),
+  linkParticipantToStudent: (id, data) => api.post(`/sessions/${id}/attendance/link`, data),
 };
 
 // Students API

@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { classesAPI } from '@/services/api';
+import { formatClassDisplay, getClassHierarchy } from '@/utils/classFormatter';
 import {
   ArrowLeftIcon,
   PencilIcon,
@@ -20,6 +21,7 @@ import StudentFormModal from '@/components/Students/StudentFormModal';
 import StudentRosterToolbar from '@/components/Students/StudentRosterToolbar';
 import StudentTableRow from '@/components/Students/StudentTableRow';
 import StudentBulkActionsBar from '@/components/Students/StudentBulkActionsBar';
+import { formatMeetingLinkForDisplay } from '@/utils/urlUtils';
 
 const ClassDetailsPage = () => {
   const { id } = useParams();
@@ -126,8 +128,9 @@ const ClassDetailsPage = () => {
       const blob = await classesAPI.exportStudents(id);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `${classInfo?.name || 'class'}_students.csv`;
+      // Create a safe filename from the formatted class display
+      const safeFileName = formatClassDisplay(classInfo).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      a.download = `${safeFileName}_students.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -203,10 +206,10 @@ const ClassDetailsPage = () => {
             <ArrowLeftIcon className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">{classInfo.name}</h1>
-            <div className="flex items-center gap-2 text-gray-600 mt-1">
-              {classInfo.subject && <span>{classInfo.subject}</span>}
-              {classInfo.section && <span>• Section {classInfo.section}</span>}
+            <h1 className="text-3xl font-bold text-gray-900">{formatClassDisplay(classInfo)}</h1>
+            <div className="flex items-center gap-2 text-gray-600 mt-1 text-sm">
+              {classInfo.section && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded">Section: {classInfo.section}</span>}
+              {classInfo.subject && <span className="bg-green-100 text-green-700 px-2 py-1 rounded">Subject: {classInfo.subject}</span>}
             </div>
           </div>
         </div>
@@ -251,7 +254,7 @@ const ClassDetailsPage = () => {
                   {classInfo.links.map((link) => (
                     <a
                       key={link.id}
-                      href={link.link_url}
+                      href={formatMeetingLinkForDisplay(link.link_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 text-sm text-accent-600 hover:text-accent-700 hover:underline"
@@ -380,12 +383,6 @@ const ClassDetailsPage = () => {
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Email
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Student ID
                   </th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Participation

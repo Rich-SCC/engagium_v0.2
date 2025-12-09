@@ -8,6 +8,16 @@ import { createRoot } from 'react-dom/client';
 import { STORAGE_KEYS } from '../utils/constants.js';
 import './options.css';
 
+// Import class formatter utility
+const formatClassDisplay = (cls) => {
+  if (!cls) return '';
+  const parts = [];
+  if (cls.section) parts.push(cls.section);
+  if (cls.subject) parts.push(cls.subject);
+  const prefix = parts.length > 0 ? parts.join(' ') + ' - ' : '';
+  return `${prefix}${cls.name}`;
+};
+
 function OptionsApp() {
   const [activeTab, setActiveTab] = useState('auth');
   const [authToken, setAuthToken] = useState('');
@@ -17,6 +27,9 @@ function OptionsApp() {
   const [meetingMappings, setMeetingMappings] = useState({});
   const [autoStart, setAutoStart] = useState(false);
   const [matchThreshold, setMatchThreshold] = useState(0.7);
+  const [autoOpenPopup, setAutoOpenPopup] = useState(false);
+  const [showJoinPrompt, setShowJoinPrompt] = useState(false);
+  const [showTrackingReminder, setShowTrackingReminder] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isVerifyingAuth, setIsVerifyingAuth] = useState(false);
   const [message, setMessage] = useState(null);
@@ -46,7 +59,10 @@ function OptionsApp() {
         STORAGE_KEYS.USER_INFO,
         STORAGE_KEYS.MEETING_MAPPINGS,
         STORAGE_KEYS.AUTO_START,
-        STORAGE_KEYS.MATCH_THRESHOLD
+        STORAGE_KEYS.MATCH_THRESHOLD,
+        STORAGE_KEYS.AUTO_OPEN_POPUP,
+        STORAGE_KEYS.SHOW_JOIN_PROMPT,
+        STORAGE_KEYS.SHOW_TRACKING_REMINDER
       ]);
 
       if (storage[STORAGE_KEYS.AUTH_TOKEN]) {
@@ -100,6 +116,9 @@ function OptionsApp() {
       setMeetingMappings(storage[STORAGE_KEYS.MEETING_MAPPINGS] || {});
       setAutoStart(storage[STORAGE_KEYS.AUTO_START] || false);
       setMatchThreshold(storage[STORAGE_KEYS.MATCH_THRESHOLD] || 0.7);
+      setAutoOpenPopup(storage[STORAGE_KEYS.AUTO_OPEN_POPUP] || false);
+      setShowJoinPrompt(storage[STORAGE_KEYS.SHOW_JOIN_PROMPT] || false);
+      setShowTrackingReminder(storage[STORAGE_KEYS.SHOW_TRACKING_REMINDER] !== undefined ? storage[STORAGE_KEYS.SHOW_TRACKING_REMINDER] : true);
 
       setIsVerifyingAuth(false);
       setIsLoading(false);
@@ -224,7 +243,10 @@ function OptionsApp() {
   async function handleSavePreferences() {
     await chrome.storage.local.set({
       [STORAGE_KEYS.AUTO_START]: autoStart,
-      [STORAGE_KEYS.MATCH_THRESHOLD]: matchThreshold
+      [STORAGE_KEYS.MATCH_THRESHOLD]: matchThreshold,
+      [STORAGE_KEYS.AUTO_OPEN_POPUP]: autoOpenPopup,
+      [STORAGE_KEYS.SHOW_JOIN_PROMPT]: showJoinPrompt,
+      [STORAGE_KEYS.SHOW_TRACKING_REMINDER]: showTrackingReminder
     });
 
     showMessage('success', 'Preferences saved successfully');
@@ -412,28 +434,63 @@ function OptionsApp() {
 
               <div className="card">
                 <h3>Existing Mappings</h3>
-                {Object.keys(meetingMappings).length === 0 ? (
-                  <p className="empty-state">No mappings yet. Add one above!</p>
-                ) : (
-                  <div className="mappings-list">
-                    {Object.entries(meetingMappings).map(([meetingId, mapping]) => (
-                      <div key={meetingId} className="mapping-item">
-                        <div className="mapping-info">
-                          <div className="mapping-meeting">{meetingId}</div>
-                          <div className="mapping-arrow">→</div>
-                          <div className="mapping-class">{mapping.class_name}</div>
+                {(() => {
+                  // Collect all class links from all classes
+                  const classLinks = [];
+                  classes.forEach(cls => {
+                    if (cls.links && cls.links.length > 0) {
+                      cls.links.forEach(link => {
+                        classLinks.push({
+                          meetingId: link.link_url,
+                          className: formatClassDisplay(cls),
+                          linkType: link.link_type,
+                          isPrimary: link.is_primary,
+                          label: link.label
+                        });
+                      });
+                    }
+                  });
+
+                  // Show manual mappings from old system (for backward compatibility)
+                  const manualMappings = Object.entries(meetingMappings).map(([meetingId, mapping]) => ({
+                    meetingId,
+                    className: mapping.class_name,
+                    isManual: true
+                  }));
+
+                  const allMappings = [...classLinks, ...manualMappings];
+
+                  if (allMappings.length === 0) {
+                    return <p className="empty-state">No mappings yet. Add one above!</p>;
+                  }
+
+                  return (
+                    <div className="mappings-list">
+                      {allMappings.map((mapping, index) => (
+                        <div key={`${mapping.meetingId}-${index}`} className="mapping-item">
+                          <div className="mapping-info">
+                            <div className="mapping-meeting">
+                              {mapping.meetingId}
+                              {mapping.label && <span className="mapping-label"> ({mapping.label})</span>}
+                              {mapping.isPrimary && <span className="badge-primary">Primary</span>}
+                            </div>
+                            <div className="mapping-arrow">→</div>
+                            <div className="mapping-class">{mapping.className}</div>
+                          </div>
+                          {mapping.isManual && (
+                            <button 
+                              className="button-icon-danger"
+                              onClick={() => handleRemoveMapping(mapping.meetingId)}
+                              title="Remove mapping"
+                            >
+                              ×
+                            </button>
+                          )}
                         </div>
-                        <button 
-                          className="button-icon-danger"
-                          onClick={() => handleRemoveMapping(meetingId)}
-                          title="Remove mapping"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -447,6 +504,7 @@ function OptionsApp() {
               </p>
 
               <div className="card">
+                <h3>Tracking Behavior</h3>
                 <div className="form-group">
                   <label className="checkbox-label">
                     <input
@@ -479,11 +537,57 @@ function OptionsApp() {
                     <span className="slider-value">{matchThreshold.toFixed(2)}</span>
                   </div>
                 </div>
-
-                <button className="button button-primary" onClick={handleSavePreferences}>
-                  Save Preferences
-                </button>
               </div>
+
+              <div className="card">
+                <h3>Quality of Life Features</h3>
+                
+                <div className="form-group">
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={autoOpenPopup}
+                      onChange={(e) => setAutoOpenPopup(e.target.checked)}
+                    />
+                    <span>Auto-open popup for known class meetings</span>
+                  </label>
+                  <p className="help-text">
+                    Automatically opens the extension popup when you join a meeting that's mapped to a class.
+                  </p>
+                </div>
+
+                <div className="form-group">
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={showJoinPrompt}
+                      onChange={(e) => setShowJoinPrompt(e.target.checked)}
+                    />
+                    <span>Show prompt to join meeting when tracking starts</span>
+                  </label>
+                  <p className="help-text">
+                    Displays a visual prompt if you start tracking while still in the waiting room.
+                  </p>
+                </div>
+
+                <div className="form-group">
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={showTrackingReminder}
+                      onChange={(e) => setShowTrackingReminder(e.target.checked)}
+                    />
+                    <span>Show tracking reminder after 60 seconds</span>
+                  </label>
+                  <p className="help-text">
+                    Reminds you to start tracking if you've been in the meeting for 60 seconds without starting. Also enables retroactive participant capture when starting late.
+                  </p>
+                </div>
+              </div>
+
+              <button className="button button-primary" onClick={handleSavePreferences}>
+                Save Preferences
+              </button>
             </div>
           )}
 
@@ -535,7 +639,7 @@ function MappingForm({ classes, onAdd }) {
           <option value="">Select a class...</option>
           {classes.map(c => (
             <option key={c.id} value={c.id}>
-              {c.name}{c.section ? ` (${c.section})` : ''}
+              {formatClassDisplay(c)}
             </option>
           ))}
         </select>

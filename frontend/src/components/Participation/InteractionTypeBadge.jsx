@@ -4,12 +4,30 @@ import {
   FaceSmileIcon,
   MicrophoneIcon,
   VideoCameraIcon,
-  PencilSquareIcon
+  PencilSquareIcon,
+  ArrowRightOnRectangleIcon,
+  ArrowLeftOnRectangleIcon
 } from '@heroicons/react/24/outline';
 
 const InteractionTypeBadge = ({ type, size = 'md' }) => {
   const getConfig = () => {
     switch (type) {
+      case 'join':
+        return {
+          label: 'Joined',
+          icon: ArrowRightOnRectangleIcon,
+          bgColor: 'bg-emerald-100',
+          textColor: 'text-emerald-800',
+          borderColor: 'border-emerald-200'
+        };
+      case 'leave':
+        return {
+          label: 'Left',
+          icon: ArrowLeftOnRectangleIcon,
+          bgColor: 'bg-orange-100',
+          textColor: 'text-orange-800',
+          borderColor: 'border-orange-200'
+        };
       case 'chat':
         return {
           label: 'Chat',

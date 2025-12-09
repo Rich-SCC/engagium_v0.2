@@ -247,6 +247,56 @@ export const WebSocketProvider = ({ children }) => {
       console.log('[WebSocket] ✅ Added attendance event to feed');
     });
 
+    newSocket.on('participant:joined', (data) => {
+      console.log('\\n========================================');
+      console.log('[WebSocket] 📥 RECEIVED: participant:joined');
+      console.log('========================================');
+      console.log('[WebSocket] Session ID:', data.session_id);
+      console.log('[WebSocket] Participant:', data.participant_name);
+      console.log('[WebSocket] Matched:', data.is_matched);
+      console.log('[WebSocket] Student ID:', data.student_id);
+      console.log('[WebSocket] Joined at:', data.joined_at);
+      console.log('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
+      console.log('========================================\\n');
+      
+      setRecentEvents(prev => [{
+        id: `participant-join-${Date.now()}-${Math.random()}`,
+        type: 'participant_joined',
+        session_id: data.session_id,
+        participant_name: data.participant_name,
+        student_id: data.student_id,
+        is_matched: data.is_matched,
+        timestamp: data.joined_at,
+        message: `${data.participant_name} joined${data.is_matched ? '' : ' (unmatched)'}`
+      }, ...prev].slice(0, 50));
+      
+      console.log('[WebSocket] ✅ Added participant join event to feed');
+    });
+
+    newSocket.on('participant:left', (data) => {
+      console.log('\\n========================================');
+      console.log('[WebSocket] 📥 RECEIVED: participant:left');
+      console.log('========================================');
+      console.log('[WebSocket] Session ID:', data.session_id);
+      console.log('[WebSocket] Participant:', data.participant_name);
+      console.log('[WebSocket] Left at:', data.left_at);
+      console.log('[WebSocket] Duration (min):', data.total_duration_minutes);
+      console.log('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
+      console.log('========================================\\n');
+      
+      setRecentEvents(prev => [{
+        id: `participant-left-${Date.now()}-${Math.random()}`,
+        type: 'participant_left',
+        session_id: data.session_id,
+        participant_name: data.participant_name,
+        duration: data.total_duration_minutes,
+        timestamp: data.left_at,
+        message: `${data.participant_name} left (${Math.round(data.total_duration_minutes || 0)}min)`
+      }, ...prev].slice(0, 50));
+      
+      console.log('[WebSocket] ✅ Added participant left event to feed');
+    });
+
     setSocket(newSocket);
 
     // Cleanup on unmount

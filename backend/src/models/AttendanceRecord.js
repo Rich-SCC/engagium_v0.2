@@ -401,6 +401,7 @@ class AttendanceRecord {
   // Mark students as absent who are in the roster but not in attendance
   static async markAbsentStudents(sessionId, classId) {
     // Get students who are in the class but don't have an attendance record
+    // Check both student_id AND participant_name to avoid duplicate key errors
     const query = `
       INSERT INTO attendance_records (session_id, student_id, participant_name, status)
       SELECT $1, s.id, s.full_name, 'absent'
@@ -408,7 +409,8 @@ class AttendanceRecord {
       WHERE s.class_id = $2
         AND NOT EXISTS (
           SELECT 1 FROM attendance_records ar 
-          WHERE ar.session_id = $1 AND ar.student_id = s.id
+          WHERE ar.session_id = $1 
+            AND (ar.student_id = s.id OR ar.participant_name = s.full_name)
         )
       RETURNING *
     `;

@@ -3,6 +3,7 @@ const Class = require('../models/Class');
 const Student = require('../models/Student');
 const AttendanceRecord = require('../models/AttendanceRecord');
 const AttendanceInterval = require('../models/AttendanceInterval');
+const { normalizeMeetingLink } = require('../utils/urlUtils');
 
 // Get all sessions for current instructor
 const getSessions = async (req, res) => {
@@ -126,9 +127,12 @@ const updateSession = async (req, res) => {
       });
     }
 
+    // Normalize meeting link if provided
+    const normalizedLink = meeting_link ? normalizeMeetingLink(meeting_link) : undefined;
+
     const updatedSession = await Session.update(id, {
       title,
-      meeting_link,
+      meeting_link: normalizedLink,
       additional_data
     });
 
@@ -326,7 +330,12 @@ const getSessionWithAttendance = async (req, res) => {
   try {
     const { id } = req.params;
 
+    console.log('[API] getSessionWithAttendance called for session:', id);
+    
     const session = await Session.findWithAttendance(id);
+
+    console.log('[API] Session found:', !!session);
+    console.log('[API] Attendance records:', session?.attendance?.length || 0);
 
     if (!session) {
       return res.status(404).json({
@@ -593,6 +602,9 @@ const startSessionFromMeeting = async (req, res) => {
       });
     }
 
+    // Normalize the meeting link to ensure consistent format
+    const normalizedLink = normalizeMeetingLink(meeting_link);
+
     // Verify class exists and user has access
     const classData = await Class.findById(class_id);
     if (!classData) {
@@ -620,7 +632,7 @@ const startSessionFromMeeting = async (req, res) => {
     const session = await Session.create({
       class_id,
       title: sessionTitle,
-      meeting_link,
+      meeting_link: normalizedLink,
       started_at,
       additional_data: null
     });
@@ -952,10 +964,43 @@ const recordParticipantJoin = async (req, res) => {
       joined_at: joined_at || new Date()
     });
 
+    // Create participation log for the join event
+    if (matchedStudentId) {
+      try {
+        const ParticipationLog = require('../models/ParticipationLog');
+        await ParticipationLog.create({
+          session_id: sessionId,
+          student_id: matchedStudentId,
+          interaction_type: 'join',
+          interaction_value: 'Joined the session',
+          additional_data: {
+            participant_name,
+            joined_at: interval.joined_at
+          }
+        });
+        console.log('[API] Created participation log for join');
+      } catch (logError) {
+        console.warn('[API] Failed to create participation log for join:', logError);
+      }
+    }
+
     // Emit socket event for real-time updates
     const io = global.io || req.app.get('io');
     if (io) {
+      console.log('[API] 📤 Emitting participant:joined to rooms:', {
+        sessionRoom: `session:${sessionId}`,
+        instructorRoom: `instructor_${req.user.id}`
+      });
+      
       io.to(`session:${sessionId}`).emit('participant:joined', {
+        session_id: sessionId,
+        participant_name,
+        student_id: matchedStudentId,
+        joined_at: interval.joined_at,
+        is_matched: !!matchedStudentId
+      });
+      
+      io.to(`instructor_${req.user.id}`).emit('participant:joined', {
         session_id: sessionId,
         participant_name,
         student_id: matchedStudentId,
@@ -986,6 +1031,15 @@ const recordParticipantLeave = async (req, res) => {
   try {
     const { id: sessionId } = req.params;
     const { participant_name, left_at } = req.body;
+
+    console.log('\\n========================================');
+    console.log('[API] 📤 recordParticipantLeave called');
+    console.log('========================================');
+    console.log('[API] Session ID:', sessionId);
+    console.log('[API] Participant:', participant_name);
+    console.log('[API] Left at:', left_at);
+    console.log('[API] User:', req.user.id);
+    console.log('========================================\\n');
 
     if (!participant_name) {
       return res.status(400).json({
@@ -1021,20 +1075,66 @@ const recordParticipantLeave = async (req, res) => {
     }
 
     // Calculate updated total duration
-    const totalDuration = await AttendanceInterval.calculateTotalDuration(sessionId, participant_name);
+    const durationData = await AttendanceInterval.calculateTotalDuration(sessionId, participant_name);
+    const totalDuration = durationData?.total_minutes || 0;
+    
+    console.log('[API] Duration calculation:', {
+      totalMinutes: totalDuration,
+      intervalCount: durationData?.interval_count,
+      firstJoined: durationData?.first_joined_at,
+      lastLeft: durationData?.last_left_at
+    });
     
     // Update the attendance record with new duration
     await AttendanceRecord.updateDuration(sessionId, participant_name, totalDuration, left_at || new Date());
 
+    // Create participation log for the leave event
+    const attendanceRecord = await AttendanceRecord.findBySessionAndParticipant(sessionId, participant_name);
+    if (attendanceRecord && attendanceRecord.student_id) {
+      try {
+        const ParticipationLog = require('../models/ParticipationLog');
+        await ParticipationLog.create({
+          session_id: sessionId,
+          student_id: attendanceRecord.student_id,
+          interaction_type: 'leave',
+          interaction_value: 'Left the session',
+          additional_data: {
+            participant_name,
+            left_at: interval.left_at,
+            duration_minutes: Math.round(totalDuration)
+          }
+        });
+        console.log('[API] Created participation log for leave');
+      } catch (logError) {
+        console.warn('[API] Failed to create participation log for leave:', logError);
+      }
+    }
+
     // Emit socket event for real-time updates
     const io = global.io || req.app.get('io');
     if (io) {
+      console.log('[API] 📤 Emitting participant:left to rooms:', {
+        sessionRoom: `session:${sessionId}`,
+        instructorRoom: `instructor_${req.user.id}`,
+        participant: participant_name,
+        duration: totalDuration
+      });
+      
       io.to(`session:${sessionId}`).emit('participant:left', {
         session_id: sessionId,
         participant_name,
         left_at: interval.left_at,
         total_duration_minutes: totalDuration
       });
+      
+      io.to(`instructor_${req.user.id}`).emit('participant:left', {
+        session_id: sessionId,
+        participant_name,
+        left_at: interval.left_at,
+        total_duration_minutes: totalDuration
+      });
+      
+      console.log('[API] ✅ Broadcasted participant:left successfully');
     }
 
     res.json({
@@ -1101,6 +1201,13 @@ const linkParticipantToStudent = async (req, res) => {
     const { id: sessionId } = req.params;
     const { participant_name, student_id, create_student = false } = req.body;
 
+    console.log('[API] linkParticipantToStudent called:', {
+      sessionId,
+      participant_name,
+      student_id,
+      create_student
+    });
+
     if (!participant_name) {
       return res.status(400).json({
         success: false,
@@ -1125,11 +1232,25 @@ const linkParticipantToStudent = async (req, res) => {
     }
 
     let targetStudentId = student_id;
+    let createdNew = false;
+    let studentRecord = null;
 
     // Create new student from participant if requested
     if (create_student && !student_id) {
-      const newStudent = await Student.createFromParticipant(session.class_id, participant_name);
-      targetStudentId = newStudent.id;
+      console.log('[API] Creating student from participant:', participant_name);
+      
+      const result = await Student.createFromParticipant(session.class_id, participant_name);
+      
+      // Handle the return structure: { created: boolean, student: object }
+      studentRecord = result.student || result;
+      createdNew = result.created !== false; // true if newly created
+      targetStudentId = studentRecord.id;
+      
+      console.log('[API] Student result:', {
+        created: createdNew,
+        studentId: targetStudentId,
+        studentName: studentRecord.full_name
+      });
     }
 
     if (!targetStudentId) {
@@ -1140,29 +1261,49 @@ const linkParticipantToStudent = async (req, res) => {
     }
 
     // Link attendance record to student
+    console.log('[API] Linking attendance record:', {
+      sessionId,
+      participant_name,
+      targetStudentId
+    });
+    
     const attendanceRecord = await AttendanceRecord.linkToStudent(sessionId, participant_name, targetStudentId);
+    
+    if (!attendanceRecord) {
+      console.warn('[API] No attendance record found for participant:', participant_name);
+    }
 
     // Link all intervals to student
+    console.log('[API] Linking intervals to student');
     await AttendanceInterval.linkToStudent(sessionId, participant_name, targetStudentId);
 
-    // Get the student info
-    const student = await Student.findById(targetStudentId);
+    // Get the student info if not already fetched
+    if (!studentRecord) {
+      studentRecord = await Student.findById(targetStudentId);
+    }
+
+    const message = create_student && createdNew
+      ? `Created student "${participant_name}" and linked attendance`
+      : `Linked attendance to student "${studentRecord.full_name}"`;
+
+    console.log('[API] ✅ Successfully linked participant to student:', message);
 
     res.json({
       success: true,
       data: {
         attendance_record: attendanceRecord,
-        student
+        student: studentRecord,
+        created_new: createdNew
       },
-      message: create_student 
-        ? `Created student "${participant_name}" and linked attendance`
-        : `Linked attendance to student "${student.full_name}"`
+      message
     });
   } catch (error) {
-    console.error('Link participant to student error:', error);
+    console.error('[API] Link participant to student error:', error);
+    console.error('[API] Error stack:', error.stack);
+    
     res.status(500).json({
       success: false,
-      error: 'Failed to link participant to student'
+      error: error.message || 'Failed to link participant to student'
     });
   }
 };

@@ -9,6 +9,16 @@ import { MESSAGE_TYPES, SESSION_STATUS } from '../utils/constants.js';
 import { formatTime, formatDuration, secondsToDuration } from '../utils/date-utils.js';
 import './popup.css';
 
+// Class formatter utility
+const formatClassDisplay = (cls) => {
+  if (!cls) return '';
+  const parts = [];
+  if (cls.section) parts.push(cls.section);
+  if (cls.subject) parts.push(cls.subject);
+  const prefix = parts.length > 0 ? parts.join(' ') + ' - ' : '';
+  return `${prefix}${cls.name}`;
+};
+
 function PopupApp() {
   const [sessionStatus, setSessionStatus] = useState(null);
   const [participants, setParticipants] = useState([]);
@@ -237,7 +247,9 @@ function PopupApp() {
           {/* Mapped Class (Auto-Track) */}
           {meetingDetected.mapped_class_id && meetingDetected.mapped_class_name && (
             <div className="meeting-action-mapped">
-              <p className="mapped-label">Track attendance for:</p>
+              <p className="mapped-label">
+                {meetingDetected.auto_mapped ? '✓ Auto-mapped to:' : 'Track attendance for:'}
+              </p>
               <div className="mapped-class">{meetingDetected.mapped_class_name}</div>
               <div className="button-group">
                 <button 
@@ -270,7 +282,7 @@ function PopupApp() {
                 <option value="">-- Select a class --</option>
                 {availableClasses.map(cls => (
                   <option key={cls.id} value={cls.id}>
-                    {cls.name}{cls.section ? ` (${cls.section})` : ''}
+                    {formatClassDisplay(cls)}
                   </option>
                 ))}
               </select>

@@ -22,12 +22,11 @@ import {
   getParticipantsBySession,
   getEventsBySession,
   clearSessionData,
-  clearAllData,
-  getSetting,
-  setSetting
+  clearAllData
 } from '../utils/storage.js';
 import { now } from '../utils/date-utils.js';
 import { debug } from '../utils/debug-logger.js';
+import { STORAGE_KEYS } from '../utils/constants.js';
 
 console.log('[Background] Service worker started');
 // Use setTimeout to ensure storage is ready before logging
@@ -92,6 +91,17 @@ async function handleMessage(message, sender) {
       // Meeting left - automatically end session if one is active
       console.log('[Background] Meeting left:', data.meetingId);
       return await handleMeetingLeft(data);
+      
+    case 'OPEN_POPUP_FROM_REMINDER':
+      // User clicked "Start Tracking" from the 60-second reminder
+      console.log('[Background] Opening popup from tracking reminder');
+      try {
+        await chrome.action.openPopup();
+      } catch (error) {
+        console.error('[Background] Failed to open popup:', error);
+        // Fallback: open options page or show notification
+      }
+      return { success: true };
 
     // ========== From Popup ==========
     case MESSAGE_TYPES.START_SESSION:
@@ -133,6 +143,10 @@ async function handleMessage(message, sender) {
     case 'IS_AUTHENTICATED':
       return await isAuthenticated();
 
+    case 'DEBUG_LOG_ADDED':
+      // Broadcast from debug logger - ignore in service worker
+      return { received: true };
+
     case 'CLEAR_ALL_SESSIONS':
       // For debugging/recovery - clears all local session data
       await clearAllData();
@@ -160,16 +174,66 @@ async function handleMeetingDetected(data, sender) {
     tab_id: sender.tab.id
   };
 
-  // Check if meeting is mapped to a class
-  const mappings = await getSetting('meeting_mappings') || {};
-  const classMapping = mappings[meetingId];
-
-  if (classMapping) {
-    currentMeetingDetection.mapped_class_id = classMapping.class_id;
-    currentMeetingDetection.mapped_class_name = classMapping.class_name;
+  // Check if meeting is mapped to a class via saved links
+  try {
+    const authenticated = await isAuthenticated();
+    if (authenticated) {
+      const classes = await getClasses(); // Includes links
+      const { formatGoogleMeetUrl } = await import('../utils/url-utils.js');
+      
+      // Format the meeting ID to match stored format
+      const formattedMeetingId = platform === 'google-meet' 
+        ? formatGoogleMeetUrl(meetingId)
+        : meetingId;
+      
+      console.log('[Background] Checking for matching class link:', formattedMeetingId);
+      
+      // Find a class with a matching link
+      for (const cls of classes) {
+        if (cls.links && cls.links.length > 0) {
+          const matchingLink = cls.links.find(link => {
+            // Normalize both links for comparison (remove protocol, case-insensitive)
+            const storedLink = link.link_url.replace(/^https?:\/\//i, '').toLowerCase();
+            const detectedLink = formattedMeetingId.replace(/^https?:\/\//i, '').toLowerCase();
+            return storedLink === detectedLink;
+          });
+          
+          if (matchingLink) {
+            // Format class display with hierarchy: Section Subject - Course
+            const parts = [];
+            if (cls.section) parts.push(cls.section);
+            if (cls.subject) parts.push(cls.subject);
+            const prefix = parts.length > 0 ? parts.join(' ') + ' - ' : '';
+            const formattedClassName = `${prefix}${cls.name}`;
+            
+            console.log('[Background] Auto-mapped meeting to class:', formattedClassName);
+            currentMeetingDetection.mapped_class_id = cls.id;
+            currentMeetingDetection.mapped_class_name = formattedClassName;
+            currentMeetingDetection.auto_mapped = true;
+            
+            // Auto-open popup if setting is enabled and meeting is auto-mapped
+            const storage = await chrome.storage.local.get([STORAGE_KEYS.AUTO_OPEN_POPUP]);
+            const autoOpenPopup = storage[STORAGE_KEYS.AUTO_OPEN_POPUP] || false;
+            if (autoOpenPopup) {
+              console.log('[Background] Auto-opening popup for known class meeting');
+              try {
+                await chrome.action.openPopup();
+              } catch (error) {
+                // openPopup() might fail if called too soon or in some contexts
+                console.log('[Background] Could not auto-open popup:', error.message);
+              }
+            }
+            
+            break;
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Background] Error checking class links:', error);
   }
 
-  console.log('[Background] Meeting detection stored, awaiting user action');
+  console.log('[Background] Meeting detection stored:', currentMeetingDetection);
   
   return { 
     detected: true, 
@@ -241,10 +305,7 @@ async function handleMeetingLeft(data) {
   
   if (!session) {
     console.log('[Background] No active session to end');
-    // Clear meeting detection state if any
-    if (currentMeetingDetection?.meeting_id === meetingId) {
-      currentMeetingDetection = null;
-    }
+    // Don't clear meeting detection if no session - user might still want to start tracking
     return { acknowledged: true, sessionEnded: false };
   }
   
@@ -256,7 +317,27 @@ async function handleMeetingLeft(data) {
   
   console.log('[Background] Auto-ending session due to meeting exit:', session.id);
   
+  // Store tab_id before clearing detection state
+  const tabId = currentMeetingDetection?.tab_id;
+  
+  // Clear meeting detection state
+  currentMeetingDetection = null;
+  
   try {
+    // Notify content script to stop tracking (if tab still exists)
+    if (tabId) {
+      try {
+        await chrome.tabs.sendMessage(tabId, {
+          type: MESSAGE_TYPES.SESSION_ENDED,
+          sessionId: session.id
+        });
+        console.log('[Background] Notified content script to stop tracking');
+      } catch (error) {
+        // Tab might be closing/closed, ignore error
+        console.log('[Background] Could not notify content script (tab may be closed)');
+      }
+    }
+    
     // End the session (this handles all cleanup and sync)
     await handleEndSession({ sessionId: session.id });
     console.log('[Background] Session auto-ended successfully');
@@ -295,8 +376,15 @@ async function handleStartSession(data) {
     if (save_meeting_link && meeting_id) {
       try {
         const { addClassLink } = await import('./api-client.js');
+        const { formatGoogleMeetUrl } = await import('../utils/url-utils.js');
+        
+        // Format the link properly before saving
+        const formattedLink = platform === 'google-meet' 
+          ? formatGoogleMeetUrl(meeting_id)
+          : meeting_id;
+        
         await addClassLink(class_id, {
-          link: meeting_id,
+          link: formattedLink,
           platform: platform || 'google-meet',
           is_active: true
         });
@@ -481,6 +569,9 @@ async function addUnmappedParticipantsAsStudents(sessionId, classId) {
       for (const newStudent of result.students) {
         // Find matching participant by name
         const matchingParticipant = unmappedParticipants.find(p => {
+          if (!p || !p.name || !newStudent || !newStudent.first_name || !newStudent.last_name) {
+            return false;
+          }
           const participantName = p.name.toLowerCase();
           const studentName = `${newStudent.first_name} ${newStudent.last_name}`.toLowerCase();
           return participantName.includes(newStudent.first_name.toLowerCase()) ||
@@ -583,6 +674,11 @@ chrome.runtime.onInstalled.addListener((details) => {
     setSetting('auto_start', false);
     setSetting('match_threshold', 0.7);
     setSetting('meeting_mappings', {});
+    
+    // QoL features (default: OFF for non-intrusive behavior)
+    setSetting('auto_open_popup', false); // Auto-open popup for known class meetings
+    setSetting('show_join_prompt', false); // Show visual prompt for Join Now button
+    setSetting('show_tracking_reminder', true); // Show reminder if not tracking after 60s (default ON - helpful)
 
     // Open options page
     chrome.runtime.openOptionsPage();
@@ -596,6 +692,67 @@ chrome.runtime.onInstalled.addListener((details) => {
 self.addEventListener('online', () => {
   console.log('[Background] Back online, processing sync queue');
   syncQueueManager.processQueue();
+});
+
+// ============================================================================
+// Tab Management - Auto-end session on tab close or navigation away
+// ============================================================================
+
+/**
+ * Handle tab removal (user closes the tab)
+ */
+chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
+  console.log('[Background] Tab removed:', tabId);
+  
+  // Check if this was the meeting tab
+  if (currentMeetingDetection && currentMeetingDetection.tab_id === tabId) {
+    console.log('[Background] Meeting tab closed, auto-ending session');
+    
+    const meetingId = currentMeetingDetection.meeting_id;
+    currentMeetingDetection = null; // Clear detection state
+    
+    // Auto-end session if active
+    await handleMeetingLeft({ meetingId });
+  }
+});
+
+/**
+ * Handle tab URL updates (user navigates away from meet)
+ * Does NOT trigger on refresh or tab switching - only on actual navigation away
+ */
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // Only process when URL actually changes to a different page
+  if (!changeInfo.url) return;
+  
+  // Check if this is the meeting tab
+  if (!currentMeetingDetection || currentMeetingDetection.tab_id !== tabId) {
+    return;
+  }
+  
+  // Check if navigated away from the specific Google Meet meeting
+  // User should still be in the SAME meeting with the SAME meeting ID
+  const meetingIdMatch = changeInfo.url.match(/meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})/);
+  const newMeetingId = meetingIdMatch ? meetingIdMatch[1] : null;
+  
+  // End session if:
+  // 1. No longer on meet.google.com at all
+  // 2. On meet.google.com but not in a meeting (home page, settings, etc.)
+  // 3. In a different meeting (meeting ID changed)
+  const leftMeeting = !changeInfo.url.includes('meet.google.com') || 
+                      !newMeetingId || 
+                      newMeetingId !== currentMeetingDetection.meeting_id;
+  
+  if (leftMeeting) {
+    console.log('[Background] Navigated away from meeting (tab navigation), auto-ending session');
+    console.log('[Background] Old meeting:', currentMeetingDetection.meeting_id, '| New URL:', changeInfo.url);
+    
+    const meetingId = currentMeetingDetection.meeting_id;
+    currentMeetingDetection = null; // Clear detection state
+    
+    // Auto-end session if active
+    await handleMeetingLeft({ meetingId });
+  }
+  // If still in the same meeting URL, don't do anything - user can refresh freely
 });
 
 console.log('[Background] Service worker initialized');

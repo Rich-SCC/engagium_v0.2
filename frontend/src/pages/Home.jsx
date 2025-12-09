@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { classesAPI, sessionsAPI } from '@/services/api';
+import { formatClassDisplay } from '@/utils/classFormatter';
 import { 
   BookOpenIcon, 
   ChartBarIcon, 
@@ -142,9 +143,9 @@ const Home = () => {
                 to={`/app/classes/${cls.id}`}
                 className="block p-4 border border-gray-200 rounded-lg hover:border-accent-300 hover:shadow-md transition"
               >
-                <h3 className="font-semibold text-gray-900 mb-2">{cls.name}</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">{formatClassDisplay(cls)}</h3>
                 <div className="flex items-center justify-between text-sm text-gray-600">
-                  <span>{cls.section || 'No section'}</span>
+                  <span>{cls.description ? cls.description.substring(0, 50) + '...' : 'No description'}</span>
                   <span className="flex items-center">
                     <UserGroupIcon className="w-4 h-4 mr-1" />
                     {cls.student_count || 0}

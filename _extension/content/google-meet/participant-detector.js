@@ -17,10 +17,13 @@ import { generateParticipantId, log, warn } from './utils.js';
 import { sendImmediate } from './event-emitter.js';
 import { MESSAGE_TYPES } from '../../utils/constants.js';
 import { now } from '../../utils/date-utils.js';
+import { openPeoplePanel, isPeoplePanelOpen } from './people-panel.js';
 
 let peoplePanelObserver = null;
 let toastObserver = null;
 let panelWatcher = null;
+let pendingPanelOpen = false;
+let recentToasts = new Map(); // Track recent toasts to prevent duplicates
 
 /**
  * Starts monitoring participants using People Panel + Toast notifications
@@ -29,17 +32,20 @@ let panelWatcher = null;
 export function startParticipantMonitoring(state) {
   log('Starting participant monitoring (ARIA-based)...');
   
-  // Initial scan of existing participants
-  scanCurrentParticipants(state);
+  // Ensure people panel is open before scanning
+  ensurePeoplePanelOpen().then(() => {
+    // Initial scan of existing participants
+    scanCurrentParticipants(state);
+    
+    // Set up People Panel observer (primary source)
+    if (!setupPeoplePanelObserver(state)) {
+      // Panel not found yet, watch for it
+      setupPanelWatcher(state);
+    }
+  });
   
   // Set up toast observer for join/leave events (provides timestamps)
   setupToastObserver(state);
-  
-  // Set up People Panel observer (primary source)
-  if (!setupPeoplePanelObserver(state)) {
-    // Panel not found yet, watch for it
-    setupPanelWatcher(state);
-  }
 }
 
 /**
@@ -84,9 +90,26 @@ function setupToastObserver(state) {
         if (textLower.includes(CONFIG.PATTERNS.joined)) {
           const name = extractNameFromToast(text, CONFIG.PATTERNS.joined);
           if (name && !isInvalidParticipant(name)) {
+            // Prevent duplicate processing of the same toast
+            const toastKey = `join:${name}:${Date.now()}`;
+            const recentKey = `join:${name}`;
+            const lastSeen = recentToasts.get(recentKey);
+            
+            // Ignore if we saw this exact toast within the last 2 seconds
+            if (lastSeen && Date.now() - lastSeen < 2000) {
+              return;
+            }
+            
+            recentToasts.set(recentKey, Date.now());
+            // Clean up old entries after 5 seconds
+            setTimeout(() => recentToasts.delete(recentKey), 5000);
+            
             log('Toast: Participant joined:', name);
-            // Delay to let DOM update, then rescan
-            setTimeout(() => rescanAndDetectNew(state), 300);
+            // Ensure people panel is open to detect the participant
+            ensurePeoplePanelOpenDebounced().then(() => {
+              // Delay to let DOM update, then rescan
+              setTimeout(() => rescanAndDetectNew(state), 300);
+            });
           }
         }
         
@@ -94,8 +117,24 @@ function setupToastObserver(state) {
         if (textLower.includes(CONFIG.PATTERNS.left)) {
           const name = extractNameFromToast(text, CONFIG.PATTERNS.left);
           if (name && !isInvalidParticipant(name)) {
+            // Prevent duplicate processing of the same toast
+            const recentKey = `leave:${name}`;
+            const lastSeen = recentToasts.get(recentKey);
+            
+            // Ignore if we saw this exact toast within the last 2 seconds
+            if (lastSeen && Date.now() - lastSeen < 2000) {
+              return;
+            }
+            
+            recentToasts.set(recentKey, Date.now());
+            // Clean up old entries after 5 seconds
+            setTimeout(() => recentToasts.delete(recentKey), 5000);
+            
             log('Toast: Participant left:', name);
-            setTimeout(() => detectLeftParticipants(state), 300);
+            // Ensure people panel is open to verify the participant left
+            ensurePeoplePanelOpenDebounced().then(() => {
+              setTimeout(() => detectLeftParticipants(state), 300);
+            });
           }
         }
       }
@@ -325,8 +364,10 @@ function detectLeftParticipants(state) {
       sendImmediate(MESSAGE_TYPES.PARTICIPANT_LEFT, {
         platform: 'google-meet',
         meetingId: state.meetingId,
+        name: participant.name, // Send name instead of/in addition to participantId
         participantId: participantId,
-        leftAt: now()
+        leftAt: now(),
+        timestamp: now()
       });
     }
   }
@@ -569,4 +610,57 @@ export function getParticipantMicStatus(state) {
   }
   
   return micStatus;
+}
+
+/**
+ * Ensures the people panel is open for accurate participant tracking
+ * @returns {Promise<boolean>} True if panel is open or was opened successfully
+ */
+async function ensurePeoplePanelOpen() {
+  if (isPeoplePanelOpen()) {
+    return true;
+  }
+  
+  log('People panel not open, attempting to open...');
+  const opened = await openPeoplePanel();
+  
+  if (opened) {
+    log('People panel opened successfully');
+  } else {
+    warn('Failed to open people panel - participant tracking may be incomplete');
+  }
+  
+  return opened;
+}
+
+/**
+ * Debounced version to prevent rapid-fire panel opening attempts
+ * @returns {Promise<boolean>}
+ */
+async function ensurePeoplePanelOpenDebounced() {
+  // If already open, return immediately
+  if (isPeoplePanelOpen()) {
+    return true;
+  }
+  
+  // If already attempting to open, wait for that attempt
+  if (pendingPanelOpen) {
+    log('Panel open already in progress, waiting...');
+    // Wait a bit for the pending operation to complete
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return isPeoplePanelOpen();
+  }
+  
+  // Mark that we're attempting to open
+  pendingPanelOpen = true;
+  
+  try {
+    const result = await ensurePeoplePanelOpen();
+    return result;
+  } finally {
+    // Clear the flag after a short delay to prevent immediate re-attempts
+    setTimeout(() => {
+      pendingPanelOpen = false;
+    }, 1000);
+  }
 }

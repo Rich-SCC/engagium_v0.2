@@ -67,7 +67,10 @@ export const STORAGE_KEYS = {
   MEETING_MAPPINGS: 'meeting_mappings',
   AUTO_START: 'auto_start',
   MATCH_THRESHOLD: 'match_threshold',
-  LAST_SYNC: 'last_sync'
+  LAST_SYNC: 'last_sync',
+  AUTO_OPEN_POPUP: 'auto_open_popup',
+  SHOW_JOIN_PROMPT: 'show_join_prompt',
+  SHOW_TRACKING_REMINDER: 'show_tracking_reminder'
 };
 
 // Detect dev vs production using chrome.runtime.getManifest()

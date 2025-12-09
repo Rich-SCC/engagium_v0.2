@@ -1,11 +1,12 @@
 /**
  * Google Meet Content Script - URL Monitor
  * Monitors URL changes for meeting detection and platform switching
+ * Does NOT aggressively detect refresh - only navigation away from meeting
  */
 
 import { CONFIG } from './config.js';
 import { clearParticipants } from './state.js';
-import { log, sendMessage } from './utils.js';
+import { log, warn, sendMessage } from './utils.js';
 import { MESSAGE_TYPES } from '../../utils/constants.js';
 import { now } from '../../utils/date-utils.js';
 
@@ -20,6 +21,7 @@ export function extractMeetingId() {
 
 /**
  * Sets up URL monitoring for platform switches
+ * Does NOT monitor for refresh - user can refresh freely without ending session
  * @param {Object} state - State object
  * @param {Function} onMeetingLeft - Callback when meeting is left
  * @param {Function} onPlatformSwitch - Callback when platform is switched
@@ -62,6 +64,8 @@ export function monitorURLChanges(state, onMeetingLeft, onPlatformSwitch) {
     originalReplaceState.apply(this, args);
     handleURLChange();
   };
+  
+  log('URL monitoring active (navigation only, not refresh)');
 }
 
 /**

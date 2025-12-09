@@ -20,7 +20,7 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE interaction_type AS ENUM ('manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'platform_switch', 'hand_raise');
+    CREATE TYPE interaction_type AS ENUM ('manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'hand_raise', 'join', 'leave');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
@@ -208,7 +208,7 @@ CREATE INDEX IF NOT EXISTS idx_attendance_intervals_session_id ON attendance_int
 CREATE INDEX IF NOT EXISTS idx_attendance_intervals_student_id ON attendance_intervals(student_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_intervals_participant_name ON attendance_intervals(participant_name);
 
--- Create updated_at trigger function
+-- Create updated_at trigger function (must exist before creating triggers)
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -217,19 +217,31 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Create triggers for updated_at (DROP IF EXISTS for idempotency)
-DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Create triggers for updated_at
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_users_updated_at') THEN
+        CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
-DROP TRIGGER IF EXISTS update_classes_updated_at ON classes;
-CREATE TRIGGER update_classes_updated_at BEFORE UPDATE ON classes
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_classes_updated_at') THEN
+        CREATE TRIGGER update_classes_updated_at BEFORE UPDATE ON classes
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
-DROP TRIGGER IF EXISTS update_session_links_updated_at ON session_links;
-CREATE TRIGGER update_session_links_updated_at BEFORE UPDATE ON session_links
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_session_links_updated_at') THEN
+        CREATE TRIGGER update_session_links_updated_at BEFORE UPDATE ON session_links
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
-DROP TRIGGER IF EXISTS update_attendance_records_updated_at ON attendance_records;
-CREATE TRIGGER update_attendance_records_updated_at BEFORE UPDATE ON attendance_records
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_attendance_records_updated_at') THEN
+        CREATE TRIGGER update_attendance_records_updated_at BEFORE UPDATE ON attendance_records
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;

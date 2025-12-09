@@ -151,37 +151,8 @@ const ClassFormModal = ({ isOpen, onClose, onSubmit, initialData = null, isLoadi
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Class Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Class Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="name"
-              value={formData.name}
-              onChange={handleChange}
-              required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-              placeholder="e.g., Introduction to Psychology"
-            />
-          </div>
-
-          {/* Subject and Section */}
+          {/* Section and Subject */}
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Subject
-              </label>
-              <input
-                type="text"
-                name="subject"
-                value={formData.subject}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                placeholder="e.g., Psychology"
-              />
-            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Section
@@ -192,9 +163,41 @@ const ClassFormModal = ({ isOpen, onClose, onSubmit, initialData = null, isLoadi
                 value={formData.section}
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                placeholder="e.g., A, B, 101"
+                placeholder="e.g., A, B, CS101"
               />
+              <p className="text-xs text-gray-500 mt-1">Section identifier</p>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Subject
+              </label>
+              <input
+                type="text"
+                name="subject"
+                value={formData.subject}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                placeholder="e.g., Computer Science"
+              />
+              <p className="text-xs text-gray-500 mt-1">Subject area</p>
+            </div>
+          </div>
+
+          {/* Course Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Course Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              required
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+              placeholder="e.g., Data Structures and Algorithms"
+            />
+            <p className="text-xs text-gray-500 mt-1">Specific course title</p>
           </div>
 
           {/* Description */}

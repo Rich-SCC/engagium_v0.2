@@ -3,8 +3,9 @@ import { XMarkIcon, PlusIcon, TrashIcon, StarIcon } from '@heroicons/react/24/ou
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { classesAPI } from '@/services/api';
+import { formatMeetingLinkForDisplay, normalizeMeetingUrl } from '@/utils/urlUtils';
 
-const LINK_TYPES = ['zoom', 'meet', 'teams', 'other'];
+const LINK_TYPES = ['zoom', 'meet', 'other'];
 
 const SessionLinksModal = ({ isOpen, onClose, classId }) => {
   const queryClient = useQueryClient();
@@ -55,7 +56,12 @@ const SessionLinksModal = ({ isOpen, onClose, classId }) => {
   const handleAddLink = (e) => {
     e.preventDefault();
     if (newLink.link_url) {
-      addLinkMutation.mutate(newLink);
+      // Normalize the URL by removing protocol before saving
+      const normalizedUrl = normalizeMeetingUrl(newLink.link_url);
+      addLinkMutation.mutate({
+        ...newLink,
+        link_url: normalizedUrl
+      });
     }
   };
 
@@ -101,13 +107,16 @@ const SessionLinksModal = ({ isOpen, onClose, classId }) => {
                     Link URL <span className="text-red-500">*</span>
                   </label>
                   <input
-                    type="url"
+                    type="text"
                     value={newLink.link_url}
                     onChange={(e) => setNewLink({ ...newLink, link_url: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
-                    placeholder="https://zoom.us/j/..."
+                    placeholder="meet.google.com/abc-defg-hij or zoom.us/j/123456789"
                     required
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Protocol (https://) is optional
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -218,7 +227,7 @@ const SessionLinksModal = ({ isOpen, onClose, classId }) => {
                           </span>
                         </div>
                         <a
-                          href={link.link_url}
+                          href={formatMeetingLinkForDisplay(link.link_url)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-sm text-blue-600 hover:underline break-all"

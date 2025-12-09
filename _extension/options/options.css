@@ -426,6 +426,30 @@ body {
   padding: 6px 12px;
   border-radius: 6px;
   border: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mapping-label {
+  font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.badge-primary {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .mapping-arrow {

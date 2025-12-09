@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { classesAPI } from '@/services/api';
+import { formatClassDisplay } from '@/utils/classFormatter';
 import { 
   PlusIcon, 
   EllipsisVerticalIcon,
@@ -15,6 +16,7 @@ import {
 import ClassFormModal from '@/components/ClassDetails/ClassFormModal';
 import SessionLinksModal from '@/components/ClassDetails/SessionLinksModal';
 import ExemptionListModal from '@/components/ClassDetails/ExemptionListModal';
+import { formatMeetingLinkForDisplay } from '@/utils/urlUtils';
 
 const MyClasses = () => {
   const navigate = useNavigate();
@@ -166,10 +168,9 @@ const MyClasses = () => {
             >
               <div className="flex justify-between items-start mb-4">
                 <div className="flex-1">
-                  <h3 className="font-bold text-xl mb-2 text-gray-900">{cls.name}</h3>
+                  <h3 className="font-bold text-xl mb-2 text-gray-900">{formatClassDisplay(cls)}</h3>
                   <div className="flex items-center gap-2 text-sm text-gray-600">
-                    {cls.subject && <span>{cls.subject}</span>}
-                    {cls.section && <span>• Section {cls.section}</span>}
+                    {cls.description && <span className="text-gray-500">{cls.description.substring(0, 100)}{cls.description.length > 100 ? '...' : ''}</span>}
                   </div>
                   {cls.status === 'archived' && (
                     <span className="inline-block mt-3 px-3 py-1 bg-gray-100 text-gray-600 text-xs rounded-lg font-medium">
@@ -305,14 +306,14 @@ const MyClasses = () => {
                   {cls.links.map((link) => (
                     <a
                       key={link.id}
-                      href={link.link_url}
+                      href={formatMeetingLinkForDisplay(link.link_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 text-sm text-accent-600 hover:text-accent-700 hover:underline"
                     >
                       <LinkIcon className="w-4 h-4 flex-shrink-0" />
                       <span className="truncate">
-                        {link.label || link.link_type === 'zoom' ? 'Zoom Meeting' : 'Google Meet'}
+                        {link.label || (link.link_type === 'zoom' ? 'Zoom Meeting' : 'Google Meet')}
                         {link.is_primary && <span className="ml-2 text-xs bg-accent-100 text-accent-700 px-2 py-0.5 rounded">Primary</span>}
                       </span>
                     </a>

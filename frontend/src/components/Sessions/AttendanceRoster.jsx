@@ -43,6 +43,10 @@ const AttendanceRoster = ({
         participantName: record.participant_name,
         createStudent: true
       });
+      // The parent component will invalidate queries and refresh the data
+      // The button will disappear on next render when student_id is populated
+    } catch (error) {
+      console.error('[AttendanceRoster] Failed to add to roster:', error);
     } finally {
       setAddingToRoster(null);
     }

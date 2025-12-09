@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { sessionsAPI, classesAPI } from '@/services/api';
+import { formatClassDisplay } from '@/utils/classFormatter';
 import { Link } from 'react-router-dom';
 import {
   CalendarIcon,
@@ -36,21 +37,34 @@ const Sessions = () => {
   const calendarSessions = calendarData?.data || [];
   const classes = classesData?.data || [];
 
-  const formatDateTime = (session) => {
-    // Prefer session_date/session_time, fallback to started_at
+  const formatSessionTime = (session) => {
+    // Format: "Dec 8 • 7:35 PM - 8:20 PM"
+    if (session.started_at) {
+      const startDate = new Date(session.started_at);
+      const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const startTime = startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      
+      if (session.ended_at) {
+        const endDate = new Date(session.ended_at);
+        const endTime = endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        return `${dateStr} • ${startTime} - ${endTime}`;
+      }
+      
+      return `${dateStr} • ${startTime} - In Progress`;
+    }
+    
+    // Fallback for scheduled sessions
     if (session.session_date) {
       const date = new Date(session.session_date);
-      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      const timeStr = session.session_time ? session.session_time.substring(0, 5) : '';
-      return { date: dateStr, time: timeStr };
-    } else if (session.started_at) {
-      const date = new Date(session.started_at);
-      return {
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-      };
+      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      if (session.session_time) {
+        const timeStr = session.session_time.substring(0, 5);
+        return `${dateStr} • ${timeStr}`;
+      }
+      return dateStr;
     }
-    return { date: 'N/A', time: '' };
+    
+    return 'N/A';
   };
 
   const handleMonthChange = (year, month) => {
@@ -127,13 +141,10 @@ const Sessions = () => {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                      Session
+                      Session Time
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                       Class
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                      Date & Time
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                       Status
@@ -146,27 +157,14 @@ const Sessions = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {sessions.map((session) => {
                     const classInfo = classes.find(c => c.id === session.class_id);
-                    const dateTime = formatDateTime(session);
+                    const sessionTime = formatSessionTime(session);
                     return (
                       <tr key={session.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{sessionTime}</div>
+                        </td>
                         <td className="px-6 py-4">
-                          <div className="flex flex-col">
-                            <div className="text-sm font-medium text-gray-900">{session.title || classInfo?.name || 'Untitled Session'}</div>
-                            {session.topic && (
-                              <div className="text-sm text-gray-500">{session.topic}</div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{classInfo?.name || 'N/A'}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {dateTime.date}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {dateTime.time}
-                          </div>
+                          <div className="text-sm text-gray-900">{classInfo ? formatClassDisplay(classInfo) : 'N/A'}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span

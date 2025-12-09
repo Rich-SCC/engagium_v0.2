@@ -6,7 +6,10 @@ import {
   MicrophoneIcon,
   VideoCameraIcon,
   ArrowRightOnRectangleIcon,
-  SparklesIcon
+  ArrowLeftOnRectangleIcon,
+  SparklesIcon,
+  UserPlusIcon,
+  UserMinusIcon
 } from '@heroicons/react/24/outline';
 
 const LiveEventFeed = () => {
@@ -33,6 +36,10 @@ const LiveEventFeed = () => {
         return <ChatBubbleLeftIcon className="w-5 h-5" />;
       case 'attendance':
         return <ArrowRightOnRectangleIcon className="w-5 h-5" />;
+      case 'participant_joined':
+        return <UserPlusIcon className="w-5 h-5" />;
+      case 'participant_left':
+        return <UserMinusIcon className="w-5 h-5" />;
       case 'session_started':
         return <SparklesIcon className="w-5 h-5" />;
       case 'session_ended':
@@ -48,6 +55,10 @@ const LiveEventFeed = () => {
         return 'bg-blue-100 text-blue-600';
       case 'attendance':
         return 'bg-green-100 text-green-600';
+      case 'participant_joined':
+        return 'bg-emerald-100 text-emerald-600';
+      case 'participant_left':
+        return 'bg-orange-100 text-orange-600';
       case 'session_started':
         return 'bg-purple-100 text-purple-600';
       case 'session_ended':

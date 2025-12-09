@@ -32,6 +32,7 @@ import {
   recordParticipantLeave
 } from './api-client.js';
 import { socketClient } from './socket-client.js';
+import { syncQueueManager } from './sync-queue.js';
 import { debug } from '../utils/debug-logger.js';
 
 class SessionManager {
@@ -208,6 +209,7 @@ class SessionManager {
   /**
    * Handle participant joined event
    * Creates an attendance interval for tracking duration
+   * Handles re-joins by creating new intervals
    * @param {Object} data - { platform, meeting_id, participant, name, timestamp, source }
    */
   async handleParticipantJoined(data) {
@@ -226,12 +228,13 @@ class SessionManager {
       return;
     }
 
-    // Check if already has an open interval (rejoining quickly)
+    // Check if already has an open interval (duplicate join event - skip it)
     const openIntervals = await getOpenIntervals(session.id);
     const existingOpen = openIntervals.find(i => i.participant_name === participantName);
     
     if (existingOpen) {
       // Silently skip - this is expected with multiple event sources
+      console.log('[SessionManager] Participant already has open interval, skipping duplicate join:', participantName);
       return;
     }
 
@@ -296,9 +299,15 @@ class SessionManager {
         });
         debug.success('background', 'JOIN_SYNCED_TO_BACKEND', { name: participantName });
       } catch (apiError) {
-        console.warn('[SessionManager] Failed to sync join to backend:', apiError);
+        console.warn('[SessionManager] Failed to sync join to backend, queueing for retry:', apiError);
         debug.error('background', 'JOIN_SYNC_FAILED', { error: apiError.message });
-        // Continue - will be synced later
+        
+        // Queue for retry
+        await syncQueueManager.enqueue('join', session.backend_id, {
+          participant_name: participantName,
+          joined_at: joinedAt,
+          student_id: match?.student?.id || null
+        });
       }
     }
 
@@ -329,17 +338,29 @@ class SessionManager {
   /**
    * Handle participant left event
    * Closes the open attendance interval
+   * Handles re-leaves by only closing if there's an open interval
    * @param {Object} data - { platform, meeting_id, participant_id, left_at, name, timestamp }
    */
   async handleParticipantLeft(data) {
     const session = await this.getActiveSession();
-    if (!session) return;
+    if (!session) {
+      console.log('[SessionManager] No active session for leave event');
+      return;
+    }
 
     // Get participant name - support both old and new format
     const participantName = data.name || data.participantId;
     const leftAt = data.timestamp || data.leftAt || now();
     
+    console.log('[SessionManager] Processing participant left:', {
+      participantName,
+      leftAt,
+      sessionId: session.id,
+      backendId: session.backend_id
+    });
+    
     if (!participantName) {
+      console.warn('[SessionManager] No participant name in leave event:', data);
       return; // Silent skip - malformed event
     }
 
@@ -349,8 +370,11 @@ class SessionManager {
     if (!closedInterval) {
       // No open interval - might have already been closed or never opened
       // This is expected when receiving duplicate leave events
+      console.log('[SessionManager] No open interval found for participant:', participantName);
       return;
     }
+    
+    console.log('[SessionManager] Closed interval for participant:', participantName, 'Duration:', closedInterval.duration_minutes, 'min');
 
     // Update participant record
     const participants = await getParticipantsBySession(session.id);
@@ -371,9 +395,14 @@ class SessionManager {
         });
         debug.success('background', 'LEAVE_SYNCED_TO_BACKEND', { name: participantName });
       } catch (apiError) {
-        console.warn('[SessionManager] Failed to sync leave to backend:', apiError);
+        console.warn('[SessionManager] Failed to sync leave to backend, queueing for retry:', apiError);
         debug.error('background', 'LEAVE_SYNC_FAILED', { error: apiError.message });
-        // Continue - will be synced later
+        
+        // Queue for retry
+        await syncQueueManager.enqueue('leave', session.backend_id, {
+          participant_name: participantName,
+          left_at: leftAt
+        });
       }
     }
 

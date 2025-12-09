@@ -4,6 +4,7 @@
  */
 
 import { API_BASE_URL, STORAGE_KEYS } from '../utils/constants.js';
+import { formatGoogleMeetUrl } from '../utils/url-utils.js';
 
 /**
  * Get auth token from storage
@@ -157,7 +158,7 @@ export async function addClassLink(classId, linkData) {
     method: 'POST',
     body: JSON.stringify({
       link_url: linkData.link,
-      link_type: linkData.platform || 'google_meet',
+      link_type: linkData.platform === 'google-meet' ? 'meet' : (linkData.platform || 'meet'),
       label: 'Auto-mapped from extension',
       is_primary: linkData.is_active ?? true
     }),
@@ -209,11 +210,17 @@ export async function getSessionById(sessionId) {
 
 export async function startSessionFromMeeting(sessionData) {
   const { class_id, meeting_id, platform } = sessionData;
+  
+  // Format meeting_id as full URL for consistent storage
+  const formattedLink = platform === 'google-meet' 
+    ? formatGoogleMeetUrl(meeting_id)
+    : meeting_id;
+  
   return await apiRequest('/sessions/start-from-meeting', {
     method: 'POST',
     body: JSON.stringify({
       class_id,
-      meeting_link: meeting_id,
+      meeting_link: formattedLink,
       started_at: new Date().toISOString(), // Required by backend
       platform,
       additional_data: {
