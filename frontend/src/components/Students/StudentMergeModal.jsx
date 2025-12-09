@@ -12,9 +12,15 @@ const StudentMergeModal = ({ isOpen, onClose, classId, students }) => {
     mutationFn: () => classesAPI.mergeStudents(classId, keepStudentId, mergeStudentId),
     onSuccess: () => {
       queryClient.invalidateQueries(['students', classId]);
+      queryClient.refetchQueries(['students', classId]); // Force immediate refetch
+      queryClient.invalidateQueries(['class', classId]); // Update class details
       onClose();
       setKeepStudentId('');
       setMergeStudentId('');
+    },
+    onError: (error) => {
+      const message = error.response?.data?.error || 'Failed to merge students';
+      alert(message);
     }
   });
 
@@ -83,14 +89,12 @@ const StudentMergeModal = ({ isOpen, onClose, classId, students }) => {
                 {students.map((student) => (
                   <option key={student.id} value={student.id}>
                     {student.full_name}
-                    {student.student_id && ` (${student.student_id})`}
                   </option>
                 ))}
               </select>
               {keepStudent && (
                 <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
                   <p><strong>Name:</strong> {keepStudent.full_name}</p>
-                  {keepStudent.student_id && <p><strong>ID:</strong> {keepStudent.student_id}</p>}
                   <p className="text-green-700 mt-2">✓ This record will be kept</p>
                 </div>
               )}
@@ -114,14 +118,12 @@ const StudentMergeModal = ({ isOpen, onClose, classId, students }) => {
                     disabled={student.id === keepStudentId}
                   >
                     {student.full_name}
-                    {student.student_id && ` (${student.student_id})`}
                   </option>
                 ))}
               </select>
               {mergeStudent && (
                 <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm">
                   <p><strong>Name:</strong> {mergeStudent.full_name}</p>
-                  {mergeStudent.student_id && <p><strong>ID:</strong> {mergeStudent.student_id}</p>}
                   <p className="text-red-700 mt-2">✗ This record will be deleted</p>
                 </div>
               )}

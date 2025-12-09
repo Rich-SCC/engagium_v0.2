@@ -41,6 +41,7 @@ const MyClasses = () => {
     mutationFn: (classData) => classesAPI.create(classData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['classes'] });
+      queryClient.refetchQueries({ queryKey: ['classes'] }); // Force immediate refetch
       setShowCreateModal(false);
     }
   });
@@ -49,6 +50,7 @@ const MyClasses = () => {
     mutationFn: ({ id, data }) => classesAPI.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['classes'] });
+      queryClient.refetchQueries({ queryKey: ['classes'] }); // Force immediate refetch
       setEditingClass(null);
     }
   });
@@ -57,6 +59,7 @@ const MyClasses = () => {
     mutationFn: (id) => classesAPI.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['classes'] });
+      queryClient.refetchQueries({ queryKey: ['classes'] }); // Force immediate refetch
     }
   });
 
@@ -64,6 +67,7 @@ const MyClasses = () => {
     mutationFn: ({ id, status }) => classesAPI.updateStatus(id, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['classes'] });
+      queryClient.refetchQueries({ queryKey: ['classes'] }); // Force immediate refetch
     }
   });
 

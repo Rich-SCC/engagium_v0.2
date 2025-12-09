@@ -25,6 +25,9 @@ const {
   getSessionAttendanceWithIntervals,
   linkParticipantToStudent
 } = require('../controllers/sessionController');
+const {
+  addBulkParticipationLogs
+} = require('../controllers/participationController');
 
 const router = express.Router();
 
@@ -47,6 +50,10 @@ router.post('/:id/attendance/leave', flexibleAuth, recordParticipantLeave);
 router.get('/:id/attendance/full', flexibleAuth, getSessionAttendanceWithIntervals);
 router.post('/:id/attendance/link', flexibleAuth, linkParticipantToStudent);
 
+// Bulk submission routes (extension-compatible)
+router.post('/:id/attendance/bulk', flexibleAuth, submitBulkAttendance);
+router.post('/:id/participation/bulk', flexibleAuth, addBulkParticipationLogs);
+
 // All other routes require instructor authentication (web app only)
 router.use(instructorAuth);
 
@@ -61,8 +68,7 @@ router.delete('/:id', deleteSession);
 // Session lifecycle management
 router.put('/:id/end', endSession); // Manual end (legacy)
 
-// Attendance routes
-router.post('/:id/attendance/bulk', submitBulkAttendance);
+// Attendance routes (web app)
 router.get('/:id/attendance', getSessionAttendance);
 router.get('/:id/attendance/stats', getAttendanceStats);
 

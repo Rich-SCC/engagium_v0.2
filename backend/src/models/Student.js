@@ -2,29 +2,22 @@ const db = require('../config/database');
 
 class Student {
   static async create(studentData) {
-    const { class_id, full_name, student_id } = studentData;
+    const { class_id, full_name } = studentData;
 
     const query = `
-      INSERT INTO students (class_id, full_name, student_id)
-      VALUES ($1, $2, $3)
+      INSERT INTO students (class_id, full_name)
+      VALUES ($1, $2)
       RETURNING *
     `;
 
-    try {
-      const result = await db.query(query, [class_id, full_name, student_id]);
-      return result.rows[0];
-    } catch (error) {
-      if (error.code === '23505') {
-        throw new Error('Student ID already exists in this class');
-      }
-      throw error;
-    }
+    const result = await db.query(query, [class_id, full_name]);
+    return result.rows[0];
   }
 
   static async findByClassId(classId) {
     const query = `
       SELECT * FROM students
-      WHERE class_id = $1
+      WHERE class_id = $1 AND deleted_at IS NULL
       ORDER BY full_name
     `;
 
@@ -45,39 +38,30 @@ class Student {
   }
 
   static async update(id, studentData) {
-    const { full_name, student_id } = studentData;
+    const { full_name } = studentData;
 
     const query = `
       UPDATE students
-      SET full_name = $1, student_id = $2
-      WHERE id = $3
+      SET full_name = $1
+      WHERE id = $2
       RETURNING *
     `;
 
-    try {
-      const result = await db.query(query, [full_name, student_id, id]);
-      return result.rows[0];
-    } catch (error) {
-      if (error.code === '23505') {
-        throw new Error('Student ID already exists in this class');
-      }
-      throw error;
-    }
+    const result = await db.query(query, [full_name, id]);
+    return result.rows[0];
   }
 
   static async delete(id) {
-    // Check if student has participation logs
-    const logCheck = await db.query(
-      'SELECT COUNT(*) as count FROM participation_logs WHERE student_id = $1',
-      [id]
-    );
-
-    if (parseInt(logCheck.rows[0].count) > 0) {
-      throw new Error('Cannot delete student with participation logs');
-    }
-
-    const query = 'DELETE FROM students WHERE id = $1';
-    await db.query(query, [id]);
+    // Soft delete - set deleted_at timestamp
+    const query = `
+      UPDATE students
+      SET deleted_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `;
+    
+    const result = await db.query(query, [id]);
+    return result.rows[0];
   }
 
   static async bulkCreate(studentsData) {
@@ -98,7 +82,7 @@ class Student {
   static async findByClassIdAndStudentId(classId, studentId) {
     const query = `
       SELECT * FROM students
-      WHERE class_id = $1 AND student_id = $2
+      WHERE class_id = $1 AND student_id = $2 AND deleted_at IS NULL
     `;
 
     const result = await db.query(query, [classId, studentId]);
@@ -108,7 +92,7 @@ class Student {
   static async findByClassIdAndName(classId, fullName) {
     const query = `
       SELECT * FROM students
-      WHERE class_id = $1 AND LOWER(full_name) = LOWER($2)
+      WHERE class_id = $1 AND LOWER(full_name) = LOWER($2) AND deleted_at IS NULL
     `;
 
     const result = await db.query(query, [classId, fullName]);
@@ -116,18 +100,14 @@ class Student {
   }
 
   static async bulkDelete(ids) {
-    // Check if any students have participation logs
-    const logCheck = await db.query(
-      'SELECT student_id FROM participation_logs WHERE student_id = ANY($1) GROUP BY student_id',
-      [ids]
-    );
-
-    if (logCheck.rows.length > 0) {
-      const studentsWithLogs = logCheck.rows.map(row => row.student_id);
-      throw new Error(`Cannot delete students with participation logs: ${studentsWithLogs.join(', ')}`);
-    }
-
-    const query = 'DELETE FROM students WHERE id = ANY($1)';
+    // Soft delete - set deleted_at timestamp for all
+    const query = `
+      UPDATE students
+      SET deleted_at = NOW()
+      WHERE id = ANY($1)
+      RETURNING *
+    `;
+    
     const result = await db.query(query, [ids]);
     return result.rowCount;
   }
@@ -170,8 +150,7 @@ class Student {
 
       if (fullName) {
         students.push({
-          full_name: fullName,
-          student_id: student.student_id || student.id || null
+          full_name: fullName
         });
       }
     }
@@ -183,8 +162,7 @@ class Student {
     const parsedStudents = this.parseCSV(csvContent);
     const studentsData = parsedStudents.map(s => ({
       class_id: classId,
-      full_name: s.full_name,
-      student_id: s.student_id || null
+      full_name: s.full_name
     }));
 
     return await this.bulkCreate(studentsData);
@@ -194,12 +172,12 @@ class Student {
     const students = await this.findByClassId(classId);
     
     if (students.length === 0) {
-      return 'full_name,student_id\n';
+      return 'full_name\n';
     }
 
-    const header = 'full_name,student_id\n';
+    const header = 'full_name\n';
     const rows = students.map(s => 
-      `${s.full_name},${s.student_id || ''}`
+      `${s.full_name}`
     ).join('\n');
 
     return header + rows;
@@ -219,16 +197,18 @@ class Student {
 
     let query = `
       SELECT DISTINCT s.*,
-             COUNT(DISTINCT pl.id) as participation_count,
+             COUNT(DISTINCT CASE WHEN pl.interaction_type NOT IN ('join', 'leave') THEN pl.id END) as participation_count,
+             COUNT(DISTINCT ar.session_id) as attendance_count,
              COUNT(DISTINCT sn.id) as notes_count,
              ARRAY_AGG(DISTINCT st.id) FILTER (WHERE st.id IS NOT NULL) as tag_ids,
              ARRAY_AGG(DISTINCT st.tag_name) FILTER (WHERE st.tag_name IS NOT NULL) as tag_names
       FROM students s
       LEFT JOIN participation_logs pl ON s.id = pl.student_id
+      LEFT JOIN attendance_records ar ON s.id = ar.student_id
       LEFT JOIN student_notes sn ON s.id = sn.student_id
       LEFT JOIN student_tag_assignments sta ON s.id = sta.student_id
       LEFT JOIN student_tags st ON sta.tag_id = st.id
-      WHERE s.class_id = $1
+      WHERE s.class_id = $1 AND s.deleted_at IS NULL
     `;
 
     const params = [classId];
@@ -299,13 +279,15 @@ class Student {
       SELECT s.*, 
              c.name as class_name, 
              c.subject,
-             COUNT(DISTINCT pl.id) as participation_count,
+             COUNT(DISTINCT CASE WHEN pl.interaction_type NOT IN ('join', 'leave') THEN pl.id END) as participation_count,
+             COUNT(DISTINCT ar.session_id) as attendance_count,
              COUNT(DISTINCT sn.id) as notes_count,
              ARRAY_AGG(DISTINCT st.id) FILTER (WHERE st.id IS NOT NULL) as tag_ids,
              ARRAY_AGG(DISTINCT st.tag_name) FILTER (WHERE st.tag_name IS NOT NULL) as tag_names
       FROM students s
       JOIN classes c ON s.class_id = c.id
       LEFT JOIN participation_logs pl ON s.id = pl.student_id
+      LEFT JOIN attendance_records ar ON s.id = ar.student_id
       LEFT JOIN student_notes sn ON s.id = sn.student_id
       LEFT JOIN student_tag_assignments sta ON s.id = sta.student_id
       LEFT JOIN student_tags st ON sta.tag_id = st.id
@@ -345,7 +327,7 @@ class Student {
 
   // Merge two students (combine participation logs, notes, tags)
   static async merge(keepStudentId, mergeStudentId) {
-    const client = await db.getClient();
+    const client = await db.pool.connect();
 
     try {
       await client.query('BEGIN');
@@ -353,6 +335,18 @@ class Student {
       // Transfer participation logs
       await client.query(
         'UPDATE participation_logs SET student_id = $1 WHERE student_id = $2',
+        [keepStudentId, mergeStudentId]
+      );
+
+      // Transfer attendance records
+      await client.query(
+        'UPDATE attendance_records SET student_id = $1 WHERE student_id = $2',
+        [keepStudentId, mergeStudentId]
+      );
+
+      // Transfer attendance intervals
+      await client.query(
+        'UPDATE attendance_intervals SET student_id = $1 WHERE student_id = $2',
         [keepStudentId, mergeStudentId]
       );
 
@@ -370,8 +364,11 @@ class Student {
         [keepStudentId, mergeStudentId]
       );
 
-      // Delete the merged student
-      await client.query('DELETE FROM students WHERE id = $1', [mergeStudentId]);
+      // Soft delete the merged student
+      await client.query(
+        'UPDATE students SET deleted_at = NOW() WHERE id = $1',
+        [mergeStudentId]
+      );
 
       await client.query('COMMIT');
 

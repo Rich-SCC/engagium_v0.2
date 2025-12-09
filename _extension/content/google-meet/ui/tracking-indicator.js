@@ -3,7 +3,7 @@
  * Visual overlay showing tracking status
  */
 
-import { log } from './utils.js';
+import { log } from '../core/utils.js';
 
 const INDICATOR_ID = 'engagium-indicator';
 const STATUS_DOT_ID = 'engagium-status-dot';

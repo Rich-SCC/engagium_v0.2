@@ -32,7 +32,6 @@
 - Class creation and roster management (manual input)
 - Real-time session monitoring dashboard
 - Post-session participation analytics
-- System notifications (auth, sync, errors)
 - Extension authentication
 
 **Technology Stack:**
@@ -197,21 +196,6 @@ CREATE TABLE exempted_accounts (
 );
 ```
 **Notes:** Exclude TAs, monitors, alternate accounts from tracking
-
-#### `notifications`
-```sql
-CREATE TABLE notifications (
-    id UUID PRIMARY KEY,
-    user_id UUID REFERENCES users(id),
-    type VARCHAR(50) NOT NULL, -- 'auth_expiry' | 'sync_failure' | 'extension_update' | 'system'
-    title VARCHAR(255) NOT NULL,
-    message TEXT NOT NULL,
-    action_url VARCHAR(500),
-    read BOOLEAN DEFAULT false,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-```
-**Notes:** System/operational notifications only; NO participation-based alerts
 
 ### 2.2 Removed/Deprecated Fields
 
@@ -414,12 +398,6 @@ Clears sync queue on success
 - `POST /api/classes/:classId/exemptions` - Add exemption
 - `DELETE /api/exemptions/:id` - Remove exemption
 
-### 4.9 Notifications (NEW)
-- `GET /api/notifications` - List user's notifications
-- `PUT /api/notifications/:id/read` - Mark as read
-- `PUT /api/notifications/read-all` - Mark all as read
-- `DELETE /api/notifications/:id` - Delete notification
-
 ---
 
 ## 5. Real-Time Features (WebSocket)
@@ -535,17 +513,6 @@ Clears sync queue on success
 - Click session → view details (attendance + participation logs)
 - ❌ **NO "Create Session" button**
 
-#### **Notifications Page (`/app/notifications`)** - NEW
-- Notification list (unread first)
-- Types:
-  - Auth expiration warnings
-  - Extension sync failures (with retry button)
-  - Extension update prompts
-  - System maintenance notices
-- Mark as read/unread
-- Delete
-- Action buttons (e.g., "Reconnect Extension")
-
 #### **Settings Page (`/app/settings`)**
 - Profile information
 - Password change
@@ -563,7 +530,6 @@ Clears sync queue on success
 - `SessionHistory.jsx` - Read-only session list
 - `SessionDetailView.jsx` - Attendance + participation tabs
 - `AnalyticsDashboard.jsx` - Charts and aggregations
-- `NotificationList.jsx` - System notifications
 
 ---
 
@@ -766,9 +732,10 @@ Background clears local session state
 ## 14. Source of Truth Changelog
 
 | Version | Date | Changes |
-|---------|------|---------|
+|---------|---------|---------||
 | 1.0 | Nov 25, 2025 | Initial architecture (manual session creation) |
-| 2.0 | Nov 26, 2025 | **Major revision:** Auto session creation, live tracking, removed manual session entry, added notifications, meeting link switching support |
+| 2.0 | Nov 26, 2025 | **Major revision:** Auto session creation, live tracking, removed manual session entry, meeting link switching support |
+| 2.1 | Dec 9, 2025 | Removed notifications feature - not needed for single-instructor use case |
 
 ---
 

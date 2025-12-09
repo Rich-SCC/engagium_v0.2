@@ -3,17 +3,12 @@
  * Handles all API calls with authentication
  */
 
-import { API_BASE_URL, STORAGE_KEYS } from '../utils/constants.js';
+import { API_BASE_URL, PLATFORMS } from '../utils/constants.js';
 import { formatGoogleMeetUrl } from '../utils/url-utils.js';
+import { getAuthToken, clearAuthToken, verifyAuthToken } from '../utils/auth.js';
+import { createLogger } from '../utils/logger.js';
 
-/**
- * Get auth token from storage
- * @returns {Promise<string|null>}
- */
-async function getAuthToken() {
-  const result = await chrome.storage.local.get(STORAGE_KEYS.AUTH_TOKEN);
-  return result[STORAGE_KEYS.AUTH_TOKEN] || null;
-}
+const logger = createLogger('API');
 
 /**
  * Make authenticated API request
@@ -46,12 +41,17 @@ async function apiRequest(endpoint, options = {}) {
     if (response.status === 401) {
       // Only clear token if explicitly allowed (critical auth flows)
       if (clearTokenOn401) {
-        await chrome.storage.local.remove(STORAGE_KEYS.AUTH_TOKEN);
+        await clearAuthToken();
         throw new Error('Authentication expired. Please login again.');
       } else {
         // Non-critical operation failed, don't clear token
         throw new Error('Unauthorized. This operation may require different permissions.');
       }
+    }
+
+    if (response.status === 403) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || error.message || 'Access denied');
     }
 
     if (!response.ok) {
@@ -61,7 +61,7 @@ async function apiRequest(endpoint, options = {}) {
 
     return await response.json();
   } catch (error) {
-    console.error('[API] Request failed:', error);
+    logger.error('Request failed:', error);
     throw error;
   }
 }
@@ -75,22 +75,10 @@ export async function verifyToken() {
     const token = await getAuthToken();
     if (!token) return false;
     
-    // Use the new extension token verification endpoint
-    const url = `${API_BASE_URL}/extension-tokens/verify`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ token })
-    });
-    
-    if (!response.ok) return false;
-    
-    const data = await response.json();
-    return data.success === true;
+    const result = await verifyAuthToken(token);
+    return result.valid;
   } catch (error) {
-    console.error('[API] Token verification failed:', error);
+    logger.error('Token verification failed:', error);
     return false;
   }
 }
@@ -121,7 +109,7 @@ export async function getUserInfo() {
     
     throw new Error('Invalid response from server');
   } catch (error) {
-    console.error('[API] Get user info failed:', error);
+    logger.error('Get user info failed:', error);
     throw error;
   }
 }
@@ -148,7 +136,7 @@ export async function getClassById(classId) {
  * @returns {Promise<Object>}
  */
 export async function addClassLink(classId, linkData) {
-  console.log('[API] Adding class link:', {
+  logger.log('Adding class link:', {
     classId,
     link: linkData.link
   });
@@ -158,7 +146,7 @@ export async function addClassLink(classId, linkData) {
     method: 'POST',
     body: JSON.stringify({
       link_url: linkData.link,
-      link_type: linkData.platform === 'google-meet' ? 'meet' : (linkData.platform || 'meet'),
+      link_type: linkData.platform === PLATFORMS.GOOGLE_MEET ? 'meet' : (linkData.platform || 'meet'),
       label: 'Auto-mapped from extension',
       is_primary: linkData.is_active ?? true
     }),
@@ -167,9 +155,45 @@ export async function addClassLink(classId, linkData) {
 }
 
 export async function getStudentsByClass(classId) {
-  const response = await apiRequest(`/classes/${classId}/students`);
-  // Backend may return { success: true, data: { students: [...] } } or { students: [...] }
-  return response.data?.students || response.students || [];
+  logger.log('Fetching students for class:', classId);
+  try {
+    const response = await apiRequest(`/classes/${classId}/students`);
+    logger.debug('Raw response:', JSON.stringify(response, null, 2));
+    
+    // Backend may return { success: true, data: { students: [...] } } or { success: true, data: [...] } or { students: [...] }
+    let students = [];
+    
+    if (response.data) {
+      if (Array.isArray(response.data)) {
+        students = response.data;
+      } else if (response.data.students) {
+        students = response.data.students;
+      }
+    } else if (response.students) {
+      students = response.students;
+    } else if (Array.isArray(response)) {
+      students = response;
+    }
+    
+    logger.log('Parsed students:', students.length, 'students');
+    if (students.length > 0) {
+      logger.debug('First student:', JSON.stringify(students[0], null, 2));
+      logger.debug('Student fields:', Object.keys(students[0]));
+    }
+    
+    // Map full_name to name for consistency with matcher
+    const mappedStudents = students.map(s => ({
+      id: s.id,
+      name: s.full_name || s.name,
+      student_id: s.student_id
+    }));
+    
+    logger.success('✅ Returning', mappedStudents.length, 'mapped students');
+    return mappedStudents;
+  } catch (error) {
+    logger.error('❌ Failed to fetch students:', error);
+    throw error;
+  }
 }
 
 /**
@@ -212,7 +236,7 @@ export async function startSessionFromMeeting(sessionData) {
   const { class_id, meeting_id, platform } = sessionData;
   
   // Format meeting_id as full URL for consistent storage
-  const formattedLink = platform === 'google-meet' 
+  const formattedLink = platform === PLATFORMS.GOOGLE_MEET 
     ? formatGoogleMeetUrl(meeting_id)
     : meeting_id;
   
@@ -233,19 +257,22 @@ export async function startSessionFromMeeting(sessionData) {
 export async function endSessionWithTimestamp(sessionId, endedAt) {
   return await apiRequest(`/sessions/${sessionId}/end-with-timestamp`, {
     method: 'PUT',
-    body: JSON.stringify({ ended_at: endedAt })
+    body: JSON.stringify({ ended_at: endedAt }),
+    clearTokenOn401: false // Don't clear token if session end fails
   });
 }
 
 export async function startSession(sessionId) {
   return await apiRequest(`/sessions/${sessionId}/start`, {
-    method: 'POST'
+    method: 'POST',
+    clearTokenOn401: false // Don't clear token if session start fails
   });
 }
 
 export async function endSession(sessionId) {
   return await apiRequest(`/sessions/${sessionId}/end`, {
-    method: 'POST'
+    method: 'POST',
+    clearTokenOn401: false // Don't clear token if session end fails
   });
 }
 
@@ -260,14 +287,15 @@ export async function endSession(sessionId) {
  * @returns {Promise<Object>}
  */
 export async function submitBulkAttendance(sessionId, attendanceRecords) {
-  console.log('[API] Submitting bulk attendance:', {
+  logger.log('Submitting bulk attendance:', {
     sessionId,
     count: attendanceRecords.length
   });
 
   return await apiRequest(`/sessions/${sessionId}/attendance/bulk`, {
     method: 'POST',
-    body: JSON.stringify({ attendance: attendanceRecords })
+    body: JSON.stringify({ attendance: attendanceRecords }),
+    clearTokenOn401: false // Don't clear token if attendance submission fails
   });
 }
 
@@ -282,14 +310,15 @@ export async function submitBulkAttendance(sessionId, attendanceRecords) {
  * @returns {Promise<Object>}
  */
 export async function recordParticipantJoin(sessionId, data) {
-  console.log('[API] Recording participant join:', {
+  logger.log('Recording participant join:', {
     sessionId,
     participant: data.participant_name
   });
 
   return await apiRequest(`/sessions/${sessionId}/attendance/join`, {
     method: 'POST',
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
+    clearTokenOn401: false // Don't clear token during session tracking
   });
 }
 
@@ -300,14 +329,15 @@ export async function recordParticipantJoin(sessionId, data) {
  * @returns {Promise<Object>}
  */
 export async function recordParticipantLeave(sessionId, data) {
-  console.log('[API] Recording participant leave:', {
+  logger.log('Recording participant leave:', {
     sessionId,
     participant: data.participant_name
   });
 
   return await apiRequest(`/sessions/${sessionId}/attendance/leave`, {
     method: 'POST',
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
+    clearTokenOn401: false // Don't clear token during session tracking
   });
 }
 
@@ -327,7 +357,7 @@ export async function getSessionAttendanceWithIntervals(sessionId) {
  * @returns {Promise<Object>}
  */
 export async function linkParticipantToStudent(sessionId, data) {
-  console.log('[API] Linking participant to student:', {
+  logger.log('Linking participant to student:', {
     sessionId,
     participant: data.participant_name,
     createStudent: data.create_student
@@ -335,7 +365,8 @@ export async function linkParticipantToStudent(sessionId, data) {
 
   return await apiRequest(`/sessions/${sessionId}/attendance/link`, {
     method: 'POST',
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
+    clearTokenOn401: false // Don't clear token during session tracking
   });
 }
 
@@ -346,7 +377,7 @@ export async function linkParticipantToStudent(sessionId, data) {
  * @returns {Promise<Object>}
  */
 export async function createStudentFromParticipant(classId, data) {
-  console.log('[API] Creating student from participant:', {
+  logger.log('Creating student from participant:', {
     classId,
     participant: data.participant_name
   });
@@ -368,14 +399,15 @@ export async function createStudentFromParticipant(classId, data) {
  * @returns {Promise<Object>}
  */
 export async function submitBulkParticipation(sessionId, participationLogs) {
-  console.log('[API] Submitting bulk participation:', {
+  logger.log('Submitting bulk participation:', {
     sessionId,
     count: participationLogs.length
   });
 
   return await apiRequest(`/participation/sessions/${sessionId}/logs/bulk`, {
     method: 'POST',
-    body: JSON.stringify({ logs: participationLogs })
+    body: JSON.stringify({ logs: participationLogs }),
+    clearTokenOn401: false // Don't clear token during session data submission
   });
 }
 

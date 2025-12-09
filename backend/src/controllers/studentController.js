@@ -86,7 +86,7 @@ const getStudents = async (req, res) => {
 const addStudent = async (req, res) => {
   try {
     const { classId } = req.params;
-    const { full_name, student_id } = req.body;
+    const { full_name } = req.body;
 
     // Verify class exists and user has access
     const classData = await Class.findById(classId);
@@ -114,8 +114,7 @@ const addStudent = async (req, res) => {
 
     const student = await Student.create({
       class_id: classId,
-      full_name,
-      student_id
+      full_name
     });
 
     res.status(201).json({
@@ -124,13 +123,6 @@ const addStudent = async (req, res) => {
     });
   } catch (error) {
     console.error('Add student error:', error);
-
-    if (error.message === 'Student ID already exists in this class') {
-      return res.status(400).json({
-        success: false,
-        error: 'Student ID already exists in this class'
-      });
-    }
 
     res.status(500).json({
       success: false,
@@ -143,7 +135,7 @@ const addStudent = async (req, res) => {
 const updateStudent = async (req, res) => {
   try {
     const { classId, studentId } = req.params;
-    const { full_name, student_id: new_student_id } = req.body;
+    const { full_name } = req.body;
 
     // Verify student exists and has access to class
     const student = await Student.findById(studentId);
@@ -179,8 +171,7 @@ const updateStudent = async (req, res) => {
     }
 
     const updatedStudent = await Student.update(studentId, {
-      full_name,
-      student_id: new_student_id
+      full_name
     });
 
     res.json({
@@ -189,13 +180,6 @@ const updateStudent = async (req, res) => {
     });
   } catch (error) {
     console.error('Update student error:', error);
-
-    if (error.message === 'Student ID already exists in this class') {
-      return res.status(400).json({
-        success: false,
-        error: 'Student ID already exists in this class'
-      });
-    }
 
     res.status(500).json({
       success: false,
@@ -242,13 +226,6 @@ const removeStudent = async (req, res) => {
     });
   } catch (error) {
     console.error('Remove student error:', error);
-
-    if (error.message === 'Cannot delete student with participation logs') {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot delete student with participation logs'
-      });
-    }
 
     res.status(500).json({
       success: false,
@@ -822,6 +799,138 @@ const createFromParticipant = async (req, res) => {
   }
 };
 
+// Get student analytics
+const getStudentAnalytics = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { startDate, endDate } = req.query;
+
+    const student = await Student.findById(studentId);
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found'
+      });
+    }
+
+    // Verify class access
+    const classData = await Class.findById(student.class_id);
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const pool = require('../config/database');
+
+    // Parse dates - extract just the date part for comparison
+    const start = startDate ? new Date(startDate).toISOString().split('T')[0] : '2020-01-01';
+    const end = endDate ? new Date(endDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+
+    // Get session attendance history
+    const sessionHistoryQuery = `
+      SELECT 
+        s.id,
+        s.title,
+        s.session_date,
+        s.session_time,
+        s.status,
+        ar.status as attendance_status,
+        ar.total_duration_minutes,
+        ar.first_joined_at,
+        ar.last_left_at,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'joined_at', ai.joined_at,
+              'left_at', ai.left_at,
+              'duration_minutes', 
+              CASE 
+                WHEN ai.left_at IS NOT NULL 
+                THEN EXTRACT(EPOCH FROM (ai.left_at - ai.joined_at)) / 60
+                ELSE NULL
+              END
+            )
+            ORDER BY ai.joined_at
+          )
+          FROM attendance_intervals ai
+          WHERE ai.session_id = s.id AND ai.student_id = $1
+        ) as intervals
+      FROM sessions s
+      LEFT JOIN attendance_records ar ON s.id = ar.session_id AND ar.student_id = $1
+      WHERE s.class_id = $2
+        AND s.session_date >= $3
+        AND s.session_date <= $4
+        AND s.status IN ('active', 'ended')
+      ORDER BY s.session_date DESC, s.session_time DESC
+    `;
+
+    const sessionHistoryResult = await pool.query(sessionHistoryQuery, [studentId, student.class_id, start, end]);
+
+    // Calculate overall statistics
+    const totalSessions = sessionHistoryResult.rows.length;
+    const sessionsAttended = sessionHistoryResult.rows.filter(s => s.attendance_status === 'present').length;
+    const sessionsLate = sessionHistoryResult.rows.filter(s => s.attendance_status === 'late').length;
+    const sessionsAbsent = sessionHistoryResult.rows.filter(s => s.attendance_status === 'absent' || !s.attendance_status).length;
+    
+    const totalDuration = sessionHistoryResult.rows.reduce((sum, s) => 
+      sum + (parseFloat(s.total_duration_minutes) || 0), 0
+    );
+    
+    const avgDuration = sessionsAttended > 0 ? (totalDuration / sessionsAttended).toFixed(2) : 0;
+    const attendanceRate = totalSessions > 0 ? ((sessionsAttended / totalSessions) * 100).toFixed(2) : 0;
+
+    // Get attendance timeline (daily summary)
+    const timelineQuery = `
+      SELECT 
+        s.session_date as date,
+        COUNT(DISTINCT s.id) as total_sessions,
+        COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as attended,
+        COALESCE(SUM(ar.total_duration_minutes), 0) as total_duration
+      FROM sessions s
+      LEFT JOIN attendance_records ar ON s.id = ar.session_id AND ar.student_id = $1
+      WHERE s.class_id = $2
+        AND s.session_date >= $3
+        AND s.session_date <= $4
+        AND s.status IN ('active', 'ended')
+      GROUP BY s.session_date
+      ORDER BY date ASC
+    `;
+
+    const timelineResult = await pool.query(timelineQuery, [studentId, student.class_id, start, end]);
+
+    const overallStats = {
+      totalSessions,
+      sessionsAttended,
+      sessionsLate,
+      sessionsAbsent,
+      attendanceRate: parseFloat(attendanceRate),
+      totalDurationMinutes: totalDuration,
+      avgDurationMinutes: parseFloat(avgDuration),
+    };
+
+    res.json({
+      success: true,
+      data: {
+        student,
+        class: classData,
+        dateRange: { startDate: start, endDate: end },
+        overallStats,
+        sessionHistory: sessionHistoryResult.rows,
+        timeline: timelineResult.rows,
+      }
+    });
+  } catch (error) {
+    console.error('Get student analytics error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   getStudents,
   getStudentDetails,
@@ -836,5 +945,6 @@ module.exports = {
   bulkUpdateStudents,
   bulkAddStudents,
   createFromParticipant,
+  getStudentAnalytics,
   upload
 };

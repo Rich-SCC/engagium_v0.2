@@ -239,14 +239,7 @@ const deleteSession = async (req, res) => {
       });
     }
 
-    // Can only delete scheduled sessions
-    if (existingSession.status !== 'scheduled') {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot delete session that has started or ended'
-      });
-    }
-
+    // Delete the session (cascades to participation logs and attendance records)
     await Session.delete(id);
 
     res.json({
@@ -964,26 +957,6 @@ const recordParticipantJoin = async (req, res) => {
       joined_at: joined_at || new Date()
     });
 
-    // Create participation log for the join event
-    if (matchedStudentId) {
-      try {
-        const ParticipationLog = require('../models/ParticipationLog');
-        await ParticipationLog.create({
-          session_id: sessionId,
-          student_id: matchedStudentId,
-          interaction_type: 'join',
-          interaction_value: 'Joined the session',
-          additional_data: {
-            participant_name,
-            joined_at: interval.joined_at
-          }
-        });
-        console.log('[API] Created participation log for join');
-      } catch (logError) {
-        console.warn('[API] Failed to create participation log for join:', logError);
-      }
-    }
-
     // Emit socket event for real-time updates
     const io = global.io || req.app.get('io');
     if (io) {
@@ -1087,28 +1060,6 @@ const recordParticipantLeave = async (req, res) => {
     
     // Update the attendance record with new duration
     await AttendanceRecord.updateDuration(sessionId, participant_name, totalDuration, left_at || new Date());
-
-    // Create participation log for the leave event
-    const attendanceRecord = await AttendanceRecord.findBySessionAndParticipant(sessionId, participant_name);
-    if (attendanceRecord && attendanceRecord.student_id) {
-      try {
-        const ParticipationLog = require('../models/ParticipationLog');
-        await ParticipationLog.create({
-          session_id: sessionId,
-          student_id: attendanceRecord.student_id,
-          interaction_type: 'leave',
-          interaction_value: 'Left the session',
-          additional_data: {
-            participant_name,
-            left_at: interval.left_at,
-            duration_minutes: Math.round(totalDuration)
-          }
-        });
-        console.log('[API] Created participation log for leave');
-      } catch (logError) {
-        console.warn('[API] Failed to create participation log for leave:', logError);
-      }
-    }
 
     // Emit socket event for real-time updates
     const io = global.io || req.app.get('io');

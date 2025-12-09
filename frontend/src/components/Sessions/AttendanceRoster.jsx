@@ -5,7 +5,9 @@ import {
   ClockIcon, 
   UserPlusIcon,
   ChevronDownIcon,
-  ChevronUpIcon
+  ChevronUpIcon,
+  UserGroupIcon,
+  ChartBarIcon
 } from '@heroicons/react/24/outline';
 
 const AttendanceRoster = ({ 
@@ -88,46 +90,91 @@ const AttendanceRoster = ({
     ? ((presentCount / attendance.length) * 100).toFixed(1) 
     : 0;
   const totalMinutes = attendance.reduce((sum, a) => sum + (a.total_duration_minutes || 0), 0);
+  const avgDuration = presentCount > 0 ? totalMinutes / presentCount : 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Section Header */}
+      <div>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">Attendance Overview</h2>
+        <p className="text-sm text-gray-600">
+          Track participant attendance, duration, and join/leave patterns for this session.
+        </p>
+      </div>
+
       {/* Stats Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600 mb-1">Total Participants</div>
-          <div className="text-2xl font-bold text-gray-900">{attendance.length}</div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Total Participants</div>
+              <div className="text-2xl font-bold text-gray-900">{attendance.length}</div>
+            </div>
+            <div className="p-3 bg-gray-100 rounded-lg">
+              <UserGroupIcon className="w-6 h-6 text-gray-600" />
+            </div>
+          </div>
         </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600 mb-1">Present</div>
-          <div className="text-2xl font-bold text-green-600">{presentCount}</div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Present</div>
+              <div className="text-2xl font-bold text-green-600">{presentCount}</div>
+            </div>
+            <div className="p-3 bg-green-100 rounded-lg">
+              <CheckCircleIcon className="w-6 h-6 text-green-600" />
+            </div>
+          </div>
         </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600 mb-1">Attendance Rate</div>
-          <div className="text-2xl font-bold text-blue-600">{attendanceRate}%</div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Attendance Rate</div>
+              <div className="text-2xl font-bold text-blue-600">{attendanceRate}%</div>
+            </div>
+            <div className="p-3 bg-blue-100 rounded-lg">
+              <ChartBarIcon className="w-6 h-6 text-blue-600" />
+            </div>
+          </div>
         </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600 mb-1">Total Time</div>
-          <div className="text-2xl font-bold text-purple-600">{formatDuration(totalMinutes)}</div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Avg. Duration</div>
+              <div className="text-2xl font-bold text-purple-600">{formatDuration(avgDuration)}</div>
+            </div>
+            <div className="p-3 bg-purple-100 rounded-lg">
+              <ClockIcon className="w-6 h-6 text-purple-600" />
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Unmatched Participants Warning */}
       {unmatchedRecords.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex items-center">
-            <UserPlusIcon className="w-5 h-5 text-yellow-600 mr-2" />
-            <span className="text-yellow-800 font-medium">
-              {unmatchedRecords.length} unmatched participant{unmatchedRecords.length !== 1 ? 's' : ''}
-            </span>
+        <div className="bg-yellow-50 border-l-4 border-yellow-400 rounded-lg p-4">
+          <div className="flex items-start">
+            <UserPlusIcon className="w-6 h-6 text-yellow-600 mr-3 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-semibold text-yellow-800">
+                {unmatchedRecords.length} Unmatched Participant{unmatchedRecords.length !== 1 ? 's' : ''}
+              </h3>
+              <p className="text-sm text-yellow-700 mt-1">
+                These participants don't match any students in your roster. Click "Add to Roster" to create student records from them.
+              </p>
+            </div>
           </div>
-          <p className="text-sm text-yellow-700 mt-1">
-            These participants don't match any students in your roster. Click "Add to Roster" to create students from them.
-          </p>
         </div>
       )}
 
       {/* Attendance Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+          <h3 className="text-lg font-semibold text-gray-900">Attendance Records</h3>
+          <p className="text-sm text-gray-600 mt-1">
+            Detailed view of all participants and their attendance status
+          </p>
+        </div>
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -141,7 +188,7 @@ const AttendanceRoster = ({
                 Duration
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Join/Leave Times
+                First Join
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
@@ -191,39 +238,40 @@ const AttendanceRoster = ({
                     {formatDuration(record.total_duration_minutes)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                    <div className="flex items-center">
-                      <span>
-                        {formatTime(record.first_joined_at)} - {formatTime(record.last_left_at)}
+                    {formatTime(record.first_joined_at)}
+                    {record.intervals && record.intervals.length > 1 && (
+                      <span className="text-xs text-gray-400 ml-1">
+                        ({record.intervals.length}x)
                       </span>
-                      {record.intervals && record.intervals.length > 1 && (
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <div className="flex items-center gap-2">
+                      {record.intervals && record.intervals.length > 0 && (
                         <button
                           onClick={() => toggleIntervals(record.participant_name)}
-                          className="ml-2 text-blue-600 hover:text-blue-800"
-                          title="View all intervals"
+                          className="inline-flex items-center px-2 py-1 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50"
+                          title="View join/leave intervals"
                         >
                           {expandedParticipant === record.participant_name ? (
-                            <ChevronUpIcon className="w-4 h-4" />
+                            <ChevronUpIcon className="w-3 h-3 mr-1" />
                           ) : (
-                            <ChevronDownIcon className="w-4 h-4" />
+                            <ChevronDownIcon className="w-3 h-3 mr-1" />
                           )}
-                          <span className="text-xs ml-1">
-                            ({record.intervals.length} intervals)
-                          </span>
+                          Intervals
+                        </button>
+                      )}
+                      {!record.student_id && onAddToRoster && (
+                        <button
+                          onClick={() => handleAddToRoster(record)}
+                          disabled={addingToRoster === record.participant_name}
+                          className="inline-flex items-center px-2 py-1 border border-transparent text-xs font-medium rounded-md text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:opacity-50"
+                        >
+                          <UserPlusIcon className="w-3 h-3 mr-1" />
+                          {addingToRoster === record.participant_name ? 'Adding...' : 'Add to Roster'}
                         </button>
                       )}
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {!record.student_id && onAddToRoster && (
-                      <button
-                        onClick={() => handleAddToRoster(record)}
-                        disabled={addingToRoster === record.participant_name}
-                        className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:opacity-50"
-                      >
-                        <UserPlusIcon className="w-4 h-4 mr-1" />
-                        {addingToRoster === record.participant_name ? 'Adding...' : 'Add to Roster'}
-                      </button>
-                    )}
                   </td>
                 </tr>
                 

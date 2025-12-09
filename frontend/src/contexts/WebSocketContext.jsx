@@ -13,6 +13,21 @@ export const useWebSocket = () => {
   return context;
 };
 
+// Map interaction types from database to event types for display
+const mapInteractionTypeToEventType = (interactionType) => {
+  const typeMap = {
+    'chat': 'chat',
+    'reaction': 'reaction',
+    'hand_raise': 'hand_raise',
+    'mic_toggle': 'mic_toggle',
+    'camera_toggle': 'camera_toggle',
+    'join': 'participant_joined',
+    'leave': 'participant_left',
+    'manual_entry': 'participation'
+  };
+  return typeMap[interactionType] || 'participation';
+};
+
 export const WebSocketProvider = ({ children }) => {
   const { user, token } = useAuth();
   const [socket, setSocket] = useState(null);
@@ -21,6 +36,7 @@ export const WebSocketProvider = ({ children }) => {
   const [recentEvents, setRecentEvents] = useState([]);
   const [isLoadingActiveSessions, setIsLoadingActiveSessions] = useState(false);
   const [isLoadingRecentEvents, setIsLoadingRecentEvents] = useState(false);
+  const [attendedStudents, setAttendedStudents] = useState(new Set()); // Track students who have already been marked as "attended"
 
   // Fetch active sessions from the backend
   const fetchActiveSessions = useCallback(async () => {
@@ -49,6 +65,32 @@ export const WebSocketProvider = ({ children }) => {
     }
   }, [user, token]);
 
+  // Format event message consistently with real-time events
+  const formatEventMessage = (log) => {
+    const name = log.student_name || log.full_name;
+    const type = log.interaction_type;
+    
+    switch (type) {
+      case 'join':
+        // Default to "joined" - will be changed to "attended" for first joins
+        return `${name} joined`;
+      case 'leave':
+        return `${name} left`;
+      case 'chat':
+        return `${name} sent a message`;
+      case 'hand_raise':
+        return `${name} raised hand`;
+      case 'reaction':
+        return `${name} reacted`;
+      case 'mic_toggle':
+        return `${name} toggled mic`;
+      case 'camera_toggle':
+        return `${name} toggled camera`;
+      default:
+        return `${name} - ${type}`;
+    }
+  };
+
   // Fetch recent events for all active sessions
   const fetchRecentEvents = useCallback(async (sessions) => {
     if (!user || !token || !sessions || sessions.length === 0) return;
@@ -66,12 +108,12 @@ export const WebSocketProvider = ({ children }) => {
           if (response.success && response.data) {
             const events = response.data.map(log => ({
               id: `participation-${log.id || Date.now()}-${Math.random()}`,
-              type: 'participation',
+              type: mapInteractionTypeToEventType(log.interaction_type),
               session_id: session.session_id,
               student_name: log.student_name || log.full_name,
               interaction_type: log.interaction_type,
               timestamp: log.timestamp,
-              message: `${log.student_name || log.full_name} - ${log.interaction_type}`
+              message: formatEventMessage(log)
             }));
             allEvents.push(...events);
             console.log('[WebSocket] ✅ Loaded', events.length, 'events for session', session.session_id);
@@ -84,6 +126,32 @@ export const WebSocketProvider = ({ children }) => {
       // Sort by timestamp descending and limit to 50
       allEvents.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       const limitedEvents = allEvents.slice(0, 50);
+      
+      // Process events to identify first joins vs rejoins
+      // Sort by timestamp ASCENDING to process oldest first
+      const sortedByTime = [...limitedEvents].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      const firstJoins = new Set(); // Track students who have had their first join
+      
+      // Go through events chronologically and mark first joins
+      sortedByTime.forEach(event => {
+        if (event.interaction_type === 'join') {
+          const key = `${event.session_id}:${event.student_name}`;
+          if (!firstJoins.has(key)) {
+            // This is the first join - mark it as "attendance" type
+            event.type = 'attendance';
+            event.message = `${event.student_name} attended`;
+            firstJoins.add(key);
+          } else {
+            // This is a rejoin - keep it as "participant_joined"
+            event.type = 'participant_joined';
+            event.message = `${event.student_name} joined`;
+          }
+        }
+      });
+      
+      // Update attendedStudents set for tracking future real-time events
+      setAttendedStudents(firstJoins);
+      console.log('[WebSocket] 📝 Tracked', firstJoins.size, 'students with existing attendance');
       
       setRecentEvents(limitedEvents);
       console.log('[WebSocket] ✅ Total recent events loaded:', limitedEvents.length);
@@ -191,6 +259,18 @@ export const WebSocketProvider = ({ children }) => {
       
       setActiveSessions(prev => prev.filter(s => s.session_id !== data.session_id));
       
+      // Clear attended students for this session
+      setAttendedStudents(prev => {
+        const newSet = new Set(prev);
+        // Remove all entries for this session
+        for (const key of newSet) {
+          if (key.startsWith(`${data.session_id}:`)) {
+            newSet.delete(key);
+          }
+        }
+        return newSet;
+      });
+      
       setRecentEvents(prev => [{
         id: `session-end-${Date.now()}`,
         type: 'session_ended',
@@ -211,14 +291,31 @@ export const WebSocketProvider = ({ children }) => {
       console.log('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
       console.log('========================================\\n');
       
+      // Skip join/leave events as they're handled by participant:joined/left
+      if (data.interaction_type === 'join' || data.interaction_type === 'leave') {
+        console.log('[WebSocket] ⏭️ Skipping join/leave event (handled by participant events)');
+        return;
+      }
+      
+      const formatMessage = (type, name) => {
+        switch (type) {
+          case 'chat': return `${name} sent a message`;
+          case 'hand_raise': return `${name} raised hand`;
+          case 'reaction': return `${name} reacted`;
+          case 'mic_toggle': return `${name} toggled mic`;
+          case 'camera_toggle': return `${name} toggled camera`;
+          default: return `${name} - ${type}`;
+        }
+      };
+      
       setRecentEvents(prev => [{
         id: `participation-${Date.now()}-${Math.random()}`,
-        type: 'participation',
+        type: mapInteractionTypeToEventType(data.interaction_type),
         session_id: data.session_id,
         student_name: data.student_name,
         interaction_type: data.interaction_type,
         timestamp: data.timestamp,
-        message: `${data.student_name} - ${data.interaction_type}`
+        message: formatMessage(data.interaction_type, data.student_name)
       }, ...prev].slice(0, 50));
       
       console.log('[WebSocket] ✅ Added participation event to feed');
@@ -234,17 +331,62 @@ export const WebSocketProvider = ({ children }) => {
       console.log('[WebSocket] Timestamp:', data.timestamp);
       console.log('========================================\\n');
       
-      setRecentEvents(prev => [{
-        id: `attendance-${Date.now()}-${Math.random()}`,
-        type: 'attendance',
-        session_id: data.session_id,
-        student_name: data.student_name,
-        action: data.action,
-        timestamp: data.timestamp,
-        message: `${data.student_name} ${data.action}`
-      }, ...prev].slice(0, 50));
+      // Create unique key for this student in this session
+      const studentSessionKey = `${data.session_id}:${data.student_name}`;
       
-      console.log('[WebSocket] ✅ Added attendance event to feed');
+      // Check if this is the FIRST time we're seeing attendance for this student in this session
+      setAttendedStudents(prev => {
+        const isFirstAttendance = !prev.has(studentSessionKey);
+        console.log('[WebSocket] 🎯 Is first attendance?', isFirstAttendance, 'for', data.student_name);
+        console.log('[WebSocket] 🔍 Current attendedStudents:', Array.from(prev));
+        
+        if (isFirstAttendance) {
+          // Only replace participant:joined with "attended" on FIRST attendance
+          setRecentEvents(prevEvents => {
+            const fiveSecondsAgo = new Date(Date.now() - 5000);
+            
+            console.log('[WebSocket] 🔍 Looking through', prevEvents.length, 'events');
+            
+            const filtered = prevEvents.filter(event => {
+              const isParticipantJoined = event.type === 'participant_joined';
+              const isSameName = event.participant_name === data.student_name;
+              const isSameSession = event.session_id === data.session_id;
+              const isRecent = new Date(event.timestamp) > fiveSecondsAgo;
+              
+              if (isParticipantJoined && isSameName && isSameSession && isRecent) {
+                console.log('[WebSocket] 🔄 REPLACING participant:joined with attendance for', data.student_name);
+                return false;
+              }
+              return true;
+            });
+            
+            console.log('[WebSocket] 📊 Filtered out', prevEvents.length - filtered.length, 'events');
+            
+            return [{
+              id: `attendance-${Date.now()}-${Math.random()}`,
+              type: 'attendance',
+              session_id: data.session_id,
+              student_name: data.student_name,
+              action: data.action,
+              interaction_type: 'join',
+              timestamp: data.timestamp,
+              message: `${data.student_name} attended`
+            }, ...filtered].slice(0, 50);
+          });
+          
+          // Mark this student as having attended
+          const newSet = new Set(prev);
+          newSet.add(studentSessionKey);
+          console.log('[WebSocket] ✅ Added to attendedStudents:', studentSessionKey);
+          return newSet;
+        } else {
+          // This is a rejoin - DON'T add another attendance event, the participant:joined will show
+          console.log('[WebSocket] ⏭️ Skipping attendance event (rejoin) for', data.student_name);
+          return prev;
+        }
+      });
+      
+      console.log('[WebSocket] ✅ Processed attendance event');
     });
 
     newSocket.on('participant:joined', (data) => {
@@ -266,6 +408,7 @@ export const WebSocketProvider = ({ children }) => {
         participant_name: data.participant_name,
         student_id: data.student_id,
         is_matched: data.is_matched,
+        interaction_type: 'join',
         timestamp: data.joined_at,
         message: `${data.participant_name} joined${data.is_matched ? '' : ' (unmatched)'}`
       }, ...prev].slice(0, 50));
@@ -290,6 +433,7 @@ export const WebSocketProvider = ({ children }) => {
         session_id: data.session_id,
         participant_name: data.participant_name,
         duration: data.total_duration_minutes,
+        interaction_type: 'leave',
         timestamp: data.left_at,
         message: `${data.participant_name} left (${Math.round(data.total_duration_minutes || 0)}min)`
       }, ...prev].slice(0, 50));

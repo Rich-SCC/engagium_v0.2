@@ -61,6 +61,8 @@ const SessionDetailPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries(['session', id]);
       queryClient.invalidateQueries(['sessions']);
+      queryClient.refetchQueries(['session', id]); // Force immediate refetch
+      queryClient.refetchQueries(['sessions']); // Force immediate refetch
       setShowEditModal(false);
     }
   });
@@ -77,6 +79,7 @@ const SessionDetailPage = () => {
     onSuccess: (data) => {
       console.log('[SessionDetail] Successfully added to roster:', data);
       queryClient.invalidateQueries(['session', id]);
+      queryClient.refetchQueries(['session', id]); // Force immediate refetch
       
       const message = data?.data?.created_new 
         ? `Successfully created new student: ${data?.data?.student?.full_name || 'Unknown'}`
@@ -115,6 +118,8 @@ const SessionDetailPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries(['session', id]);
       queryClient.invalidateQueries(['sessions']);
+      queryClient.refetchQueries(['session', id]); // Force immediate refetch
+      queryClient.refetchQueries(['sessions']); // Force immediate refetch
     }
   });
 
@@ -123,6 +128,8 @@ const SessionDetailPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries(['session', id]);
       queryClient.invalidateQueries(['sessions']);
+      queryClient.refetchQueries(['session', id]); // Force immediate refetch
+      queryClient.refetchQueries(['sessions']); // Force immediate refetch
     }
   });
 
@@ -196,14 +203,6 @@ const SessionDetailPage = () => {
                 <PencilIcon className="w-5 h-5" />
                 Edit
               </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleteSessionMutation.isPending}
-                className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 flex items-center gap-2"
-              >
-                <TrashIcon className="w-5 h-5" />
-                Delete
-              </button>
             </>
           )}
           {session.status === 'active' && (
@@ -216,6 +215,15 @@ const SessionDetailPage = () => {
               End Session
             </button>
           )}
+          {/* Delete button - available for all statuses */}
+          <button
+            onClick={handleDelete}
+            disabled={deleteSessionMutation.isPending}
+            className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <TrashIcon className="w-5 h-5" />
+            Delete
+          </button>
         </div>
       </div>
 

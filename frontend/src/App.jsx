@@ -16,7 +16,6 @@ import MyClasses from '@/pages/MyClasses';
 import ClassDetailsPage from '@/pages/ClassDetailsPage';
 import Sessions from '@/pages/Sessions';
 import SessionDetailPage from '@/pages/SessionDetailPage';
-import Notifications from '@/pages/Notifications';
 import Settings from '@/pages/Settings';
 
 // Protected route component
@@ -92,7 +91,6 @@ function App() {
         <Route path="sessions" element={<Sessions />} />
         <Route path="sessions/:id" element={<SessionDetailPage />} />
         <Route path="analytics" element={<Analytics />} />
-        <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<Settings />} />
         
         {/* Legacy redirect for old dashboard route */}

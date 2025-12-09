@@ -4,11 +4,12 @@
  * Does NOT aggressively detect refresh - only navigation away from meeting
  */
 
-import { CONFIG } from './config.js';
-import { clearParticipants } from './state.js';
-import { log, warn, sendMessage } from './utils.js';
-import { MESSAGE_TYPES } from '../../utils/constants.js';
-import { now } from '../../utils/date-utils.js';
+import { CONFIG } from '../core/config.js';
+import { PLATFORMS } from '../../../utils/constants.js';
+import { clearParticipants } from '../core/state.js';
+import { log, warn, sendMessage } from '../core/utils.js';
+import { MESSAGE_TYPES } from '../../../utils/constants.js';
+import { now } from '../../../utils/date-utils.js';
 
 /**
  * Extracts meeting ID from the current URL
@@ -92,7 +93,7 @@ function processURLChange(state, onMeetingLeft, onPlatformSwitch) {
     
     // Log platform switch event
     sendMessage(MESSAGE_TYPES.PLATFORM_SWITCH, {
-      platform: 'google-meet',
+      platform: PLATFORMS.GOOGLE_MEET,
       old_meeting_id: state.meetingId,
       new_meeting_id: newMeetingId,
       timestamp: now()

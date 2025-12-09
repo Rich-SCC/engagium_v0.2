@@ -3,7 +3,7 @@
  * Main coordinator for the extension
  */
 
-import { MESSAGE_TYPES, SESSION_STATUS, ATTENDANCE_STATUS } from '../utils/constants.js';
+import { MESSAGE_TYPES, SESSION_STATUS, ATTENDANCE_STATUS, PLATFORMS } from '../utils/constants.js';
 import { sessionManager } from './session-manager.js';
 import { syncQueueManager } from './sync-queue.js';
 import {
@@ -27,11 +27,19 @@ import {
 import { now } from '../utils/date-utils.js';
 import { debug } from '../utils/debug-logger.js';
 import { STORAGE_KEYS } from '../utils/constants.js';
+import { createLogger } from '../utils/logger.js';
 
-console.log('[Background] Service worker started');
+const logger = createLogger('Background');
+
+logger.log('Service worker started');
 // Use setTimeout to ensure storage is ready before logging
 setTimeout(() => {
   debug.info('background', 'SERVICE_WORKER_START', 'Service worker initialized').catch(() => {});
+  
+  // Clear any old failed items from previous sessions
+  syncQueueManager.clearFailedItems().catch(err => {
+    logger.warn('Failed to clear old queue items:', err);
+  });
 }, 100);
 
 // Meeting detection state
@@ -42,7 +50,7 @@ let currentMeetingDetection = null; // { meeting_id, platform, tab_id }
 // ============================================================================
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[Background] Message received:', message.type);
+  logger.log('Message received:', message.type);
   debug.receive('background', message.type, { data: message, sender: sender?.tab?.id });
 
   handleMessage(message, sender)
@@ -51,7 +59,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: true, data: response });
     })
     .catch(error => {
-      console.error('[Background] Error handling message:', error);
+      logger.error(' Error handling message:', error);
       debug.error('background', `${message.type}_ERROR`, { error: error.message, stack: error.stack });
       sendResponse({ success: false, error: error.message });
     });
@@ -72,33 +80,38 @@ async function handleMessage(message, sender) {
       return await handleMeetingDetected(data, sender);
 
     case MESSAGE_TYPES.PARTICIPANT_JOINED:
-      return await sessionManager.handleParticipantJoined(data);
+      const joinResult = await sessionManager.handleParticipantJoined(data);
+      // Broadcast to popup for real-time updates
+      chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.PARTICIPANT_JOINED,
+        participant: data
+      }).catch(() => {}); // Ignore if no listeners
+      return joinResult;
 
     case MESSAGE_TYPES.PARTICIPANT_LEFT:
-      return await sessionManager.handleParticipantLeft(data);
-
-    case MESSAGE_TYPES.CHAT_MESSAGE:
-    case MESSAGE_TYPES.REACTION:
-    case MESSAGE_TYPES.HAND_RAISE:
-    case MESSAGE_TYPES.MIC_TOGGLE:
-    case MESSAGE_TYPES.CAMERA_TOGGLE:
-      return await sessionManager.handleParticipationEvent({ type, ...data });
+      const leaveResult = await sessionManager.handleParticipantLeft(data);
+      // Broadcast to popup for real-time updates
+      chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.PARTICIPANT_LEFT,
+        participant: data
+      }).catch(() => {}); // Ignore if no listeners
+      return leaveResult;
       
     case MESSAGE_TYPES.PLATFORM_SWITCH:
       return await handlePlatformSwitch(data);
       
     case MESSAGE_TYPES.MEETING_LEFT:
       // Meeting left - automatically end session if one is active
-      console.log('[Background] Meeting left:', data.meetingId);
+      logger.log(' Meeting left:', data.meetingId);
       return await handleMeetingLeft(data);
       
     case 'OPEN_POPUP_FROM_REMINDER':
       // User clicked "Start Tracking" from the 60-second reminder
-      console.log('[Background] Opening popup from tracking reminder');
+      logger.log(' Opening popup from tracking reminder');
       try {
         await chrome.action.openPopup();
       } catch (error) {
-        console.error('[Background] Failed to open popup:', error);
+        logger.error(' Failed to open popup:', error);
         // Fallback: open options page or show notification
       }
       return { success: true };
@@ -151,7 +164,7 @@ async function handleMessage(message, sender) {
       // For debugging/recovery - clears all local session data
       await clearAllData();
       sessionManager.activeSessionId = null;
-      console.log('[Background] All session data cleared');
+      logger.log(' All session data cleared');
       return { cleared: true };
 
     default:
@@ -165,7 +178,7 @@ async function handleMessage(message, sender) {
 
 async function handleMeetingDetected(data, sender) {
   const { platform, meetingId } = data;
-  console.log('[Background] Meeting detected:', platform, meetingId);
+  logger.log(' Meeting detected:', platform, meetingId);
 
   // Store meeting detection state
   currentMeetingDetection = {
@@ -173,6 +186,12 @@ async function handleMeetingDetected(data, sender) {
     platform: platform,
     tab_id: sender.tab.id
   };
+
+  // Broadcast to all extension contexts
+  chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.MEETING_DETECTED,
+    meeting: currentMeetingDetection
+  }).catch(() => {}); // Ignore if no listeners
 
   // Check if meeting is mapped to a class via saved links
   try {
@@ -182,11 +201,11 @@ async function handleMeetingDetected(data, sender) {
       const { formatGoogleMeetUrl } = await import('../utils/url-utils.js');
       
       // Format the meeting ID to match stored format
-      const formattedMeetingId = platform === 'google-meet' 
+      const formattedMeetingId = platform === PLATFORMS.GOOGLE_MEET 
         ? formatGoogleMeetUrl(meetingId)
         : meetingId;
       
-      console.log('[Background] Checking for matching class link:', formattedMeetingId);
+      logger.log(' Checking for matching class link:', formattedMeetingId);
       
       // Find a class with a matching link
       for (const cls of classes) {
@@ -206,7 +225,7 @@ async function handleMeetingDetected(data, sender) {
             const prefix = parts.length > 0 ? parts.join(' ') + ' - ' : '';
             const formattedClassName = `${prefix}${cls.name}`;
             
-            console.log('[Background] Auto-mapped meeting to class:', formattedClassName);
+            logger.log(' Auto-mapped meeting to class:', formattedClassName);
             currentMeetingDetection.mapped_class_id = cls.id;
             currentMeetingDetection.mapped_class_name = formattedClassName;
             currentMeetingDetection.auto_mapped = true;
@@ -215,12 +234,12 @@ async function handleMeetingDetected(data, sender) {
             const storage = await chrome.storage.local.get([STORAGE_KEYS.AUTO_OPEN_POPUP]);
             const autoOpenPopup = storage[STORAGE_KEYS.AUTO_OPEN_POPUP] || false;
             if (autoOpenPopup) {
-              console.log('[Background] Auto-opening popup for known class meeting');
+              logger.log(' Auto-opening popup for known class meeting');
               try {
                 await chrome.action.openPopup();
               } catch (error) {
                 // openPopup() might fail if called too soon or in some contexts
-                console.log('[Background] Could not auto-open popup:', error.message);
+                logger.log(' Could not auto-open popup:', error.message);
               }
             }
             
@@ -230,10 +249,10 @@ async function handleMeetingDetected(data, sender) {
       }
     }
   } catch (error) {
-    console.error('[Background] Error checking class links:', error);
+    logger.error(' Error checking class links:', error);
   }
 
-  console.log('[Background] Meeting detection stored:', currentMeetingDetection);
+  logger.log(' Meeting detection stored:', currentMeetingDetection);
   
   return { 
     detected: true, 
@@ -254,7 +273,7 @@ async function handleGetMeetingStatus() {
       classes = await getClasses(); // Already returns array
     }
   } catch (error) {
-    console.error('[Background] Failed to fetch classes:', error);
+    logger.error(' Failed to fetch classes:', error);
   }
 
   return {
@@ -264,19 +283,19 @@ async function handleGetMeetingStatus() {
 }
 
 function handleDismissMeeting() {
-  console.log('[Background] Meeting dismissed');
+  logger.log(' Meeting dismissed');
   currentMeetingDetection = null;
   return { dismissed: true };
 }
 
 async function handlePlatformSwitch(data) {
   const { platform, old_meeting_id, new_meeting_id, timestamp } = data;
-  console.log('[Background] Platform switch:', old_meeting_id, '->', new_meeting_id);
+  logger.log(' Platform switch:', old_meeting_id, '->', new_meeting_id);
   
   // Log as participation event with type 'platform_switch'
   const session = await sessionManager.getActiveSession();
   if (!session) {
-    console.warn('[Background] No active session for platform switch');
+    logger.warn(' No active session for platform switch');
     return { logged: false };
   }
   
@@ -290,7 +309,7 @@ async function handlePlatformSwitch(data) {
     participantId: null // No specific participant
   });
   
-  console.log('[Background] Platform switch logged');
+  logger.log(' Platform switch logged');
   return { logged: true };
 }
 
@@ -304,18 +323,18 @@ async function handleMeetingLeft(data) {
   const session = await sessionManager.getActiveSession();
   
   if (!session) {
-    console.log('[Background] No active session to end');
+    logger.log(' No active session to end');
     // Don't clear meeting detection if no session - user might still want to start tracking
     return { acknowledged: true, sessionEnded: false };
   }
   
   // Check if this is the same meeting
   if (session.meeting_id !== meetingId) {
-    console.log('[Background] Meeting ID mismatch, not ending session');
+    logger.log(' Meeting ID mismatch, not ending session');
     return { acknowledged: true, sessionEnded: false };
   }
   
-  console.log('[Background] Auto-ending session due to meeting exit:', session.id);
+  logger.log(' Auto-ending session due to meeting exit:', session.id);
   
   // Store tab_id before clearing detection state
   const tabId = currentMeetingDetection?.tab_id;
@@ -331,19 +350,25 @@ async function handleMeetingLeft(data) {
           type: MESSAGE_TYPES.SESSION_ENDED,
           sessionId: session.id
         });
-        console.log('[Background] Notified content script to stop tracking');
+        logger.log(' Notified content script to stop tracking');
       } catch (error) {
         // Tab might be closing/closed, ignore error
-        console.log('[Background] Could not notify content script (tab may be closed)');
+        logger.log(' Could not notify content script (tab may be closed)');
       }
     }
+
+    // Broadcast to all extension contexts (popup, options)
+    chrome.runtime.sendMessage({
+      type: MESSAGE_TYPES.SESSION_ENDED,
+      sessionId: session.id
+    }).catch(() => {}); // Ignore if no listeners
     
     // End the session (this handles all cleanup and sync)
     await handleEndSession({ sessionId: session.id });
-    console.log('[Background] Session auto-ended successfully');
+    logger.log(' Session auto-ended successfully');
     return { acknowledged: true, sessionEnded: true };
   } catch (error) {
-    console.error('[Background] Failed to auto-end session:', error);
+    logger.error(' Failed to auto-end session:', error);
     return { acknowledged: true, sessionEnded: false, error: error.message };
   }
 }
@@ -379,25 +404,30 @@ async function handleStartSession(data) {
         const { formatGoogleMeetUrl } = await import('../utils/url-utils.js');
         
         // Format the link properly before saving
-        const formattedLink = platform === 'google-meet' 
+        const formattedLink = platform === PLATFORMS.GOOGLE_MEET 
           ? formatGoogleMeetUrl(meeting_id)
           : meeting_id;
         
         await addClassLink(class_id, {
           link: formattedLink,
-          platform: platform || 'google-meet',
+          platform: platform || PLATFORMS.GOOGLE_MEET,
           is_active: true
         });
-        console.log('[Background] Meeting link saved to class');
+        logger.log(' Meeting link saved to class');
       } catch (linkError) {
         // Don't fail the session start if link save fails
-        console.warn('[Background] Failed to save meeting link:', linkError);
+        logger.warn(' Failed to save meeting link:', linkError);
       }
     }
 
-    // Load student roster for matching
+    // Load student roster for matching and re-match any existing participants
+    logger.log(' Loading student roster for class:', class_id);
     const students = await getStudentsByClass(class_id);
-    sessionManager.setStudentRoster(students);
+    logger.log(' ✅ Loaded', students.length, 'students from roster');
+    if (students.length > 0) {
+      logger.log(' Sample students:', students.slice(0, 3).map(s => s.name));
+    }
+    await sessionManager.setStudentRoster(students);
 
     // Notify content script to start tracking BEFORE clearing detection state
     if (currentMeetingDetection?.tab_id) {
@@ -406,20 +436,27 @@ async function handleStartSession(data) {
           type: MESSAGE_TYPES.SESSION_STARTED,
           sessionId: session.id
         });
-        console.log('[Background] Notified content script to start tracking');
+        logger.log(' Notified content script to start tracking');
       } catch (error) {
-        console.error('[Background] Failed to notify content script:', error);
+        logger.error(' Failed to notify content script:', error);
       }
     }
+
+    // Broadcast to all extension contexts (popup, options)
+    chrome.runtime.sendMessage({
+      type: MESSAGE_TYPES.SESSION_STARTED,
+      sessionId: session.id,
+      session: session
+    }).catch(() => {}); // Ignore if no listeners
 
     // Clear meeting detection state AFTER notifying content script
     currentMeetingDetection = null;
 
-    console.log('[Background] Session started:', session.id);
+    logger.log(' Session started:', session.id);
     return session;
 
   } catch (error) {
-    console.error('[Background] Failed to start session:', error);
+    logger.error(' Failed to start session:', error);
     throw error;
   }
 }
@@ -431,29 +468,18 @@ async function handleEndSession(data) {
     // Get session info before ending (need class_id)
     const sessionInfo = await getSession(sessionId);
     
-    // End session locally
-    const session = await sessionManager.endSession(sessionId);
-
-    // Aggregate and submit data
+    // FIRST: Aggregate and submit data BEFORE ending session
     try {
-      // First, add unmapped participants as students to the class
+      // Add unmapped participants as students to the class
       await addUnmappedParticipantsAsStudents(sessionId, sessionInfo?.class_id);
       
       await submitSessionData(sessionId);
       
-      // Mark as synced
-      await updateSession(sessionId, {
-        status: SESSION_STATUS.SYNCED
-      });
-
-      // Clear local data
-      await clearSessionData(sessionId);
-
-      console.log('[Background] Session ended and synced:', sessionId);
+      logger.log(' Session data submitted successfully');
     } catch (error) {
-      console.error('[Background] Failed to sync session data:', error);
+      logger.error(' Failed to sync session data:', error);
       
-      // Add to sync queue for retry
+      // Add to sync queue for retry (will be processed before session ends)
       try {
         const attendancePayload = await buildAttendancePayload(sessionId);
         const participationPayload = await buildParticipationPayload(sessionId);
@@ -461,22 +487,27 @@ async function handleEndSession(data) {
         await syncQueueManager.enqueue('attendance', sessionId, attendancePayload);
         await syncQueueManager.enqueue('participation', sessionId, participationPayload);
 
-        console.log('[Background] Session data queued for retry');
+        logger.log(' Session data queued for retry');
       } catch (queueError) {
-        console.error('[Background] Failed to queue session data:', queueError);
-      }
-      
-      // Clear local data even if sync failed (data is in queue)
-      try {
-        await clearSessionData(sessionId);
-      } catch (clearError) {
-        console.error('[Background] Failed to clear session data:', clearError);
+        logger.error(' Failed to queue session data:', queueError);
       }
     }
+    
+    // THEN: End session (this will process queue before closing)
+    const session = await sessionManager.endSession(sessionId);
+
+    // Mark as synced and clear local data
+    await updateSession(sessionId, {
+      status: SESSION_STATUS.SYNCED
+    });
+
+    await clearSessionData(sessionId);
+
+    logger.log(' Session ended and synced:', sessionId);
 
     return session;
   } catch (error) {
-    console.error('[Background] Failed to end session:', error);
+    logger.error(' Failed to end session:', error);
     throw error;
   }
 }
@@ -535,7 +566,7 @@ async function handleGetParticipants(data) {
  */
 async function addUnmappedParticipantsAsStudents(sessionId, classId) {
   if (!classId) {
-    console.warn('[Background] No class ID for adding unmapped participants');
+    logger.warn(' No class ID for adding unmapped participants');
     return;
   }
 
@@ -546,22 +577,21 @@ async function addUnmappedParticipantsAsStudents(sessionId, classId) {
     const unmappedParticipants = participants.filter(p => !p.matched_student_id);
     
     if (unmappedParticipants.length === 0) {
-      console.log('[Background] No unmapped participants to add');
+      logger.log(' No unmapped participants to add');
       return;
     }
 
-    console.log('[Background] Adding', unmappedParticipants.length, 'unmapped participants as students');
+    logger.log(' Adding', unmappedParticipants.length, 'unmapped participants as students');
 
-    // Convert participants to student format
+    // Convert participants to student format (name only)
     const studentsToAdd = unmappedParticipants.map(p => ({
-      name: p.name,
-      email: p.email
+      name: p.name
     }));
 
     // Bulk create students in backend
     const result = await createStudentsBulk(classId, studentsToAdd);
     
-    console.log('[Background] Added students:', result?.added || 0, 'of', studentsToAdd.length);
+    logger.log(' Added students:', result?.added || 0, 'of', studentsToAdd.length);
 
     // Update local participant records with new student IDs
     // This allows their attendance and participation to be properly tracked
@@ -588,19 +618,19 @@ async function addUnmappedParticipantsAsStudents(sessionId, classId) {
             match_confidence: 1.0,
             match_method: 'auto_created'
           });
-          console.log('[Background] Linked participant', matchingParticipant.name, 'to new student', newStudent.id);
+          logger.log(' Linked participant', matchingParticipant.name, 'to new student', newStudent.id);
         }
       }
     }
 
   } catch (error) {
-    console.error('[Background] Failed to add unmapped participants as students:', error);
+    logger.error(' Failed to add unmapped participants as students:', error);
     // Don't throw - this is a nice-to-have feature, shouldn't block session end
   }
 }
 
 async function submitSessionData(sessionId) {
-  console.log('[Background] Submitting session data:', sessionId);
+  logger.log(' Submitting session data:', sessionId);
 
   // Build payloads
   const attendancePayload = await buildAttendancePayload(sessionId);
@@ -609,13 +639,13 @@ async function submitSessionData(sessionId) {
   // Submit attendance
   if (attendancePayload.attendance.length > 0) {
     await submitBulkAttendance(sessionId, attendancePayload.attendance);
-    console.log('[Background] Attendance submitted:', attendancePayload.attendance.length);
+    logger.log(' Attendance submitted:', attendancePayload.attendance.length);
   }
 
   // Submit participation
   if (participationPayload.logs.length > 0) {
     await submitBulkParticipation(sessionId, participationPayload.logs);
-    console.log('[Background] Participation submitted:', participationPayload.logs.length);
+    logger.log(' Participation submitted:', participationPayload.logs.length);
   }
 }
 
@@ -626,6 +656,7 @@ async function buildAttendancePayload(sessionId) {
     .filter(p => p.matched_student_id) // Only matched students
     .map(p => ({
       student_id: p.matched_student_id,
+      participant_name: p.name, // Include participant name
       status: ATTENDANCE_STATUS.PRESENT,
       joined_at: p.joined_at,
       left_at: p.left_at || now() // Use current time if still in meeting
@@ -667,7 +698,7 @@ async function buildParticipationPayload(sessionId) {
 // ============================================================================
 
 chrome.runtime.onInstalled.addListener((details) => {
-  console.log('[Background] Extension installed:', details.reason);
+  logger.log(' Extension installed:', details.reason);
 
   if (details.reason === 'install') {
     // Set default settings
@@ -690,7 +721,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 // ============================================================================
 
 self.addEventListener('online', () => {
-  console.log('[Background] Back online, processing sync queue');
+  logger.log(' Back online, processing sync queue');
   syncQueueManager.processQueue();
 });
 
@@ -702,11 +733,11 @@ self.addEventListener('online', () => {
  * Handle tab removal (user closes the tab)
  */
 chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
-  console.log('[Background] Tab removed:', tabId);
+  logger.log(' Tab removed:', tabId);
   
   // Check if this was the meeting tab
   if (currentMeetingDetection && currentMeetingDetection.tab_id === tabId) {
-    console.log('[Background] Meeting tab closed, auto-ending session');
+    logger.log(' Meeting tab closed, auto-ending session');
     
     const meetingId = currentMeetingDetection.meeting_id;
     currentMeetingDetection = null; // Clear detection state
@@ -743,8 +774,8 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
                       newMeetingId !== currentMeetingDetection.meeting_id;
   
   if (leftMeeting) {
-    console.log('[Background] Navigated away from meeting (tab navigation), auto-ending session');
-    console.log('[Background] Old meeting:', currentMeetingDetection.meeting_id, '| New URL:', changeInfo.url);
+    logger.log(' Navigated away from meeting (tab navigation), auto-ending session');
+    logger.log(' Old meeting:', currentMeetingDetection.meeting_id, '| New URL:', changeInfo.url);
     
     const meetingId = currentMeetingDetection.meeting_id;
     currentMeetingDetection = null; // Clear detection state
@@ -755,4 +786,4 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // If still in the same meeting URL, don't do anything - user can refresh freely
 });
 
-console.log('[Background] Service worker initialized');
+logger.log(' Service worker initialized');

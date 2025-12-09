@@ -24,7 +24,7 @@ class Class {
       SELECT c.*,
              COUNT(s.id) as student_count
       FROM classes c
-      LEFT JOIN students s ON c.id = s.class_id
+      LEFT JOIN students s ON c.id = s.class_id AND s.deleted_at IS NULL
       WHERE c.instructor_id = $1 ${statusFilter}
       GROUP BY c.id
       ORDER BY c.created_at DESC
@@ -77,7 +77,7 @@ class Class {
   }
 
   static async getStudentCount(classId) {
-    const query = 'SELECT COUNT(*) as count FROM students WHERE class_id = $1';
+    const query = 'SELECT COUNT(*) as count FROM students WHERE class_id = $1 AND deleted_at IS NULL';
     const result = await db.query(query, [classId]);
     return parseInt(result.rows[0].count);
   }

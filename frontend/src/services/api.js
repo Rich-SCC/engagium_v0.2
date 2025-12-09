@@ -118,9 +118,18 @@ export const authAPI = {
   logout: () => api.post('/auth/logout'),
   getProfile: () => api.get('/auth/profile'),
   updateProfile: (userData) => api.put('/auth/profile', userData),
+  changePassword: (passwordData) => api.put('/auth/change-password', passwordData),
   refreshToken: (refreshToken) => api.post('/auth/refresh-token', { refreshToken }),
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
   resetPassword: (token, password) => api.post('/auth/reset-password', { token, password }),
+};
+
+// Extension Tokens API
+export const extensionTokensAPI = {
+  getAll: () => api.get('/extension-tokens'),
+  generate: () => api.post('/extension-tokens/generate'),
+  revoke: (tokenId) => api.delete(`/extension-tokens/${tokenId}`),
+  revokeAll: () => api.delete('/extension-tokens/revoke-all'),
 };
 
 // Classes API
@@ -205,6 +214,11 @@ export const classesAPI = {
 
   // Class sessions
   getSessions: (classId, params) => api.get(`/classes/${classId}/sessions`, { params }),
+
+  // Analytics
+  getClassAnalytics: (classId, params) => api.get(`/classes/${classId}/analytics`, { params }),
+  getStudentAnalytics: (classId, studentId, params) => 
+    api.get(`/classes/${classId}/students/${studentId}/analytics`, { params }),
 };
 
 // Sessions API
@@ -261,17 +275,6 @@ export const participationAPI = {
     api.get(`/participation/sessions/${sessionId}/summary`),
   getRecentActivity: (sessionId, minutes = 5) =>
     api.get(`/participation/sessions/${sessionId}/recent?minutes=${minutes}`),
-};
-
-// Notifications API
-export const notificationsAPI = {
-  getAll: (unreadOnly = false) =>
-    api.get('/notifications', { params: { unread: unreadOnly } }),
-  getUnreadCount: () => api.get('/notifications/unread-count'),
-  markAsRead: (id) => api.put(`/notifications/${id}/read`),
-  markAllAsRead: () => api.put('/notifications/read-all'),
-  delete: (id) => api.delete(`/notifications/${id}`),
-  create: (data) => api.post('/notifications', data),
 };
 
 export default api;

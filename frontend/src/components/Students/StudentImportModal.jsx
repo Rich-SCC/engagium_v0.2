@@ -15,6 +15,8 @@ const StudentImportModal = ({ isOpen, onClose, classId }) => {
     onSuccess: (data) => {
       setImportResults(data);
       queryClient.invalidateQueries(['students', classId]);
+      queryClient.refetchQueries(['students', classId]); // Force immediate refetch
+      queryClient.invalidateQueries(['class', classId]); // Update class details
     }
   });
 

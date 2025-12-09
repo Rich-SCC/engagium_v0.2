@@ -7,6 +7,11 @@
 
 import { API_BASE_URL, STORAGE_KEYS } from '../utils/constants.js';
 import { debug } from '../utils/debug-logger.js';
+import { getAuthToken } from '../utils/auth.js';
+import { now } from '../utils/date-utils.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('Socket');
 
 // Socket.io client for service workers (using polling since WebSocket isn't available in service workers)
 const SOCKET_URL = API_BASE_URL.replace('/api', '');
@@ -30,7 +35,7 @@ class SocketClient {
    */
   async connect(sessionId) {
     if (this.isConnected && this.sessionId === sessionId) {
-      console.log('[Socket] Already connected to session:', sessionId);
+      logger.log(' Already connected to session:', sessionId);
       return true;
     }
 
@@ -43,11 +48,10 @@ class SocketClient {
 
     try {
       // Get auth token
-      const result = await chrome.storage.local.get(STORAGE_KEYS.AUTH_TOKEN);
-      const token = result[STORAGE_KEYS.AUTH_TOKEN];
+      const token = await getAuthToken();
 
       if (!token) {
-        console.error('[Socket] No auth token available');
+        logger.error(' No auth token available');
         return false;
       }
 
@@ -56,24 +60,24 @@ class SocketClient {
       // We'll use a hybrid approach: POST events to a REST endpoint
       // and the backend will broadcast via Socket.io to frontend
       
-      console.log('[Socket] Connecting to session:', sessionId);
+      logger.log(' Connecting to session:', sessionId);
       this.isConnected = true;
       this.reconnectAttempts = 0;
 
       // Notify backend that extension is now tracking this session
       await this._sendEvent('session:extension_connected', {
         sessionId: this.sessionId,
-        timestamp: new Date().toISOString()
+        timestamp: now()
       });
 
       // Flush any pending events
       await this._flushPendingEvents();
 
-      console.log('[Socket] Connected to session:', sessionId);
+      logger.log(' Connected to session:', sessionId);
       return true;
 
     } catch (error) {
-      console.error('[Socket] Connection failed:', error);
+      logger.error(' Connection failed:', error);
       this.isConnected = false;
       return false;
     }
@@ -91,21 +95,21 @@ class SocketClient {
       // Notify backend that extension is disconnecting
       await this._sendEvent('session:extension_disconnected', {
         sessionId: this.sessionId,
-        timestamp: new Date().toISOString()
+        timestamp: now()
       });
     } catch (error) {
-      console.error('[Socket] Error sending disconnect event:', error);
+      logger.error(' Error sending disconnect event:', error);
     }
 
     this.isConnected = false;
     this.sessionId = null;
     this.reconnectAttempts = 0;
-    console.log('[Socket] Disconnected');
+    logger.log(' Disconnected');
   }
 
   /**
    * Emit a participant joined event
-   * @param {Object} participant - { id, name, email, joinedAt }
+   * @param {Object} participant - { id, name, joinedAt }
    */
   async emitParticipantJoined(participant) {
     await this._sendEvent('participant:joined', {
@@ -113,8 +117,7 @@ class SocketClient {
       participant: {
         id: participant.id,
         name: participant.name,
-        email: participant.email || null,
-        joinedAt: participant.joinedAt || new Date().toISOString()
+        joinedAt: participant.joinedAt || now()
       }
     });
   }
@@ -128,7 +131,7 @@ class SocketClient {
     await this._sendEvent('participant:left', {
       sessionId: this.sessionId,
       participantId,
-      leftAt: leftAt || new Date().toISOString()
+      leftAt: leftAt || now()
     });
   }
 
@@ -183,17 +186,17 @@ class SocketClient {
    */
   async _sendEvent(eventType, data) {
     if (!this.sessionId && eventType !== 'session:extension_connected') {
-      console.warn('[Socket] No session connected, queuing event:', eventType);
+      logger.warn(' No session connected, queuing event:', eventType);
       this.pendingEvents.push({ eventType, data, timestamp: Date.now() });
       return;
     }
 
     console.log('\n========================================');
-    console.log('[Socket] 📤 SENDING EVENT TO BACKEND');
+    logger.log(' 📤 SENDING EVENT TO BACKEND');
     console.log('========================================');
-    console.log('[Socket] Event Type:', eventType);
-    console.log('[Socket] Session ID:', this.sessionId);
-    console.log('[Socket] Data:', JSON.stringify(data, null, 2));
+    logger.log(' Event Type:', eventType);
+    logger.log(' Session ID:', this.sessionId);
+    logger.log(' Data:', JSON.stringify(data, null, 2));
     console.log('========================================\n');
 
     // Debug log - outgoing API call
@@ -204,7 +207,7 @@ class SocketClient {
       const token = result[STORAGE_KEYS.AUTH_TOKEN];
 
       if (!token) {
-        console.error('[Socket] ❌ No auth token for event:', eventType);
+        logger.error(' ❌ No auth token for event:', eventType);
         debug.error('socket', eventType, 'No auth token available');
         return;
       }
@@ -219,13 +222,13 @@ class SocketClient {
           eventType,
           sessionId: this.sessionId,
           data,
-          timestamp: new Date().toISOString()
+          timestamp: now()
         })
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[Socket] ❌ Event send failed:', response.status, errorText);
+        logger.error(' ❌ Event send failed:', response.status, errorText);
         debug.error('socket', eventType, { status: response.status, error: errorText });
         
         // Queue for retry if it's a transient error
@@ -236,12 +239,12 @@ class SocketClient {
       }
 
       const responseData = await response.json();
-      console.log('[Socket] ✅ Event sent successfully:', eventType);
-      console.log('[Socket] Backend response:', responseData);
+      logger.log(' ✅ Event sent successfully:', eventType);
+      logger.log(' Backend response:', responseData);
       debug.success('socket', `${eventType}_RESPONSE`, responseData);
 
     } catch (error) {
-      console.error('[Socket] ❌ Error sending event:', error);
+      logger.error(' ❌ Error sending event:', error);
       debug.error('socket', eventType, { error: error.message, stack: error.stack });
       // Queue for retry
       this.pendingEvents.push({ eventType, data, timestamp: Date.now() });
@@ -254,7 +257,7 @@ class SocketClient {
   async _flushPendingEvents() {
     if (this.pendingEvents.length === 0) return;
 
-    console.log('[Socket] Flushing', this.pendingEvents.length, 'pending events');
+    logger.log(' Flushing', this.pendingEvents.length, 'pending events');
     
     const events = [...this.pendingEvents];
     this.pendingEvents = [];

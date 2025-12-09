@@ -3,7 +3,7 @@
  * Provides visual prompts and notifications within the meeting UI
  */
 
-import { log } from './utils.js';
+import { log, findJoinButton } from '../core/utils.js';
 
 /**
  * Show a notification for Join Now button (when tracking started but still in waiting room)
@@ -16,9 +16,7 @@ export function showJoinNowPrompt(classInfo) {
   }
   
   // Find the Join Now button
-  const joinButton = document.querySelector('button[jsname="Qx7Oae"]') || // Primary join button
-                      document.querySelector('button[aria-label*="Join"]') ||
-                      document.querySelector('button[aria-label*="join"]');
+  const joinButton = findJoinButton();
   
   if (!joinButton) {
     log('Join button not found - user may have already joined');

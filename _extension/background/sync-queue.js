@@ -18,6 +18,9 @@ import {
   recordParticipantJoin,
   recordParticipantLeave
 } from './api-client.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('SyncQueue');
 
 class SyncQueueManager {
   constructor() {
@@ -42,7 +45,7 @@ class SyncQueueManager {
     };
 
     await addToSyncQueue(item);
-    console.log('[SyncQueue] Item added:', item.id, type);
+    logger.log('Item added:', item.id, type);
 
     // Trigger processing
     this.processQueue();
@@ -53,7 +56,7 @@ class SyncQueueManager {
    */
   async processQueue() {
     if (this.isProcessing) {
-      console.log('[SyncQueue] Already processing');
+      logger.log(' Already processing');
       return;
     }
 
@@ -61,13 +64,13 @@ class SyncQueueManager {
 
     try {
       const queue = await getSyncQueue();
-      console.log('[SyncQueue] Processing queue:', queue.length, 'items');
+      logger.log(' Processing queue:', queue.length, 'items');
 
       for (const item of queue) {
         await this.processItem(item);
       }
     } catch (error) {
-      console.error('[SyncQueue] Error processing queue:', error);
+      logger.error(' Error processing queue:', error);
     } finally {
       this.isProcessing = false;
     }
@@ -80,7 +83,7 @@ class SyncQueueManager {
   async processItem(item) {
     // Check if max attempts reached
     if (item.attempts >= SYNC_RETRY.MAX_ATTEMPTS) {
-      console.error('[SyncQueue] Max attempts reached for item:', item.id);
+      logger.error(' Max attempts reached for item:', item.id);
       // Keep in queue for manual retry or user action
       return;
     }
@@ -95,12 +98,12 @@ class SyncQueueManager {
     if (item.last_attempt) {
       const timeSinceLastAttempt = Date.now() - new Date(item.last_attempt).getTime();
       if (timeSinceLastAttempt < backoffDelay) {
-        console.log('[SyncQueue] Waiting for backoff:', item.id);
+        logger.log(' Waiting for backoff:', item.id);
         return;
       }
     }
 
-    console.log('[SyncQueue] Attempting sync:', item.id, 'attempt:', item.attempts + 1);
+    logger.log(' Attempting sync:', item.id, 'attempt:', item.attempts + 1);
 
     try {
       // Update attempts
@@ -122,7 +125,7 @@ class SyncQueueManager {
 
       // Success - remove from queue
       await removeSyncQueueItem(item.id);
-      console.log('[SyncQueue] Item synced successfully:', item.id);
+      logger.log(' Item synced successfully:', item.id);
 
       // Broadcast success event
       chrome.runtime.sendMessage({
@@ -132,7 +135,35 @@ class SyncQueueManager {
       });
 
     } catch (error) {
-      console.error('[SyncQueue] Sync failed:', item.id, error.message);
+      logger.error('⚠️ Sync failed:', item.id, error.message);
+
+      // Check if error is non-retryable
+      const NON_RETRYABLE_ERRORS = [
+        'Can only add participation logs to active sessions',
+        'Can only add attendance to active sessions',
+        'Unauthorized',
+        'Access denied',
+        'Session not found',
+        'Invalid session',
+        'Session has ended'
+      ];
+
+      const isNonRetryable = NON_RETRYABLE_ERRORS.some(msg => 
+        error.message.includes(msg)
+      );
+
+      if (isNonRetryable) {
+        logger.warn('🗑️ Non-retryable error, removing from queue:', item.id);
+        await removeSyncQueueItem(item.id);
+        
+        chrome.runtime.sendMessage({
+          type: 'SYNC_PERMANENT_FAILURE',
+          itemId: item.id,
+          itemType: item.type,
+          error: error.message
+        });
+        return;
+      }
 
       // Update with error
       await updateSyncQueueItem(item.id, {
@@ -183,7 +214,7 @@ class SyncQueueManager {
       await removeSyncQueueItem(item.id);
     }
 
-    console.log('[SyncQueue] Cleared session queue:', sessionId);
+    logger.log(' Cleared session queue:', sessionId);
   }
 
   /**
@@ -200,6 +231,31 @@ class SyncQueueManager {
       failed: queue.filter(item => item.attempts >= SYNC_RETRY.MAX_ATTEMPTS).length
     };
   }
+
+  /**
+   * Clear permanently failed items
+   * @returns {Promise<number>} Number of items cleared
+   */
+  async clearFailedItems() {
+    const queue = await getSyncQueue();
+    const failed = queue.filter(item => item.attempts >= SYNC_RETRY.MAX_ATTEMPTS);
+    
+    for (const item of failed) {
+      await removeSyncQueueItem(item.id);
+    }
+    
+    logger.log('🧹 Cleared', failed.length, 'failed items');
+    return failed.length;
+  }
+
+  /**
+   * Handle session end - clear queue to prevent sync after session closes
+   * @param {string} sessionId 
+   */
+  async onSessionEnd(sessionId) {
+    logger.log('📭 Session ended, clearing queue:', sessionId);
+    await this.clearSessionQueue(sessionId);
+  }
 }
 
 // Export singleton instance
@@ -210,7 +266,7 @@ chrome.alarms.create('sync-check', { periodInMinutes: 5 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'sync-check') {
-    console.log('[SyncQueue] Periodic sync check');
+    logger.log(' Periodic sync check');
     syncQueueManager.processQueue();
   }
 });

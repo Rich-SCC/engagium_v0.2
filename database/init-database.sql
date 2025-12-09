@@ -1,7 +1,47 @@
--- Active: 1763973062283@@127.0.0.1@5432@engagium
--- Engagium Database Schema
--- PostgreSQL Schema for Phase 1 MVP
--- Migration-ready: Can be run multiple times safely with IF NOT EXISTS
+-- Engagium Database Initialization Script
+-- Complete setup for fresh PostgreSQL installation
+-- Run as postgres superuser: psql -U postgres -f init-database.sql
+
+-- ============================================================================
+-- PART 1: Database and User Setup
+-- ============================================================================
+
+-- Drop existing database if it exists (CAUTION: This will delete all data!)
+DROP DATABASE IF EXISTS engagium;
+
+-- Drop existing user if exists
+DROP USER IF EXISTS engagium_user;
+
+-- Create database
+CREATE DATABASE engagium;
+
+-- Create user with password
+-- IMPORTANT: Change this password to something secure in production!
+CREATE USER engagium_user WITH PASSWORD 'engagium_password';
+
+-- Grant privileges
+GRANT ALL PRIVILEGES ON DATABASE engagium TO engagium_user;
+
+-- Connect to the database
+\c engagium
+
+-- Grant schema privileges
+GRANT ALL ON SCHEMA public TO engagium_user;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT ALL ON TABLES TO engagium_user;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT ALL ON SEQUENCES TO engagium_user;
+
+\echo '============================================================================'
+\echo 'Database and user created successfully!'
+\echo '============================================================================'
+\echo ''
+
+-- ============================================================================
+-- PART 2: Schema Setup
+-- ============================================================================
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -248,3 +288,21 @@ DO $$ BEGIN
             FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
     END IF;
 END $$;
+
+-- Grant all privileges on tables to engagium_user
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO engagium_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO engagium_user;
+
+\echo '============================================================================'
+\echo 'Schema created successfully!'
+\echo '============================================================================'
+\echo ''
+\echo 'INITIALIZATION COMPLETE!'
+\echo ''
+\echo 'Database: engagium'
+\echo 'User: engagium_user'
+\echo 'Password: engagium_password (CHANGE THIS IN PRODUCTION!)'
+\echo ''
+\echo 'Update your backend/.env file with:'
+\echo 'DATABASE_URL=postgresql://engagium_user:engagium_password@localhost:5432/engagium'
+\echo ''

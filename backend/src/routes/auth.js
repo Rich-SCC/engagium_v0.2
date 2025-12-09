@@ -9,7 +9,8 @@ const {
   refreshToken,
   forgotPassword,
   resetPassword,
-  generateExtensionToken
+  generateExtensionToken,
+  changePassword
 } = require('../controllers/authController');
 
 const router = express.Router();
@@ -24,6 +25,7 @@ router.post('/reset-password', resetPassword);
 // Protected routes
 router.get('/profile', auth, getProfile);
 router.put('/profile', auth, updateProfile);
+router.put('/change-password', auth, changePassword);
 router.post('/logout', auth, logout);
 router.post('/generate-extension-token', auth, generateExtensionToken);
 

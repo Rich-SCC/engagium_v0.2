@@ -5,19 +5,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MESSAGE_TYPES, SESSION_STATUS } from '../utils/constants.js';
+import { MESSAGE_TYPES, SESSION_STATUS, PLATFORMS } from '../utils/constants.js';
 import { formatTime, formatDuration, secondsToDuration } from '../utils/date-utils.js';
+import { formatClassDisplay } from '../utils/class-formatter.js';
 import './popup.css';
-
-// Class formatter utility
-const formatClassDisplay = (cls) => {
-  if (!cls) return '';
-  const parts = [];
-  if (cls.section) parts.push(cls.section);
-  if (cls.subject) parts.push(cls.subject);
-  const prefix = parts.length > 0 ? parts.join(' ') + ' - ' : '';
-  return `${prefix}${cls.name}`;
-};
 
 function PopupApp() {
   const [sessionStatus, setSessionStatus] = useState(null);
@@ -38,13 +29,35 @@ function PopupApp() {
     loadSessionStatus();
     loadMeetingDetectionStatus();
     
-    // Only refresh every 10 seconds for status updates (reduced from 2s)
-    // Most updates will come from user actions
+    // Listen for real-time updates from background
+    const handleMessage = (message) => {
+      if (message.type === MESSAGE_TYPES.SESSION_STARTED || 
+          message.type === MESSAGE_TYPES.SESSION_ENDED) {
+        loadSessionStatus();
+      }
+      if (message.type === MESSAGE_TYPES.MEETING_DETECTED) {
+        loadMeetingDetectionStatus();
+      }
+      // Reload participants when someone joins or leaves
+      if (message.type === MESSAGE_TYPES.PARTICIPANT_JOINED || 
+          message.type === MESSAGE_TYPES.PARTICIPANT_LEFT) {
+        if (sessionStatus?.session?.id) {
+          loadParticipants(sessionStatus.session.id);
+        }
+      }
+    };
+    
+    chrome.runtime.onMessage.addListener(handleMessage);
+    
+    // Backup polling every 30 seconds (reduced from 10s) just in case events are missed
     const interval = setInterval(() => {
       loadSessionStatus();
-    }, 10000);
+    }, 30000);
     
-    return () => clearInterval(interval);
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleMessage);
+      clearInterval(interval);
+    };
   }, []);
   
   // Load meeting detection status
@@ -240,7 +253,7 @@ function PopupApp() {
             </svg>
             <div className="meeting-info">
               <h3>Meeting Detected</h3>
-              <p className="meeting-platform">{meetingDetected.platform === 'google-meet' ? 'Google Meet' : meetingDetected.platform}</p>
+              <p className="meeting-platform">{meetingDetected.platform === PLATFORMS.GOOGLE_MEET ? 'Google Meet' : meetingDetected.platform}</p>
             </div>
           </div>
 

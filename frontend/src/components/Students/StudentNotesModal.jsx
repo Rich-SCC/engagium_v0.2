@@ -21,6 +21,7 @@ const StudentNotesModal = ({ isOpen, onClose, classId, student }) => {
     onSuccess: () => {
       queryClient.invalidateQueries(['studentNotes', classId, student.id]);
       queryClient.invalidateQueries(['students', classId]);
+      queryClient.refetchQueries(['studentNotes', classId, student.id]); // Force immediate refetch
       setNoteText('');
     }
   });
@@ -29,6 +30,7 @@ const StudentNotesModal = ({ isOpen, onClose, classId, student }) => {
     mutationFn: ({ noteId, text }) => classesAPI.updateNote(classId, student.id, noteId, text),
     onSuccess: () => {
       queryClient.invalidateQueries(['studentNotes', classId, student.id]);
+      queryClient.refetchQueries(['studentNotes', classId, student.id]); // Force immediate refetch
       setEditingNote(null);
       setNoteText('');
     }
@@ -39,6 +41,7 @@ const StudentNotesModal = ({ isOpen, onClose, classId, student }) => {
     onSuccess: () => {
       queryClient.invalidateQueries(['studentNotes', classId, student.id]);
       queryClient.invalidateQueries(['students', classId]);
+      queryClient.refetchQueries(['studentNotes', classId, student.id]); // Force immediate refetch
     }
   });
 

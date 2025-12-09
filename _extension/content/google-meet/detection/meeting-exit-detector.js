@@ -5,7 +5,7 @@
  * Prompts user after page refresh to confirm session status
  */
 
-import { log } from './utils.js';
+import { log } from '../core/utils.js';
 
 /**
  * Check if page was refreshed

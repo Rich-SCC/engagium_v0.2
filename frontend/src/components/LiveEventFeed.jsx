@@ -9,7 +9,8 @@ import {
   ArrowLeftOnRectangleIcon,
   SparklesIcon,
   UserPlusIcon,
-  UserMinusIcon
+  UserMinusIcon,
+  CheckCircleIcon
 } from '@heroicons/react/24/outline';
 
 const LiveEventFeed = () => {
@@ -17,25 +18,35 @@ const LiveEventFeed = () => {
   const feedRef = useRef(null);
   const [autoScroll, setAutoScroll] = React.useState(true);
 
-  // Auto-scroll to bottom when new events arrive
+  // Auto-scroll to top when new events arrive (latest events are at the top)
   useEffect(() => {
     if (autoScroll && feedRef.current) {
-      feedRef.current.scrollTop = feedRef.current.scrollHeight;
+      feedRef.current.scrollTop = 0;
     }
   }, [recentEvents, autoScroll]);
 
   const handleScroll = (e) => {
-    const { scrollTop, scrollHeight, clientHeight } = e.target;
-    // Enable auto-scroll if user scrolls to bottom, disable otherwise
-    setAutoScroll(scrollHeight - scrollTop - clientHeight < 100);
+    const { scrollTop } = e.target;
+    // Enable auto-scroll if user scrolls to top, disable otherwise
+    setAutoScroll(scrollTop < 100);
   };
 
   const getEventIcon = (type) => {
     switch (type) {
+      case 'chat':
+        return <ChatBubbleLeftIcon className="w-5 h-5" />;
+      case 'hand_raise':
+        return <HandRaisedIcon className="w-5 h-5" />;
+      case 'mic_toggle':
+        return <MicrophoneIcon className="w-5 h-5" />;
+      case 'camera_toggle':
+        return <VideoCameraIcon className="w-5 h-5" />;
+      case 'reaction':
+        return <SparklesIcon className="w-5 h-5" />;
       case 'participation':
         return <ChatBubbleLeftIcon className="w-5 h-5" />;
       case 'attendance':
-        return <ArrowRightOnRectangleIcon className="w-5 h-5" />;
+        return <CheckCircleIcon className="w-5 h-5" />;
       case 'participant_joined':
         return <UserPlusIcon className="w-5 h-5" />;
       case 'participant_left':
@@ -51,6 +62,16 @@ const LiveEventFeed = () => {
 
   const getEventColor = (type) => {
     switch (type) {
+      case 'chat':
+        return 'bg-blue-100 text-blue-600';
+      case 'hand_raise':
+        return 'bg-yellow-100 text-yellow-600';
+      case 'mic_toggle':
+        return 'bg-indigo-100 text-indigo-600';
+      case 'camera_toggle':
+        return 'bg-pink-100 text-pink-600';
+      case 'reaction':
+        return 'bg-purple-100 text-purple-600';
       case 'participation':
         return 'bg-blue-100 text-blue-600';
       case 'attendance':
@@ -164,12 +185,12 @@ const LiveEventFeed = () => {
             ))}
             
             {!autoScroll && (
-              <div className="sticky bottom-0 left-0 right-0 py-2 text-center">
+              <div className="sticky top-0 left-0 right-0 py-2 text-center">
                 <button
                   onClick={() => {
                     setAutoScroll(true);
                     if (feedRef.current) {
-                      feedRef.current.scrollTop = feedRef.current.scrollHeight;
+                      feedRef.current.scrollTop = 0;
                     }
                   }}
                   className="px-4 py-2 bg-accent-500 text-white rounded-lg text-sm font-medium hover:bg-accent-600 transition shadow-lg"

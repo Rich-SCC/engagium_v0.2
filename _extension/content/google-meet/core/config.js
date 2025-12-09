@@ -36,7 +36,7 @@ export const EVENT_TYPES = {
 // SELECTORS export for backwards compatibility
 export const SELECTORS = {
   // People Panel (PRIMARY SOURCE - always has complete participant list)
-  sidePanel: '[role="complementary"]',
+  sidePanel: 'aside[aria-label="Side panel"]',
   participantsList: '[role="list"][aria-label="Participants"]',
   peoplePanelList: '[role="list"][aria-label="Participants"]',
   participantItem: '[role="listitem"]',
@@ -66,7 +66,7 @@ export const CONFIG = {
   // Uses ARIA roles and labels instead of data-* attributes
   SELECTORS: {
     // People Panel (PRIMARY SOURCE - always has complete participant list)
-    sidePanel: '[role="complementary"]',
+    sidePanel: 'aside[aria-label="Side panel"]',
     participantsList: '[role="list"][aria-label="Participants"]',
     peoplePanelList: '[role="list"][aria-label="Participants"]', // alias for consistency
     participantItem: '[role="listitem"]',

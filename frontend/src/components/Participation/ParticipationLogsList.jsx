@@ -116,8 +116,16 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
 
   return (
     <div className="space-y-4">
+      {/* Section Header */}
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900">Participation Logs</h3>
+        <p className="text-sm text-gray-600 mt-1">
+          Detailed chronological record of all student interactions during the session
+        </p>
+      </div>
+
       {/* Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">

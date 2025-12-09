@@ -12,18 +12,54 @@
  * Reference: __documentation/Extension/GOOGLE_MEET_DOM_REFERENCE.md
  */
 
-import { CONFIG, cleanParticipantName, isValidParticipantName } from './config.js';
-import { generateParticipantId, log, warn } from './utils.js';
-import { sendImmediate } from './event-emitter.js';
-import { MESSAGE_TYPES } from '../../utils/constants.js';
-import { now } from '../../utils/date-utils.js';
-import { openPeoplePanel, isPeoplePanelOpen } from './people-panel.js';
+import { CONFIG, cleanParticipantName, isValidParticipantName } from '../core/config.js';
+import { generateParticipantId, log, warn, sleep, isInvalidParticipant } from '../core/utils.js';
+import { sendImmediate } from '../core/event-emitter.js';
+import { MESSAGE_TYPES, PLATFORMS } from '../../../utils/constants.js';
+import { now } from '../../../utils/date-utils.js';
+import { openPeoplePanel, closePeoplePanel, isPeoplePanelOpen } from './people-panel.js';
+import { showRetroactiveCaptureNotification } from '../ui/meeting-notifications.js';
 
 let peoplePanelObserver = null;
 let toastObserver = null;
 let panelWatcher = null;
-let pendingPanelOpen = false;
 let recentToasts = new Map(); // Track recent toasts to prevent duplicates
+
+/**
+ * CENTRALIZED WORKFLOW: open → scan → send → close
+ * Ensures consistent behavior across all detection triggers
+ * @param {Object} state - State object
+ * @param {Function} scanFunction - Function to call for scanning (receives state)
+ * @param {string} reason - Reason for workflow (for logging)
+ */
+async function executeDetectionWorkflow(state, scanFunction, reason) {
+  log(`Detection workflow started: ${reason}`);
+  
+  // Remember if panel was already open
+  const wasAlreadyOpen = isPeoplePanelOpen();
+  
+  // 1. OPEN: Ensure panel is open
+  const opened = await openPeoplePanel();
+  if (!opened) {
+    warn(`Failed to open panel for: ${reason}`);
+    return false;
+  }
+  
+  // Small delay to ensure DOM is ready
+  await sleep(100);
+  
+  // 2. SCAN & SEND: Execute the scan function (which sends events)
+  scanFunction(state);
+  
+  // 3. CLOSE: Close panel if we opened it (not if user had it open)
+  if (!wasAlreadyOpen) {
+    await sleep(500); // Ensure all events are sent
+    await closePeoplePanel();
+    log(`Panel closed after: ${reason}`);
+  }
+  
+  return true;
+}
 
 /**
  * Starts monitoring participants using People Panel + Toast notifications
@@ -32,11 +68,17 @@ let recentToasts = new Map(); // Track recent toasts to prevent duplicates
 export function startParticipantMonitoring(state) {
   log('Starting participant monitoring (ARIA-based)...');
   
-  // Ensure people panel is open before scanning
-  ensurePeoplePanelOpen().then(() => {
-    // Initial scan of existing participants
+  // Initial scan using centralized workflow
+  executeDetectionWorkflow(state, (state) => {
     scanCurrentParticipants(state);
     
+    // Show retroactive capture notification if participants were found
+    const participantCount = state.participants.size;
+    if (participantCount > 0) {
+      log(`Retroactively captured ${participantCount} participants already in meeting`);
+      showRetroactiveCaptureNotification(participantCount);
+    }
+  }, 'initial scan').then(() => {
     // Set up People Panel observer (primary source)
     if (!setupPeoplePanelObserver(state)) {
       // Panel not found yet, watch for it
@@ -89,9 +131,8 @@ function setupToastObserver(state) {
         // Check for join notification
         if (textLower.includes(CONFIG.PATTERNS.joined)) {
           const name = extractNameFromToast(text, CONFIG.PATTERNS.joined);
-          if (name && !isInvalidParticipant(name)) {
+          if (name && !isInvalidParticipant(name, CONFIG)) {
             // Prevent duplicate processing of the same toast
-            const toastKey = `join:${name}:${Date.now()}`;
             const recentKey = `join:${name}`;
             const lastSeen = recentToasts.get(recentKey);
             
@@ -105,18 +146,18 @@ function setupToastObserver(state) {
             setTimeout(() => recentToasts.delete(recentKey), 5000);
             
             log('Toast: Participant joined:', name);
-            // Ensure people panel is open to detect the participant
-            ensurePeoplePanelOpenDebounced().then(() => {
-              // Delay to let DOM update, then rescan
-              setTimeout(() => rescanAndDetectNew(state), 300);
-            });
+            
+            // Use centralized workflow: open → scan → send → close
+            executeDetectionWorkflow(state, (state) => {
+              rescanAndDetectNew(state);
+            }, `join toast: ${name}`);
           }
         }
         
         // Check for leave notification
         if (textLower.includes(CONFIG.PATTERNS.left)) {
           const name = extractNameFromToast(text, CONFIG.PATTERNS.left);
-          if (name && !isInvalidParticipant(name)) {
+          if (name && !isInvalidParticipant(name, CONFIG)) {
             // Prevent duplicate processing of the same toast
             const recentKey = `leave:${name}`;
             const lastSeen = recentToasts.get(recentKey);
@@ -131,10 +172,11 @@ function setupToastObserver(state) {
             setTimeout(() => recentToasts.delete(recentKey), 5000);
             
             log('Toast: Participant left:', name);
-            // Ensure people panel is open to verify the participant left
-            ensurePeoplePanelOpenDebounced().then(() => {
-              setTimeout(() => detectLeftParticipants(state), 300);
-            });
+            
+            // Use centralized workflow: open → scan → send → close
+            executeDetectionWorkflow(state, (state) => {
+              detectLeftParticipants(state);
+            }, `leave toast: ${name}`);
           }
         }
       }
@@ -277,20 +319,42 @@ function scanCurrentParticipants(state) {
       });
       
       sendImmediate(MESSAGE_TYPES.PARTICIPANT_JOINED, {
-        platform: 'google-meet',
+        platform: PLATFORMS.GOOGLE_MEET,
         meetingId: state.meetingId,
         participant: {
           id: participant.id,
           name: participant.name,
-          email: participant.email,
           isMuted: participant.isMuted,
           joinedAt: now()
         }
       });
     } else {
-      // Update mic status for existing participant
+      // Check if this participant has rejoined (was marked as left but is now present)
       const existing = state.participants.get(participant.id);
-      existing.isMuted = participant.isMuted;
+      
+      if (existing.leftAt) {
+        log('Participant rejoined (detected in scan):', participant.name);
+        
+        // Clear leftAt and update joinedAt to mark rejoin
+        existing.leftAt = null;
+        existing.joinedAt = now();
+        existing.isMuted = participant.isMuted;
+        
+        // Send PARTICIPANT_JOINED event for the rejoin
+        sendImmediate(MESSAGE_TYPES.PARTICIPANT_JOINED, {
+          platform: PLATFORMS.GOOGLE_MEET,
+          meetingId: state.meetingId,
+          participant: {
+            id: participant.id,
+            name: participant.name,
+            isMuted: participant.isMuted,
+            joinedAt: now()
+          }
+        });
+      } else {
+        // Just update mic status for participants who never left
+        existing.isMuted = participant.isMuted;
+      }
     }
   }
   
@@ -321,20 +385,42 @@ function rescanAndDetectNew(state) {
       });
       
       sendImmediate(MESSAGE_TYPES.PARTICIPANT_JOINED, {
-        platform: 'google-meet',
+        platform: PLATFORMS.GOOGLE_MEET,
         meetingId: state.meetingId,
         participant: {
           id: participant.id,
           name: participant.name,
-          email: participant.email,
           isMuted: participant.isMuted,
           joinedAt: now()
         }
       });
     } else {
-      // Update mic status
+      // Check if this participant has rejoined (was marked as left but is now present)
       const existing = state.participants.get(participant.id);
-      existing.isMuted = participant.isMuted;
+      
+      if (existing.leftAt) {
+        log('Participant rejoined:', participant.name);
+        
+        // Clear leftAt and update joinedAt to mark rejoin
+        existing.leftAt = null;
+        existing.joinedAt = now();
+        existing.isMuted = participant.isMuted;
+        
+        // Send PARTICIPANT_JOINED event for the rejoin
+        sendImmediate(MESSAGE_TYPES.PARTICIPANT_JOINED, {
+          platform: PLATFORMS.GOOGLE_MEET,
+          meetingId: state.meetingId,
+          participant: {
+            id: participant.id,
+            name: participant.name,
+            isMuted: participant.isMuted,
+            joinedAt: now()
+          }
+        });
+      } else {
+        // Just update mic status for participants who never left
+        existing.isMuted = participant.isMuted;
+      }
     }
   }
 }
@@ -362,7 +448,7 @@ function detectLeftParticipants(state) {
       participant.leftAt = now();
       
       sendImmediate(MESSAGE_TYPES.PARTICIPANT_LEFT, {
-        platform: 'google-meet',
+        platform: PLATFORMS.GOOGLE_MEET,
         meetingId: state.meetingId,
         name: participant.name, // Send name instead of/in addition to participantId
         participantId: participantId,
@@ -423,7 +509,7 @@ function extractParticipantFromListitem(listitem) {
         if (el.querySelector('button')) continue;
         
         const text = cleanParticipantName(el.textContent?.trim());
-        if (isValidParticipantName(text) && !isInvalidParticipant(text)) {
+        if (isValidParticipantName(text) && !isInvalidParticipant(text, CONFIG)) {
           name = text;
           break;
         }
@@ -455,7 +541,6 @@ function extractParticipantFromListitem(listitem) {
     return {
       id,
       name,
-      email: null, // Not available in new DOM structure
       isSelf,
       isPresentation,
       isMuted,
@@ -514,43 +599,21 @@ export function extractParticipantData(element) {
       const generics = element.querySelectorAll('[role="generic"]');
       for (const g of generics) {
         const text = g.textContent?.trim();
-        if (text && text.length > 1 && text.length < 100 && !isInvalidParticipant(text)) {
+        if (text && text.length > 1 && text.length < 100 && !isInvalidParticipant(text, CONFIG)) {
           name = text;
           break;
         }
       }
     }
     
-    if (name === 'Unknown' || isInvalidParticipant(name)) return null;
+    if (name === 'Unknown' || isInvalidParticipant(name, CONFIG)) return null;
     
     const id = generateParticipantId({ textContent: name });
-    return { id, name, email: null };
+    return { id, name };
   } catch (err) {
     console.error('[GoogleMeet] Error extracting participant data:', err);
     return null;
   }
-}
-
-/**
- * Checks if a participant name is invalid (UI element, not a person)
- * @param {string} name - Participant name to check
- * @returns {boolean} True if invalid
- */
-function isInvalidParticipant(name) {
-  if (!name || typeof name !== 'string') return true;
-  
-  const lowerName = name.toLowerCase().trim();
-  
-  // Check against invalid names list
-  if (CONFIG.INVALID_NAMES.includes(lowerName)) return true;
-  
-  // Too short
-  if (name.length < 2) return true;
-  
-  // Starts with underscore or is all special chars
-  if (name.startsWith('_') || /^[^a-zA-Z0-9]+$/.test(name)) return true;
-  
-  return false;
 }
 
 /**
@@ -612,55 +675,4 @@ export function getParticipantMicStatus(state) {
   return micStatus;
 }
 
-/**
- * Ensures the people panel is open for accurate participant tracking
- * @returns {Promise<boolean>} True if panel is open or was opened successfully
- */
-async function ensurePeoplePanelOpen() {
-  if (isPeoplePanelOpen()) {
-    return true;
-  }
-  
-  log('People panel not open, attempting to open...');
-  const opened = await openPeoplePanel();
-  
-  if (opened) {
-    log('People panel opened successfully');
-  } else {
-    warn('Failed to open people panel - participant tracking may be incomplete');
-  }
-  
-  return opened;
-}
-
-/**
- * Debounced version to prevent rapid-fire panel opening attempts
- * @returns {Promise<boolean>}
- */
-async function ensurePeoplePanelOpenDebounced() {
-  // If already open, return immediately
-  if (isPeoplePanelOpen()) {
-    return true;
-  }
-  
-  // If already attempting to open, wait for that attempt
-  if (pendingPanelOpen) {
-    log('Panel open already in progress, waiting...');
-    // Wait a bit for the pending operation to complete
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return isPeoplePanelOpen();
-  }
-  
-  // Mark that we're attempting to open
-  pendingPanelOpen = true;
-  
-  try {
-    const result = await ensurePeoplePanelOpen();
-    return result;
-  } finally {
-    // Clear the flag after a short delay to prevent immediate re-attempts
-    setTimeout(() => {
-      pendingPanelOpen = false;
-    }, 1000);
-  }
-}
+// Old ensurePeoplePanelOpen functions removed - now using centralized executeDetectionWorkflow

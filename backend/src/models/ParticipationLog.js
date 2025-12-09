@@ -158,7 +158,7 @@ class ParticipationLog {
   }
 
   static async getClassStudentCount(classId) {
-    const query = 'SELECT COUNT(*) as total_students FROM students WHERE class_id = $1';
+    const query = 'SELECT COUNT(*) as total_students FROM students WHERE class_id = $1 AND deleted_at IS NULL';
     const result = await db.query(query, [classId]);
     return result.rows[0].total_students;
   }

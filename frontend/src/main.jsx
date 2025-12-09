@@ -12,10 +12,10 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      refetchOnWindowFocus: false,
-      staleTime: 5 * 60 * 1000, // 5 minutes - data is considered fresh
-      gcTime: 10 * 60 * 1000, // 10 minutes - cache retention (formerly cacheTime)
-      refetchOnMount: false, // Don't refetch if data is still fresh
+      refetchOnWindowFocus: true, // Refetch when window regains focus
+      staleTime: 30 * 1000, // 30 seconds - data is considered fresh
+      gcTime: 5 * 60 * 1000, // 5 minutes - cache retention (formerly cacheTime)
+      refetchOnMount: true, // Always refetch when component mounts
     },
   },
 })

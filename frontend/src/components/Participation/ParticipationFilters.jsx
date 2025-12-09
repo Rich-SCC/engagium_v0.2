@@ -19,7 +19,10 @@ const ParticipationFilters = ({
   ];
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-gray-900">Filter & Search</h3>
+      </div>
       <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
         {/* Left side: Filters */}
         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">

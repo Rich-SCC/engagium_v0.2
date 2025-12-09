@@ -3,15 +3,13 @@ import { XMarkIcon } from '@heroicons/react/24/outline';
 
 const StudentFormModal = ({ isOpen, onClose, onSubmit, initialData, isLoading }) => {
   const [formData, setFormData] = useState({
-    full_name: '',
-    student_id: ''
+    full_name: ''
   });
 
   useEffect(() => {
     if (initialData) {
       setFormData({
-        full_name: initialData.full_name || '',
-        student_id: initialData.student_id || ''
+        full_name: initialData.full_name || ''
       });
     }
   }, [initialData]);
@@ -59,20 +57,6 @@ const StudentFormModal = ({ isOpen, onClose, onSubmit, initialData, isLoading })
               onChange={handleChange}
               required
               placeholder="e.g., John Smith"
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Student ID (optional)
-            </label>
-            <input
-              type="text"
-              name="student_id"
-              value={formData.student_id}
-              onChange={handleChange}
-              placeholder="e.g., STU001"
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-gray-900"
             />
           </div>

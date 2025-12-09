@@ -6,8 +6,7 @@ import { classesAPI } from '@/services/api';
 const ExemptionListModal = ({ isOpen, onClose, classId }) => {
   const queryClient = useQueryClient();
   const [newExemption, setNewExemption] = useState({
-    account_identifier: '',
-    reason: ''
+    account_identifier: ''
   });
 
   const { data: exemptionsData, isLoading } = useQuery({
@@ -22,7 +21,8 @@ const ExemptionListModal = ({ isOpen, onClose, classId }) => {
     mutationFn: (exemptionData) => classesAPI.addExemption(classId, exemptionData),
     onSuccess: () => {
       queryClient.invalidateQueries(['classExemptions', classId]);
-      setNewExemption({ account_identifier: '', reason: '' });
+      queryClient.refetchQueries(['classExemptions', classId]); // Force immediate refetch
+      setNewExemption({ account_identifier: '' });
     }
   });
 
@@ -30,6 +30,7 @@ const ExemptionListModal = ({ isOpen, onClose, classId }) => {
     mutationFn: (exemptionId) => classesAPI.deleteExemption(classId, exemptionId),
     onSuccess: () => {
       queryClient.invalidateQueries(['classExemptions', classId]);
+      queryClient.refetchQueries(['classExemptions', classId]); // Force immediate refetch
     }
   });
 
@@ -73,32 +74,19 @@ const ExemptionListModal = ({ isOpen, onClose, classId }) => {
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Account Identifier <span className="text-red-500">*</span>
+                  Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={newExemption.account_identifier}
                   onChange={(e) => setNewExemption({ ...newExemption, account_identifier: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
-                  placeholder="Email or name to exempt"
+                  placeholder="John Doe"
                   required
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  This can be an email address or display name that appears in sessions
+                  Enter the name exactly as it appears in the meeting (e.g., Google Meet display name)
                 </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Reason
-                </label>
-                <input
-                  type="text"
-                  value={newExemption.reason}
-                  onChange={(e) => setNewExemption({ ...newExemption, reason: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent text-sm"
-                  placeholder="e.g., TA, Observer, Alt account"
-                />
               </div>
 
               <button
@@ -135,13 +123,6 @@ const ExemptionListModal = ({ isOpen, onClose, classId }) => {
                       <div className="font-medium text-sm">
                         {exemption.account_identifier}
                       </div>
-                      {exemption.reason && (
-                        <div className="text-xs text-gray-600 mt-1">
-                          <span className="inline-block px-2 py-0.5 bg-gray-100 rounded">
-                            {exemption.reason}
-                          </span>
-                        </div>
-                      )}
                       <div className="text-xs text-gray-400 mt-1">
                         Added {new Date(exemption.created_at).toLocaleDateString()}
                       </div>

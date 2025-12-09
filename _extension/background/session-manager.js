@@ -34,6 +34,9 @@ import {
 import { socketClient } from './socket-client.js';
 import { syncQueueManager } from './sync-queue.js';
 import { debug } from '../utils/debug-logger.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('SessionManager');
 
 class SessionManager {
   constructor() {
@@ -62,7 +65,7 @@ class SessionManager {
         platform: sessionData.meeting_platform
       });
 
-      console.log('[SessionManager] API response:', JSON.stringify(response));
+      logger.log(' API response:', JSON.stringify(response));
 
       if (!response.success) {
         throw new Error(response.message || response.error || 'Failed to start session');
@@ -71,10 +74,10 @@ class SessionManager {
       // Backend returns { success: true, data: session } (session object directly in data)
       const backendSession = response.data;
       
-      console.log('[SessionManager] Backend session:', JSON.stringify(backendSession));
+      logger.log(' Backend session:', JSON.stringify(backendSession));
       
       if (!backendSession || !backendSession.id) {
-        console.error('[SessionManager] Invalid response structure:', response);
+        logger.error(' Invalid response structure:', response);
         throw new Error('Invalid session response from server - missing session ID');
       }
 
@@ -97,16 +100,16 @@ class SessionManager {
       // Connect to WebSocket for real-time updates
       try {
         await socketClient.connect(backendSession.id);
-        console.log('[SessionManager] WebSocket connected for session:', backendSession.id);
+        logger.log(' WebSocket connected for session:', backendSession.id);
       } catch (wsError) {
-        console.warn('[SessionManager] WebSocket connection failed (will sync offline):', wsError);
+        logger.warn(' WebSocket connection failed (will sync offline):', wsError);
       }
 
-      console.log('[SessionManager] Session started:', session.id, '(backend:', backendSession.id, ')');
+      logger.log(' Session started:', session.id, '(backend:', backendSession.id, ')');
       return session;
 
     } catch (error) {
-      console.error('[SessionManager] Failed to start session:', error);
+      logger.error(' Failed to start session:', error);
       throw error;
     }
   }
@@ -130,13 +133,12 @@ class SessionManager {
     const endedAt = now();
 
     try {
-      // Disconnect WebSocket first
-      try {
-        await socketClient.disconnect();
-        console.log('[SessionManager] WebSocket disconnected');
-      } catch (wsError) {
-        console.warn('[SessionManager] WebSocket disconnect failed:', wsError);
-      }
+      // FIRST: Process pending queue items while session is still active on backend
+      logger.log('🔄 Processing pending queue before ending session...');
+      await syncQueueManager.processQueue();
+      
+      // Give queue time to finish processing
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       // Close all open attendance intervals locally
       const closedCount = await closeAllOpenIntervals(sessionId, endedAt);
@@ -145,6 +147,17 @@ class SessionManager {
       // Call backend API to end session (this will also close intervals server-side)
       if (session.backend_id) {
         await endSessionWithTimestamp(session.backend_id, endedAt);
+      }
+      
+      // Clear any remaining queue items (these are now stale since session ended)
+      await syncQueueManager.onSessionEnd(sessionId);
+
+      // Disconnect WebSocket
+      try {
+        await socketClient.disconnect();
+        logger.log(' WebSocket disconnected');
+      } catch (wsError) {
+        logger.warn(' WebSocket disconnect failed:', wsError);
       }
 
       // Update local session
@@ -157,11 +170,11 @@ class SessionManager {
         this.activeSessionId = null;
       }
 
-      console.log('[SessionManager] Session ended:', sessionId);
+      logger.log(' Session ended:', sessionId);
       return updatedSession;
 
     } catch (error) {
-      console.error('[SessionManager] Failed to end session:', error);
+      logger.error(' Failed to end session:', error);
       
       // Still close intervals and mark as ended locally even if API call fails
       await closeAllOpenIntervals(sessionId, endedAt);
@@ -199,11 +212,67 @@ class SessionManager {
 
   /**
    * Set student roster for matching
-   * @param {Array} roster - Array of { id, name, email }
+   * Re-matches all existing unmatched participants after roster is loaded
+   * @param {Array} roster - Array of { id, name }
    */
-  setStudentRoster(roster) {
+  async setStudentRoster(roster) {
     this.studentRoster = roster;
-    console.log('[SessionManager] Roster loaded:', roster.length, 'students');
+    logger.log(' 📋 Roster set with', roster.length, 'students');
+    if (roster.length > 0) {
+      logger.log(' Roster sample:', roster.slice(0, 5).map(s => `${s.name} (ID: ${s.id})`));
+    } else {
+      logger.warn(' ⚠️ WARNING: Empty roster - no students to match against!');
+    }
+    
+    // Re-match existing participants that joined before roster was loaded
+    await this.rematchExistingParticipants();
+  }
+  
+  /**
+   * Re-match all unmatched participants against the current roster
+   * Called after roster is loaded to match participants who joined early
+   */
+  async rematchExistingParticipants() {
+    const session = await this.getActiveSession();
+    if (!session || this.studentRoster.length === 0) {
+      return;
+    }
+    
+    const participants = await getParticipantsBySession(session.id);
+    const unmatchedParticipants = participants.filter(p => !p.matched_student_id);
+    
+    if (unmatchedParticipants.length === 0) {
+      return;
+    }
+    
+    logger.log(' 🔄 Re-matching', unmatchedParticipants.length, 'unmatched participants against roster of', this.studentRoster.length);
+    
+    for (const participant of unmatchedParticipants) {
+      logger.log(' Re-matching:', participant.name);
+      const match = matchParticipant({ name: participant.name }, this.studentRoster);
+      
+      if (match) {
+        // Update participant with match info
+        await updateParticipant(participant.id, {
+          matched_student_id: match.student.id,
+          matched_student_name: match.student.name,
+          match_confidence: match.score,
+          match_method: match.method
+        });
+        
+        logger.log(' Re-matched participant:', participant.name, '->', match.student.name);
+        
+        // Also update any open attendance intervals for this participant
+        const openIntervals = await getOpenIntervals(session.id);
+        const participantIntervals = openIntervals.filter(i => i.participant_name === participant.name);
+        
+        for (const interval of participantIntervals) {
+          // Note: We need to add an update function for intervals
+          // For now, the backend sync will handle this correctly
+          logger.log(' Found open interval for re-matched participant:', interval.id);
+        }
+      }
+    }
   }
 
   /**
@@ -224,7 +293,7 @@ class SessionManager {
     const joinedAt = data.timestamp || data.participant?.joinedAt || now();
     
     if (!participantName) {
-      console.warn('[SessionManager] No participant name in join event:', data);
+      logger.warn(' No participant name in join event:', data);
       return;
     }
 
@@ -234,16 +303,25 @@ class SessionManager {
     
     if (existingOpen) {
       // Silently skip - this is expected with multiple event sources
-      console.log('[SessionManager] Participant already has open interval, skipping duplicate join:', participantName);
+      logger.log(' Participant already has open interval, skipping duplicate join:', participantName);
       return;
     }
 
     debug.receive('background', 'PARTICIPANT_JOINED', { name: participantName });
 
     // Match to student roster
+    logger.log(' 🔍 Attempting to match participant:', participantName);
+    logger.log(' Current roster size:', this.studentRoster.length);
+    
     const match = this.studentRoster.length > 0
       ? matchParticipant({ name: participantName }, this.studentRoster)
       : null;
+    
+    if (match) {
+      logger.log(' ✅ MATCHED:', participantName, '->', match.student.name, `(confidence: ${(match.score * 100).toFixed(1)}%, method: ${match.method})`);
+    } else {
+      logger.log(' ❌ NO MATCH found for:', participantName, '(roster size:', this.studentRoster.length + ')');
+    }
 
     // Create local attendance interval
     const interval = {
@@ -268,7 +346,6 @@ class SessionManager {
         session_id: session.id,
         platform_participant_id: data.participant?.id || participantName,
         name: participantName,
-        email: null, // No longer available from Google Meet
         matched_student_id: match ? match.student.id : null,
         matched_student_name: match ? match.student.name : null,
         match_confidence: match ? match.score : 0,
@@ -299,7 +376,7 @@ class SessionManager {
         });
         debug.success('background', 'JOIN_SYNCED_TO_BACKEND', { name: participantName });
       } catch (apiError) {
-        console.warn('[SessionManager] Failed to sync join to backend, queueing for retry:', apiError);
+        logger.warn(' Failed to sync join to backend, queueing for retry:', apiError);
         debug.error('background', 'JOIN_SYNC_FAILED', { error: apiError.message });
         
         // Queue for retry
@@ -344,7 +421,7 @@ class SessionManager {
   async handleParticipantLeft(data) {
     const session = await this.getActiveSession();
     if (!session) {
-      console.log('[SessionManager] No active session for leave event');
+      logger.log(' No active session for leave event');
       return;
     }
 
@@ -352,7 +429,7 @@ class SessionManager {
     const participantName = data.name || data.participantId;
     const leftAt = data.timestamp || data.leftAt || now();
     
-    console.log('[SessionManager] Processing participant left:', {
+    logger.log(' Processing participant left:', {
       participantName,
       leftAt,
       sessionId: session.id,
@@ -360,7 +437,7 @@ class SessionManager {
     });
     
     if (!participantName) {
-      console.warn('[SessionManager] No participant name in leave event:', data);
+      logger.warn(' No participant name in leave event:', data);
       return; // Silent skip - malformed event
     }
 
@@ -370,11 +447,11 @@ class SessionManager {
     if (!closedInterval) {
       // No open interval - might have already been closed or never opened
       // This is expected when receiving duplicate leave events
-      console.log('[SessionManager] No open interval found for participant:', participantName);
+      logger.log(' No open interval found for participant:', participantName);
       return;
     }
     
-    console.log('[SessionManager] Closed interval for participant:', participantName, 'Duration:', closedInterval.duration_minutes, 'min');
+    logger.log(' Closed interval for participant:', participantName, 'Duration:', closedInterval.duration_minutes, 'min');
 
     // Update participant record
     const participants = await getParticipantsBySession(session.id);
@@ -395,7 +472,7 @@ class SessionManager {
         });
         debug.success('background', 'LEAVE_SYNCED_TO_BACKEND', { name: participantName });
       } catch (apiError) {
-        console.warn('[SessionManager] Failed to sync leave to backend, queueing for retry:', apiError);
+        logger.warn(' Failed to sync leave to backend, queueing for retry:', apiError);
         debug.error('background', 'LEAVE_SYNC_FAILED', { error: apiError.message });
         
         // Queue for retry
@@ -411,106 +488,46 @@ class SessionManager {
       try {
         await socketClient.emitParticipantLeft(participantName, leftAt);
       } catch (wsError) {
-        console.warn('[SessionManager] WebSocket emit failed:', wsError);
+        logger.warn(' WebSocket emit failed:', wsError);
       }
     }
 
-    console.log('[SessionManager] Participant left:', participantName);
+    logger.log(' Participant left:', participantName);
   }
 
   /**
-   * Handle participation event (chat, reaction, etc.)
+   * Handle participation event (REMOVED - see PLANNED_FEATURES.md)
+   * Kept as stub for backwards compatibility
    * @param {Object} data - { type, platform, meeting_id, participant_id, ... }
    */
   async handleParticipationEvent(data) {
-    console.log('[SessionManager] handleParticipationEvent called with type:', data.type);
-    debug.receive('background', 'PARTICIPATION_EVENT', { type: data.type, data });
-    
-    const session = await this.getActiveSession();
-    if (!session) {
-      debug.warn('background', 'NO_ACTIVE_SESSION', 'Participation event ignored - no active session');
-      return;
-    }
-
-    const participants = await getParticipantsBySession(session.id);
-    const participant = participants.find(
-      p => p.platform_participant_id === data.participantId
-    );
-
-    if (!participant) {
-      console.warn('[SessionManager] Participant not found for event:', data.participantId, 'type:', data.type);
-      debug.warn('background', 'PARTICIPANT_NOT_FOUND', { participantId: data.participantId, type: data.type });
-      return;
-    }
-
-    const eventType = this.mapEventType(data.type);
-    const event = {
-      id: uuidv4(),
-      session_id: session.id,
-      participant_id: participant.id,
-      event_type: eventType,
-      event_data: this.extractEventData(data),
-      timestamp: data.timestamp || now()
-    };
-
-    await createEvent(event);
-    debug.success('background', 'EVENT_STORED_LOCALLY', { eventId: event.id, type: eventType });
-
-    // Emit real-time event via WebSocket
-    if (socketClient.isSessionConnected()) {
-      try {
-        // Chat messages get their own emit
-        if (eventType === 'chat') {
-          await socketClient.emitChatMessage({
-            sender: participant.matched_student_name || participant.name,
-            message: data.message,
-            timestamp: event.timestamp
-          });
-          debug.send('background', 'CHAT_MESSAGE_EMITTED', { sender: participant.name });
-        }
-        
-        // All events also emit as participation
-        await socketClient.emitParticipation({
-          studentId: participant.matched_student_id,
-          studentName: participant.matched_student_name || participant.name,
-          type: eventType,
-          metadata: event.event_data
-        });
-        debug.success('background', 'PARTICIPATION_EMITTED', { type: eventType, student: participant.matched_student_name || participant.name });
-      } catch (wsError) {
-        console.warn('[SessionManager] WebSocket emit failed:', wsError);
-        debug.error('background', 'WEBSOCKET_EMIT_FAILED', { error: wsError.message, type: eventType });
-      }
-    } else {
-      debug.warn('background', 'SOCKET_NOT_CONNECTED', { message: 'Event stored locally but not sent in real-time' });
-    }
-
-    console.log('[SessionManager] Event recorded:', {
-      type: event.event_type,
-      participant: participant.name
+    logger.warn(' handleParticipationEvent called but participation events are disabled');
+    debug.warn('background', 'PARTICIPATION_DISABLED', { 
+      type: data.type, 
+      message: 'Participation events removed - see PLANNED_FEATURES.md' 
     });
+    return null;
   }
 
   /**
-   * Map message type to event type
+   * Map message type to event type (LEGACY - kept for future use)
    * Must match database ENUM: 'manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'platform_switch', 'hand_raise'
    */
   mapEventType(messageType) {
+    // Legacy mapping - kept for when participation events are re-enabled
     const mapping = {
-      [MESSAGE_TYPES.CHAT_MESSAGE]: 'chat',
-      [MESSAGE_TYPES.REACTION]: 'reaction',
-      [MESSAGE_TYPES.HAND_RAISE]: 'hand_raise',
-      [MESSAGE_TYPES.MIC_TOGGLE]: 'mic_toggle',
-      [MESSAGE_TYPES.CAMERA_TOGGLE]: 'camera_toggle',
+      // MESSAGE_TYPES.CHAT_MESSAGE: 'chat', (removed)
+      // MESSAGE_TYPES.REACTION: 'reaction', (removed)
+      // MESSAGE_TYPES.HAND_RAISE: 'hand_raise', (removed)
+      // MESSAGE_TYPES.MIC_TOGGLE: 'mic_toggle', (removed)
+      // MESSAGE_TYPES.CAMERA_TOGGLE: 'camera_toggle', (removed)
       [MESSAGE_TYPES.PLATFORM_SWITCH]: 'platform_switch'
     };
-    const result = mapping[messageType] || 'manual_entry';
-    console.log('[SessionManager] mapEventType:', messageType, '->', result);
-    return result;
+    return mapping[messageType] || 'manual_entry';
   }
 
   /**
-   * Extract relevant event data
+   * Extract relevant event data (LEGACY)
    */
   extractEventData(data) {
     const { type, message, reaction, ...rest } = data;
@@ -539,7 +556,7 @@ class SessionManager {
       match_method: 'manual'
     });
 
-    console.log('[SessionManager] Manual match:', participantId, '->', studentId);
+    logger.log(' Manual match:', participantId, '->', studentId);
   }
 }
 

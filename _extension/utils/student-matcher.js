@@ -3,6 +3,8 @@
  * Matches meeting participants to student roster using fuzzy matching
  */
 
+import { normalizeName } from './string-utils.js';
+
 /**
  * Calculate Levenshtein distance between two strings
  * @param {string} str1 
@@ -59,68 +61,40 @@ function stringSimilarity(str1, str2) {
 }
 
 /**
- * Normalize a name for comparison
- * @param {string} name 
- * @returns {string} Normalized name
- */
-function normalizeName(name) {
-  if (!name) return '';
-  
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z\s]/g, '') // Remove special characters
-    .replace(/\s+/g, ' ') // Normalize whitespace
-    .split(' ')
-    .sort() // Sort words (handles "Doe, John" vs "John Doe")
-    .join(' ');
-}
-
-/**
- * Extract email domain
- * @param {string} email 
- * @returns {string} Domain or empty string
- */
-function extractDomain(email) {
-  if (!email) return '';
-  const match = email.match(/@(.+)$/);
-  return match ? match[1].toLowerCase() : '';
-}
-
-/**
  * Match a participant to a student roster
- * @param {Object} participant - { name, email }
- * @param {Array} roster - Array of { id, name, email }
+ * @param {Object} participant - { name }
+ * @param {Array} roster - Array of { id, name }
  * @param {number} threshold - Minimum confidence score (0-1)
  * @returns {Object|null} - { student, score } or null if no match
  */
 export function matchParticipant(participant, roster, threshold = 0.7) {
   if (!participant || !roster || roster.length === 0) {
+    console.log('[StudentMatcher] ❌ Invalid input - participant:', !!participant, 'roster size:', roster?.length || 0);
     return null;
   }
 
+  console.log('[StudentMatcher] 🔍 Matching participant:', participant.name, 'against', roster.length, 'students');
+  const normalizedParticipantName = normalizeName(participant.name);
+  console.log('[StudentMatcher] Normalized participant name:', `"${participant.name}" -> "${normalizedParticipantName}"`);
+
   const matches = [];
+  let bestScore = 0;
+  let bestStudent = null;
 
   for (const student of roster) {
     let score = 0;
 
-    // Strategy 1: Exact email match (highest confidence)
-    if (participant.email && student.email) {
-      if (participant.email.toLowerCase() === student.email.toLowerCase()) {
-        return { student, score: 1.0, method: 'exact_email' };
-      }
-      
-      // Same domain bonus
-      const participantDomain = extractDomain(participant.email);
-      const studentDomain = extractDomain(student.email);
-      if (participantDomain && participantDomain === studentDomain) {
-        score += 0.2; // Bonus for same domain
+    // Strategy 1: Exact name match (high confidence)
+    const normalizedStudentName = normalizeName(student.name);
+    
+    if (normalizedParticipantName && normalizedStudentName) {
+      if (normalizedParticipantName === normalizedStudentName) {
+        console.log('[StudentMatcher] ✅ EXACT MATCH:', `"${normalizedParticipantName}" === "${normalizedStudentName}"`, '(', student.name, ')');
+        return { student, score: 1.0, method: 'exact_name' };
       }
     }
 
     // Strategy 2: Fuzzy name match
-    const normalizedParticipantName = normalizeName(participant.name);
-    const normalizedStudentName = normalizeName(student.name);
     
     if (normalizedParticipantName && normalizedStudentName) {
       const nameSimilarity = stringSimilarity(
@@ -128,6 +102,11 @@ export function matchParticipant(participant, roster, threshold = 0.7) {
         normalizedStudentName
       );
       score += nameSimilarity * 0.8; // Name match weighted 80%
+      
+      if (nameSimilarity > bestScore) {
+        bestScore = nameSimilarity;
+        bestStudent = student.name;
+      }
     }
 
     // Strategy 3: Partial name match (first or last name)
@@ -160,10 +139,14 @@ export function matchParticipant(participant, roster, threshold = 0.7) {
 
   // Return best match
   if (matches.length === 0) {
+    console.log('[StudentMatcher] ❌ NO MATCH found for:', participant.name);
+    console.log('[StudentMatcher] Best similarity was:', (bestScore * 100).toFixed(1) + '% with', bestStudent, '(threshold:', (threshold * 100) + '%)');
+    console.log('[StudentMatcher] Sample roster names:', roster.slice(0, 5).map(s => `"${s.name}" -> "${normalizeName(s.name)}"`));
     return null;
   }
 
   matches.sort((a, b) => b.score - a.score);
+  console.log('[StudentMatcher] ✅ Best match:', matches[0].student.name, 'with score:', (matches[0].score * 100).toFixed(1) + '%');
   return matches[0];
 }
 

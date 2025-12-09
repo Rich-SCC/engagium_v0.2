@@ -6,17 +6,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { STORAGE_KEYS } from '../utils/constants.js';
+import { formatClassDisplay } from '../utils/class-formatter.js';
+import { getApiBaseUrl, verifyAuthToken, clearAuthToken } from '../utils/auth.js';
 import './options.css';
-
-// Import class formatter utility
-const formatClassDisplay = (cls) => {
-  if (!cls) return '';
-  const parts = [];
-  if (cls.section) parts.push(cls.section);
-  if (cls.subject) parts.push(cls.subject);
-  const prefix = parts.length > 0 ? parts.join(' ') + ' - ' : '';
-  return `${prefix}${cls.name}`;
-};
 
 function OptionsApp() {
   const [activeTab, setActiveTab] = useState('auth');
@@ -70,27 +62,16 @@ function OptionsApp() {
         
         // Verify token is still valid
         try {
-          const isDev = !('update_url' in chrome.runtime.getManifest());
-          const baseUrl = isDev ? 'http://localhost:3001' : 'https://engagium.app';
-          
-          const response = await fetch(`${baseUrl}/api/extension-tokens/verify`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ token: storage[STORAGE_KEYS.AUTH_TOKEN] })
-          });
+          const result = await verifyAuthToken(storage[STORAGE_KEYS.AUTH_TOKEN]);
 
-          const data = await response.json();
-
-          if (data.success) {
+          if (result.valid) {
             setIsAuthenticated(true);
             
-            if (data.data?.user) {
-              setUserInfo(data.data.user);
+            if (result.user) {
+              setUserInfo(result.user);
               // Update stored user info if it changed
               await chrome.storage.local.set({
-                [STORAGE_KEYS.USER_INFO]: data.data.user
+                [STORAGE_KEYS.USER_INFO]: result.user
               });
             } else if (storage[STORAGE_KEYS.USER_INFO]) {
               setUserInfo(storage[STORAGE_KEYS.USER_INFO]);
@@ -101,7 +82,8 @@ function OptionsApp() {
           } else {
             // Token invalid, clear it
             setIsAuthenticated(false);
-            await chrome.storage.local.remove([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.USER_INFO]);
+            await clearAuthToken();
+            await chrome.storage.local.remove(STORAGE_KEYS.USER_INFO);
           }
         } catch (error) {
           console.error('Error verifying token:', error);
@@ -191,10 +173,8 @@ function OptionsApp() {
   }
 
   async function handleLogout() {
-    await chrome.storage.local.remove([
-      STORAGE_KEYS.AUTH_TOKEN,
-      STORAGE_KEYS.USER_INFO
-    ]);
+    await clearAuthToken();
+    await chrome.storage.local.remove(STORAGE_KEYS.USER_INFO);
     
     setAuthToken('');
     setIsAuthenticated(false);
@@ -660,7 +640,7 @@ function DebugDashboard() {
   const [sessionStatus, setSessionStatus] = useState(null);
   const [meetingStatus, setMeetingStatus] = useState(null);
   const [filter, setFilter] = useState('all');
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   
   // Source exclusion filters
@@ -700,25 +680,38 @@ function DebugDashboard() {
     Promise.all([loadLogs(), loadStatus()]).finally(() => setIsLoading(false));
   }, [loadLogs, loadStatus]);
 
-  // Listen for new debug logs
+  // Listen for new debug logs and status changes
   useEffect(() => {
     const handleMessage = (message) => {
       if (message.type === 'DEBUG_LOG_ADDED' && autoRefresh) {
         setLogs(prev => [message.entry, ...prev].slice(0, 500));
       }
+      
+      // Update status on key events instead of constant polling
+      if (
+        message.type === 'SESSION_STARTED' ||
+        message.type === 'SESSION_ENDED' ||
+        message.type === 'MEETING_DETECTED' ||
+        message.type === 'MEETING_LEFT'
+      ) {
+        loadStatus();
+      }
     };
     
     chrome.runtime.onMessage.addListener(handleMessage);
     return () => chrome.runtime.onMessage.removeListener(handleMessage);
-  }, [autoRefresh]);
+  }, [autoRefresh, loadStatus]);
 
-  // Auto-refresh status
+  // Auto-refresh status (only when enabled and tab is visible)
   useEffect(() => {
     if (!autoRefresh) return;
     
     const interval = setInterval(() => {
-      loadStatus();
-    }, 2000);
+      // Only poll if the page is visible
+      if (document.visibilityState === 'visible') {
+        loadStatus();
+      }
+    }, 10000); // Reduced from 2s to 10s
     
     return () => clearInterval(interval);
   }, [autoRefresh, loadStatus]);

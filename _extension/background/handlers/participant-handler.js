@@ -49,7 +49,6 @@ export async function handleParticipantJoined(session, studentRoster, data) {
     session_id: session.id,
     platform_participant_id: participant.id,
     name: participant.name,
-    email: participant.email || null,
     matched_student_id: match ? match.student.id : null,
     matched_student_name: match ? match.student.name : null,
     match_confidence: match ? match.score : 0,
@@ -139,7 +138,6 @@ async function emitParticipantJoinedEvents(trackedParticipant, match) {
     await socketClient.emitParticipantJoined({
       id: trackedParticipant.platform_participant_id,
       name: trackedParticipant.name,
-      email: trackedParticipant.email,
       joinedAt: trackedParticipant.joined_at
     });
 

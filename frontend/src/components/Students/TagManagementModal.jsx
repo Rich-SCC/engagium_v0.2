@@ -22,6 +22,8 @@ const TagManagementModal = ({ isOpen, onClose, classId }) => {
     onSuccess: () => {
       queryClient.invalidateQueries(['tags', classId]);
       queryClient.invalidateQueries(['students', classId]);
+      queryClient.refetchQueries(['tags', classId]); // Force immediate refetch
+      queryClient.refetchQueries(['students', classId]); // Force immediate refetch
       setTagName('');
       setTagColor('#3B82F6');
     }
@@ -32,6 +34,8 @@ const TagManagementModal = ({ isOpen, onClose, classId }) => {
     onSuccess: () => {
       queryClient.invalidateQueries(['tags', classId]);
       queryClient.invalidateQueries(['students', classId]);
+      queryClient.refetchQueries(['tags', classId]); // Force immediate refetch
+      queryClient.refetchQueries(['students', classId]); // Force immediate refetch
       setEditingTag(null);
       setTagName('');
       setTagColor('#3B82F6');
@@ -43,6 +47,8 @@ const TagManagementModal = ({ isOpen, onClose, classId }) => {
     onSuccess: () => {
       queryClient.invalidateQueries(['tags', classId]);
       queryClient.invalidateQueries(['students', classId]);
+      queryClient.refetchQueries(['tags', classId]); // Force immediate refetch
+      queryClient.refetchQueries(['students', classId]); // Force immediate refetch
     }
   });
 

@@ -3,6 +3,8 @@
  * Shared utility functions for the content script modules
  */
 
+import { hashString as hashStr } from '../../../utils/string-utils.js';
+
 /**
  * Creates a debounced version of a function
  * @param {Function} func - Function to debounce
@@ -22,18 +24,12 @@ export function debounce(func, wait) {
 }
 
 /**
- * Creates a simple hash from a string (for generating stable IDs)
- * @param {string} str - String to hash
- * @returns {string} Base36 hash string
+ * Simple sleep/delay helper using Promise
+ * @param {number} ms - Milliseconds to wait
+ * @returns {Promise<void>}
  */
-export function hashString(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return Math.abs(hash).toString(36);
+export function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -43,7 +39,7 @@ export function hashString(str) {
  */
 export function generateParticipantId(element) {
   const text = element.textContent || '';
-  return `gmeet-${hashString(text)}`;
+  return `gmeet-${hashStr(text)}`;
 }
 
 /**
@@ -118,4 +114,71 @@ export function warn(...args) {
  */
 export function error(...args) {
   console.error('[GoogleMeet]', ...args);
+}
+
+/**
+ * Checks if a participant name is invalid (UI element, not a person)
+ * Centralized validation logic used across multiple detectors
+ * @param {string} name - Participant name to check
+ * @param {Object} CONFIG - Config object with INVALID_NAMES
+ * @returns {boolean} True if invalid
+ */
+export function isInvalidParticipant(name, CONFIG) {
+  if (!name || typeof name !== 'string') return true;
+  
+  const lowerName = name.toLowerCase().trim();
+  
+  // Check against invalid names list
+  if (CONFIG && CONFIG.INVALID_NAMES && CONFIG.INVALID_NAMES.includes(lowerName)) {
+    return true;
+  }
+  
+  // Too short
+  if (name.length < 2) return true;
+  
+  // Starts with underscore or is all special chars
+  if (name.startsWith('_') || /^[^a-zA-Z0-9]+$/.test(name)) return true;
+  
+  return false;
+}
+
+/**
+ * Finds the People button in Google Meet
+ * Uses multiple selectors and fallback methods for reliability
+ * @returns {Element|null} The People button element or null if not found
+ */
+export function findPeopleButton() {
+  // Try aria-label based selector
+  let button = document.querySelector('button[aria-label*="people" i]');
+  if (button) return button;
+  
+  // Try finding by visible text
+  const buttons = document.querySelectorAll('button');
+  for (const btn of buttons) {
+    const text = btn.textContent?.toLowerCase() || '';
+    const ariaLabel = btn.getAttribute('aria-label')?.toLowerCase() || '';
+    
+    if (text.includes('people') || ariaLabel.includes('people')) {
+      return btn;
+    }
+  }
+  
+  // Try tab button if side panel is open with different tab
+  const peopleTab = document.querySelector('[role="tab"][aria-label*="People" i]');
+  if (peopleTab && !peopleTab.getAttribute('aria-selected')?.includes('true')) {
+    return peopleTab;
+  }
+  
+  return null;
+}
+
+/**
+ * Finds the Join button in Google Meet waiting room
+ * Uses multiple selectors as fallback
+ * @returns {Element|null} The Join button element or null if not found
+ */
+export function findJoinButton() {
+  return document.querySelector('button[jsname="Qx7Oae"]') || // Primary join button
+         document.querySelector('button[aria-label*="Join"]') ||
+         document.querySelector('button[aria-label*="join"]');
 }

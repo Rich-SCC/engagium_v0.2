@@ -94,6 +94,12 @@ const ClassDetailsPage = () => {
     mutationFn: (studentId) => classesAPI.removeStudent(id, studentId),
     onSuccess: () => {
       queryClient.invalidateQueries(['students', id]);
+      queryClient.refetchQueries(['students', id]); // Force immediate refetch
+      queryClient.invalidateQueries(['class', id]); // Update class details
+    },
+    onError: (error) => {
+      const message = error.response?.data?.error || 'Failed to delete student';
+      alert(message);
     }
   });
 
@@ -101,7 +107,13 @@ const ClassDetailsPage = () => {
     mutationFn: (studentIds) => classesAPI.bulkDeleteStudents(id, studentIds),
     onSuccess: () => {
       queryClient.invalidateQueries(['students', id]);
+      queryClient.refetchQueries(['students', id]); // Force immediate refetch
+      queryClient.invalidateQueries(['class', id]); // Update class details
       setSelectedStudents([]);
+    },
+    onError: (error) => {
+      const message = error.response?.data?.error || 'Failed to delete students';
+      alert(message);
     }
   });
 
@@ -109,6 +121,7 @@ const ClassDetailsPage = () => {
     mutationFn: (tagId) => classesAPI.bulkAssignTag(id, tagId, selectedStudents),
     onSuccess: () => {
       queryClient.invalidateQueries(['students', id]);
+      queryClient.refetchQueries(['students', id]); // Force immediate refetch
       setSelectedStudents([]);
     }
   });
@@ -117,8 +130,13 @@ const ClassDetailsPage = () => {
     mutationFn: ({ studentId, data }) => classesAPI.updateStudent(id, studentId, data),
     onSuccess: () => {
       queryClient.invalidateQueries(['students', id]);
+      queryClient.refetchQueries(['students', id]); // Force immediate refetch
       setShowStudentFormModal(false);
       setSelectedStudent(null);
+    },
+    onError: (error) => {
+      const message = error.response?.data?.error || 'Failed to update student';
+      alert(message);
     }
   });
 
@@ -275,23 +293,31 @@ const ClassDetailsPage = () => {
               <h3 className="font-semibold text-gray-700 mb-3">
                 Schedule{(Array.isArray(classInfo.schedule) && classInfo.schedule.length > 1) ? 's' : ''}
               </h3>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {/* New format: schedule is an array */}
                 {Array.isArray(classInfo.schedule) && classInfo.schedule.length > 0 ? (
                   classInfo.schedule.map((schedule, idx) => (
-                    <div key={idx} className="border-l-3 border-accent-500 pl-3">
-                      <div className="flex flex-wrap gap-2 mb-1">
+                    <div 
+                      key={idx} 
+                      className="bg-gradient-to-r from-accent-50 to-transparent border-l-4 border-accent-500 rounded-r-lg p-3 shadow-sm"
+                    >
+                      {classInfo.schedule.length > 1 && (
+                        <div className="text-xs font-semibold text-accent-700 mb-2">
+                          Schedule {idx + 1}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2 mb-2">
                         {schedule.days && schedule.days.map(day => (
                           <span
                             key={day}
-                            className="px-3 py-1 bg-accent-50 text-accent-700 rounded-full text-sm font-medium"
+                            className="px-3 py-1 bg-white text-accent-700 rounded-full text-sm font-medium shadow-sm border border-accent-200"
                           >
                             {day.substring(0, 3)}
                           </span>
                         ))}
                       </div>
                       {(schedule.startTime || schedule.endTime) && (
-                        <p className="text-gray-700 font-medium text-sm mt-1">
+                        <p className="text-gray-800 font-semibold text-sm">
                           {schedule.startTime && new Date(`1970-01-01T${schedule.startTime}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
                           {schedule.startTime && schedule.endTime && ' - '}
                           {schedule.endTime && new Date(`1970-01-01T${schedule.endTime}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
@@ -302,19 +328,19 @@ const ClassDetailsPage = () => {
                 ) : (
                   /* Old format: schedule is an object - for backward compatibility */
                   classInfo.schedule.days?.length > 0 && (
-                    <div className="border-l-3 border-accent-500 pl-3">
-                      <div className="flex flex-wrap gap-2 mb-1">
+                    <div className="bg-gradient-to-r from-accent-50 to-transparent border-l-4 border-accent-500 rounded-r-lg p-3 shadow-sm">
+                      <div className="flex flex-wrap gap-2 mb-2">
                         {classInfo.schedule.days.map(day => (
                           <span
                             key={day}
-                            className="px-3 py-1 bg-accent-50 text-accent-700 rounded-full text-sm font-medium"
+                            className="px-3 py-1 bg-white text-accent-700 rounded-full text-sm font-medium shadow-sm border border-accent-200"
                           >
                             {day.substring(0, 3)}
                           </span>
                         ))}
                       </div>
                       {classInfo.schedule.time && (
-                        <p className="text-gray-700 font-medium text-sm mt-1">{classInfo.schedule.time}</p>
+                        <p className="text-gray-800 font-semibold text-sm">{classInfo.schedule.time}</p>
                       )}
                     </div>
                   )
@@ -386,6 +412,9 @@ const ClassDetailsPage = () => {
                   </th>
                   <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Participation
+                  </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Attendance
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions

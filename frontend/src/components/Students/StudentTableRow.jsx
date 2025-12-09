@@ -63,6 +63,11 @@ const StudentTableRow = ({
           {student.participation_count || 0}
         </span>
       </td>
+      <td className="px-6 py-4 text-center">
+        <span className="font-medium text-gray-600">
+          {student.attendance_count || 0}
+        </span>
+      </td>
       <td className="px-6 py-4">
         <div className="flex items-center gap-2">
           <button

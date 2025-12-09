@@ -16,7 +16,8 @@ const {
   deleteClassLink,
   getExemptedAccounts,
   addExemptedAccount,
-  deleteExemptedAccount
+  deleteExemptedAccount,
+  getClassAnalytics
 } = require('../controllers/classController');
 const {
   getStudents,
@@ -32,6 +33,7 @@ const {
   bulkUpdateStudents,
   bulkAddStudents,
   createFromParticipant,
+  getStudentAnalytics,
   upload
 } = require('../controllers/studentController');
 const {
@@ -57,11 +59,15 @@ const {
 } = require('../controllers/sessionController');
 
 const router = express.Router();
-
 // Routes that work with both web app (JWT) and extension (extension token)
 // These must come FIRST before the param routes
 router.get('/stats', instructorAuth, getClassStats);
 
+// Analytics routes
+router.get('/:id/analytics', instructorAuth, getClassAnalytics);
+router.get('/:classId/students/:studentId/analytics', instructorAuth, getStudentAnalytics);
+
+// Extension-compatible routes (read-only)
 // Extension-compatible routes (read-only)
 router.get('/', flexibleAuth, getClasses);
 router.get('/:id', flexibleAuth, getClass);

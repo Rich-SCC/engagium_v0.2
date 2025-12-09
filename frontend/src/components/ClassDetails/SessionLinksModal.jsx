@@ -5,13 +5,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { classesAPI } from '@/services/api';
 import { formatMeetingLinkForDisplay, normalizeMeetingUrl } from '@/utils/urlUtils';
 
-const LINK_TYPES = ['zoom', 'meet', 'other'];
+const LINK_TYPES = ['meet', 'zoom'];
 
 const SessionLinksModal = ({ isOpen, onClose, classId }) => {
   const queryClient = useQueryClient();
   const [newLink, setNewLink] = useState({
     link_url: '',
-    link_type: 'zoom',
+    link_type: 'meet',
     label: '',
     zoom_meeting_id: '',
     zoom_passcode: ''
@@ -29,9 +29,10 @@ const SessionLinksModal = ({ isOpen, onClose, classId }) => {
     mutationFn: (linkData) => classesAPI.addLink(classId, linkData),
     onSuccess: () => {
       queryClient.invalidateQueries(['classLinks', classId]);
+      queryClient.refetchQueries(['classLinks', classId]); // Force immediate refetch
       setNewLink({
         link_url: '',
-        link_type: 'zoom',
+        link_type: 'meet',
         label: '',
         zoom_meeting_id: '',
         zoom_passcode: ''
@@ -43,6 +44,7 @@ const SessionLinksModal = ({ isOpen, onClose, classId }) => {
     mutationFn: (linkId) => classesAPI.deleteLink(classId, linkId),
     onSuccess: () => {
       queryClient.invalidateQueries(['classLinks', classId]);
+      queryClient.refetchQueries(['classLinks', classId]); // Force immediate refetch
     }
   });
 
@@ -50,6 +52,7 @@ const SessionLinksModal = ({ isOpen, onClose, classId }) => {
     mutationFn: ({ linkId, linkData }) => classesAPI.updateLink(classId, linkId, linkData),
     onSuccess: () => {
       queryClient.invalidateQueries(['classLinks', classId]);
+      queryClient.refetchQueries(['classLinks', classId]); // Force immediate refetch
     }
   });
 

@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   HomeIcon,
-  BellIcon,
   ChartBarIcon,
   BookOpenIcon,
   CogIcon,
@@ -28,7 +27,6 @@ const Layout = () => {
     { name: 'My Classes', href: '/app/classes', icon: BookOpenIcon },
     { name: 'Sessions', href: '/app/sessions', icon: CalendarIcon },
     { name: 'Analytics', href: '/app/analytics', icon: ChartBarIcon },
-    { name: 'Notifications', href: '/app/notifications', icon: BellIcon },
     { name: 'Settings', href: '/app/settings', icon: CogIcon },
   ];
 
@@ -98,17 +96,6 @@ const Layout = () => {
 
       {/* Main Content Area */}
       <div className="ml-72 min-h-screen">
-        {/* Top Bar */}
-        <header className="bg-white shadow-sm border-b border-gray-200">
-          <div className="flex items-center justify-between px-8 py-6">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
-                Welcome Back, {user?.first_name || 'User'}!
-              </h1>
-            </div>
-          </div>
-        </header>
-
         {/* Page Content */}
         <main className="p-8">
           <Outlet />

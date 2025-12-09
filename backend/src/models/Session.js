@@ -226,11 +226,22 @@ class Session {
             'id', ar.id,
             'student_id', ar.student_id,
             'participant_name', ar.participant_name,
+            'student_name', st.full_name,
             'full_name', st.full_name,
             'status', ar.status,
             'first_joined_at', ar.first_joined_at,
             'last_left_at', ar.last_left_at,
-            'total_duration_minutes', ar.total_duration_minutes
+            'total_duration_minutes', ar.total_duration_minutes,
+            'intervals', (
+              SELECT json_agg(json_build_object(
+                'id', ai.id,
+                'joined_at', ai.joined_at,
+                'left_at', ai.left_at
+              ) ORDER BY ai.joined_at)
+              FROM attendance_intervals ai
+              WHERE ai.session_id = ar.session_id 
+                AND ai.participant_name = ar.participant_name
+            )
           ))
           FROM attendance_records ar
           LEFT JOIN students st ON ar.student_id = st.id

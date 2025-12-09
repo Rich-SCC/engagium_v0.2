@@ -609,6 +609,149 @@ const deleteExemptedAccount = async (req, res) => {
   }
 };
 
+// Get class analytics
+const getClassAnalytics = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startDate, endDate } = req.query;
+
+    const classData = await Class.findById(id);
+
+    if (!classData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Class not found'
+      });
+    }
+
+    // Check ownership
+    if (classData.instructor_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const pool = require('../config/database');
+
+    // Parse dates - extract just the date part for comparison
+    const start = startDate ? new Date(startDate).toISOString().split('T')[0] : '2020-01-01';
+    const end = endDate ? new Date(endDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+
+    console.log('Analytics Date Range:', { classId: id, startDate, endDate, start, end });
+
+    // Get session attendance data within date range
+    const sessionsQuery = `
+      SELECT 
+        s.id,
+        s.title,
+        s.session_date,
+        s.session_time,
+        s.status,
+        COUNT(DISTINCT ar.id) as total_participants,
+        COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as present_count,
+        COALESCE(ROUND((COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END)::numeric / 
+                 NULLIF(COUNT(DISTINCT ar.id), 0) * 100), 2), 0) as attendance_rate,
+        COALESCE(AVG(ar.total_duration_minutes), 0) as avg_duration_minutes
+      FROM sessions s
+      LEFT JOIN attendance_records ar ON s.id = ar.session_id
+      WHERE s.class_id = $1 
+        AND s.session_date >= $2
+        AND s.session_date <= $3
+        AND s.status IN ('active', 'ended')
+      GROUP BY s.id, s.title, s.session_date, s.session_time, s.status
+      ORDER BY s.session_date ASC, s.session_time ASC
+    `;
+
+    const sessionsResult = await pool.query(sessionsQuery, [id, start, end]);
+    
+    console.log('Sessions Query Result:', { 
+      rowCount: sessionsResult.rows.length,
+      params: [id, start, end]
+    });
+
+    // Get student performance data
+    const studentPerformanceQuery = `
+      SELECT 
+        st.id,
+        st.full_name,
+        COUNT(DISTINCT ar.session_id) as sessions_attended,
+        COUNT(DISTINCT s.id) as total_sessions,
+        COALESCE(ROUND((COUNT(DISTINCT ar.session_id)::numeric / 
+                 NULLIF(COUNT(DISTINCT s.id), 0) * 100), 2), 0) as attendance_rate,
+        COALESCE(AVG(ar.total_duration_minutes), 0) as avg_duration_minutes,
+        COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as present_count,
+        COUNT(DISTINCT CASE WHEN ar.status = 'late' THEN ar.id END) as late_count,
+        COUNT(DISTINCT CASE WHEN ar.status = 'absent' THEN ar.id END) as absent_count
+      FROM students st
+      CROSS JOIN sessions s
+      LEFT JOIN attendance_records ar ON ar.student_id = st.id AND ar.session_id = s.id
+      WHERE st.class_id = $1
+        AND s.class_id = $1
+        AND s.session_date >= $2
+        AND s.session_date <= $3
+        AND s.status IN ('active', 'ended')
+        AND st.deleted_at IS NULL
+      GROUP BY st.id, st.full_name
+      ORDER BY attendance_rate DESC, sessions_attended DESC
+    `;
+
+    const studentPerformanceResult = await pool.query(studentPerformanceQuery, [id, start, end]);
+
+    // Get daily attendance heatmap data
+    const heatmapQuery = `
+      SELECT 
+        s.session_date as date,
+        EXTRACT(DOW FROM s.session_date) as day_of_week,
+        EXTRACT(HOUR FROM s.session_time) as hour,
+        COUNT(DISTINCT ar.id) as total_participants,
+        COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as present_count,
+        COALESCE(ROUND((COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END)::numeric / 
+                 NULLIF(COUNT(DISTINCT ar.id), 0) * 100), 2), 0) as attendance_rate
+      FROM sessions s
+      LEFT JOIN attendance_records ar ON s.id = ar.session_id
+      WHERE s.class_id = $1
+        AND s.session_date >= $2
+        AND s.session_date <= $3
+        AND s.status IN ('active', 'ended')
+      GROUP BY s.session_date, EXTRACT(DOW FROM s.session_date), EXTRACT(HOUR FROM s.session_time)
+      ORDER BY s.session_date ASC
+    `;
+
+    const heatmapResult = await pool.query(heatmapQuery, [id, start, end]);
+
+    // Calculate overall statistics
+    const overallStats = {
+      totalSessions: sessionsResult.rows.length,
+      avgAttendanceRate: sessionsResult.rows.length > 0
+        ? (sessionsResult.rows.reduce((sum, s) => sum + parseFloat(s.attendance_rate || 0), 0) / sessionsResult.rows.length).toFixed(2)
+        : 0,
+      avgDuration: sessionsResult.rows.length > 0
+        ? (sessionsResult.rows.reduce((sum, s) => sum + parseFloat(s.avg_duration_minutes || 0), 0) / sessionsResult.rows.length).toFixed(2)
+        : 0,
+      totalStudents: studentPerformanceResult.rows.length,
+    };
+
+    res.json({
+      success: true,
+      data: {
+        class: classData,
+        dateRange: { startDate: start, endDate: end },
+        overallStats,
+        sessionTrends: sessionsResult.rows,
+        studentPerformance: studentPerformanceResult.rows,
+        heatmapData: heatmapResult.rows,
+      }
+    });
+  } catch (error) {
+    console.error('Get class analytics error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   getClasses,
   getClass,
@@ -624,5 +767,6 @@ module.exports = {
   deleteClassLink,
   getExemptedAccounts,
   addExemptedAccount,
-  deleteExemptedAccount
+  deleteExemptedAccount,
+  getClassAnalytics
 };

@@ -11,12 +11,6 @@ export const MESSAGE_TYPES = {
   MEETING_LEFT: 'MEETING_LEFT',
   PARTICIPANT_JOINED: 'PARTICIPANT_JOINED',
   PARTICIPANT_LEFT: 'PARTICIPANT_LEFT',
-  CHAT_MESSAGE: 'CHAT_MESSAGE',
-  REACTION: 'REACTION',
-  HAND_RAISE: 'HAND_RAISE',
-  MIC_TOGGLE: 'MIC_TOGGLE',
-  CAMERA_TOGGLE: 'CAMERA_TOGGLE',
-  SCREEN_SHARE: 'SCREEN_SHARE',
   PLATFORM_SWITCH: 'PLATFORM_SWITCH',
   
   // From popup to background
@@ -52,11 +46,8 @@ export const ATTENDANCE_STATUS = {
 };
 
 export const INTERACTION_TYPES = {
-  CHAT: 'chat',
-  REACTION: 'reaction',
-  HAND_RAISE: 'hand_raise',
-  MIC_ON: 'mic_on',
-  CAMERA_ON: 'camera_on',
+  // Removed participation event types - see __documentation/Extension/PLANNED_FEATURES.md
+  // Future: CHAT, REACTION, HAND_RAISE, MIC_ON, CAMERA_ON
   QUESTION: 'question',
   ANSWER: 'answer'
 };

@@ -5,7 +5,7 @@
  */
 
 import { log } from './utils.js';
-import { debug } from '../../utils/debug-logger.js';
+import { debug } from '../../../utils/debug-logger.js';
 
 // Event queue for batching
 let eventQueue = [];

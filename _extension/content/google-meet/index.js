@@ -1,6 +1,6 @@
 /**
  * Google Meet Content Script - Main Entry Point
- * Coordinates all tracking modules for Google Meet
+ * Coordinates core tracking for Google Meet (Join/Leave only)
  * 
  * Module Structure:
  * - config.js: DOM selectors and timing configuration
@@ -9,38 +9,34 @@
  * - event-emitter.js: Batching and deduplication for events
  * - url-monitor.js: URL change detection for platform switches
  * - meeting-exit-detector.js: Meeting exit/end detection via DOM monitoring
- * - participant-detector.js: Participant list monitoring (async)
- * - chat-monitor.js: Chat message tracking (async)
- * - hand-raise-detector.js: Hand raise detection (async)
- * - reaction-detector.js: Emoji reaction tracking (async)
- * - media-state-detector.js: Mic/camera toggle detection (async)
+ * - participant-detector.js: Participant join/leave monitoring
  * - tracking-indicator.js: Visual UI overlay
+ * - meeting-notifications.js: User prompts and notifications
+ * 
+ * Removed modules (see __documentation/Extension/PLANNED_FEATURES.md):
+ * - chat-monitor.js, hand-raise-detector.js, reaction-detector.js,
+ * - media-state-detector.js, screen-share-detector.js
  */
 
-import { CONFIG } from './config.js';
-import { createState, resetParticipationState, disconnectObservers } from './state.js';
-import { log, warn, sendMessage } from './utils.js';
-import { clearEventQueue } from './event-emitter.js';
-import { extractMeetingId, monitorURLChanges } from './url-monitor.js';
-import { monitorMeetingExit, stopMeetingExitMonitoring } from './meeting-exit-detector.js';
+import { CONFIG } from './core/config.js';
+import { createState, resetParticipationState, disconnectObservers } from './core/state.js';
+import { log, warn, sendMessage, findPeopleButton, findJoinButton } from './core/utils.js';
+import { clearEventQueue } from './core/event-emitter.js';
+import { extractMeetingId, monitorURLChanges } from './detection/url-monitor.js';
+import { monitorMeetingExit, stopMeetingExitMonitoring } from './detection/meeting-exit-detector.js';
 import { 
   startParticipantMonitoring, 
   stopParticipantMonitoring, 
   scanParticipants 
-} from './participant-detector.js';
-import { startChatMonitoring, stopChatMonitoring } from './chat-monitor.js';
-import { startHandRaiseMonitoring, stopHandRaiseMonitoring } from './hand-raise-detector.js';
-import { startReactionMonitoring, stopReactionMonitoring } from './reaction-detector.js';
-import { startMediaStateMonitoring, stopMediaStateMonitoring } from './media-state-detector.js';
-import { startScreenShareMonitoring, stopScreenShareMonitoring } from './screen-share-detector.js';
-import { injectTrackingIndicator, updateIndicator } from './tracking-indicator.js';
+} from './detection/participant-detector.js';
+import { injectTrackingIndicator, updateIndicator } from './ui/tracking-indicator.js';
 import { 
   showJoinNowPrompt, 
   showTrackingReminder, 
   showRetroactiveCaptureNotification,
   dismissAllNotifications 
-} from './meeting-notifications.js';
-import { MESSAGE_TYPES, STORAGE_KEYS } from '../../utils/constants.js';
+} from './ui/meeting-notifications.js';
+import { MESSAGE_TYPES, STORAGE_KEYS, PLATFORMS } from '../../utils/constants.js';
 import { now } from '../../utils/date-utils.js';
 
 // Create state instance
@@ -68,7 +64,7 @@ async function init() {
   
   // Notify background of meeting detection
   sendMessage(MESSAGE_TYPES.MEETING_DETECTED, {
-    platform: 'google-meet',
+    platform: PLATFORMS.GOOGLE_MEET,
     meetingId: state.meetingId,
     meetingUrl: window.location.href
   });
@@ -111,7 +107,7 @@ function isInWaitingRoom() {
   }
   
   // Look for specific join buttons
-  const joinButtonByJsname = document.querySelector('button[jsname="Qx7Oae"]');
+  const joinButtonByJsname = findJoinButton();
   const joinButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
     const label = (btn.getAttribute('aria-label') || '').toLowerCase();
     const text = (btn.textContent || '').trim().toLowerCase();
@@ -120,9 +116,7 @@ function isInWaitingRoom() {
   });
   
   // Check for "People" button - this exists when you're IN the meeting
-  const peopleButton = document.querySelector('[aria-label*="Show everyone"]') ||
-                       document.querySelector('[aria-label*="People"]') ||
-                       document.querySelector('button[aria-label*="participant" i]');
+  const peopleButton = findPeopleButton();
   
   // If we have People button, we're definitely IN the meeting (not waiting room)
   if (peopleButton) {
@@ -167,7 +161,7 @@ async function setupTrackingReminder() {
         
         // Re-send meeting detection to ensure background has current state
         sendMessage(MESSAGE_TYPES.MEETING_DETECTED, {
-          platform: 'google-meet',
+          platform: PLATFORMS.GOOGLE_MEET,
           meetingId: state.meetingId,
           meetingUrl: window.location.href
         }).then(() => {
@@ -194,9 +188,6 @@ function startTracking() {
     clearTimeout(trackingReminderTimeout);
     trackingReminderTimeout = null;
   }
-  
-  // Open participant panel (needed to access participant list)
-  openParticipantPanel();
   
   // Wait a bit for panel to load, then start all async monitoring
   setTimeout(async () => {
@@ -242,9 +233,7 @@ function startTracking() {
         attempts++;
         
         // Check if People button is available (indicates UI is loaded)
-        const peopleButton = document.querySelector('[aria-label*="Show everyone"]') ||
-                             document.querySelector('[aria-label*="People"]') ||
-                             document.querySelector('button[aria-label*="participant" i]');
+        const peopleButton = findPeopleButton();
         
         if (peopleButton) {
           log('Meeting UI ready - People button found');
@@ -261,30 +250,16 @@ function startTracking() {
   
   // Helper function to initialize all monitors
   async function initializeAllMonitors() {
-    log('Initializing all monitors...');
+    log('Initializing participant monitoring...');
     
-    // All monitors are now async (MutationObserver-based, no polling)
+    // Start participant join/leave monitoring
+    // This will handle opening/closing the panel internally
     startParticipantMonitoring(state);
     log('✓ Participant monitoring started');
     
-    startChatMonitoring(state);
-    log('✓ Chat monitoring started');
-    
-    startMediaStateMonitoring(state);
-    log('✓ Media state monitoring started');
-    
-    startHandRaiseMonitoring(state);
-    log('✓ Hand raise monitoring started');
-    
-    startReactionMonitoring(state);
-    log('✓ Reaction monitoring started');
-    
-    startScreenShareMonitoring(state);
-    log('✓ Screen share monitoring started');
-    
     updateIndicator('active', state.participants.size);
     
-    // Set up periodic indicator update (just for UI, not for scraping)
+    // Set up periodic indicator update (just for UI)
     state._indicatorInterval = setInterval(() => {
       if (state.isTracking) {
         updateIndicator('active', state.participants.size);
@@ -292,17 +267,6 @@ function startTracking() {
     }, 5000);
     
     log('All monitors initialized. Ready to track participation.');
-    
-    // Retroactive participant capture - scan everyone already in the meeting
-    // Wait a bit for participant panel to load
-    setTimeout(() => {
-      scanParticipants(state);
-      const participantCount = state.participants.size;
-      if (participantCount > 0) {
-        log(`Retroactively captured ${participantCount} participants already in meeting`);
-        showRetroactiveCaptureNotification(participantCount);
-      }
-    }, 1500);
   }
 }
 
@@ -321,13 +285,8 @@ function stopTracking() {
   // Dismiss any active notifications
   dismissAllNotifications();
   
-  // Stop all async monitors
+  // Stop participant monitoring
   stopParticipantMonitoring(state);
-  stopChatMonitoring(state);
-  stopMediaStateMonitoring();
-  stopHandRaiseMonitoring();
-  stopReactionMonitoring();
-  stopScreenShareMonitoring();
   stopMeetingExitMonitoring(state);
   
   // Clear event queue
@@ -353,7 +312,7 @@ function stopTracking() {
 // ============================================================================
 
 function openParticipantPanel() {
-  const peopleButton = document.querySelector(CONFIG.SELECTORS.peopleButton);
+  const peopleButton = findPeopleButton();
   
   if (peopleButton) {
     const isOpen = peopleButton.getAttribute('aria-pressed') === 'true';
@@ -373,7 +332,7 @@ function openParticipantPanel() {
 }
 
 function closeParticipantPanel() {
-  const peopleButton = document.querySelector(CONFIG.SELECTORS.peopleButton);
+  const peopleButton = findPeopleButton();
   
   if (peopleButton) {
     const isOpen = peopleButton.getAttribute('aria-pressed') === 'true';
@@ -422,7 +381,7 @@ function handleMeetingEnded() {
   // Always send meeting left message to background - it will check if there's an active session
   // This is important for the refresh case where state.isTracking may be false but session exists
   sendMessage(MESSAGE_TYPES.MEETING_LEFT, {
-    platform: 'google-meet',
+    platform: PLATFORMS.GOOGLE_MEET,
     meetingId: state.meetingId
   });
   
@@ -432,7 +391,7 @@ function handleMeetingEnded() {
     for (const [participantId, participant] of state.participants.entries()) {
       if (!participant.leftAt) {
         sendMessage(MESSAGE_TYPES.PARTICIPANT_LEFT, {
-          platform: 'google-meet',
+          platform: PLATFORMS.GOOGLE_MEET,
           meetingId: state.meetingId,
           participantId: participantId,
           leftAt: now()
@@ -464,7 +423,7 @@ function handlePageUnload(event) {
   for (const [participantId, participant] of state.participants.entries()) {
     if (!participant.leftAt) {
       sendMessage(MESSAGE_TYPES.PARTICIPANT_LEFT, {
-        platform: 'google-meet',
+        platform: PLATFORMS.GOOGLE_MEET,
         meetingId: state.meetingId,
         participantId: participantId,
         leftAt: now()

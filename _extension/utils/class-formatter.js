@@ -15,7 +15,7 @@
  * @param {Object} cls - Class object with section, subject, and name properties
  * @returns {string} Formatted class string
  */
-function formatClassDisplay(cls) {
+export function formatClassDisplay(cls) {
   if (!cls) return '';
   
   const parts = [];
