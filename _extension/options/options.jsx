@@ -266,10 +266,12 @@ function OptionsApp() {
       <header className="header">
         <div className="container">
           <div className="logo">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2"/>
-              <path d="M8 12h8M12 8v8" stroke="currentColor" strokeWidth="2"/>
-            </svg>
+            <img 
+              src="../assets/icons/icon128.png" 
+              alt="Engagium" 
+              width="64" 
+              height="64"
+            />
             <div>
               <h1>Engagium Extension</h1>
               <p>Attendance & Participation Tracker</p>

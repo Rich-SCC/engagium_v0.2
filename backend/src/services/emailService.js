@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const path = require('path');
 
 class EmailService {
   constructor() {
@@ -68,6 +69,11 @@ class EmailService {
               color: white; 
               padding: 32px 40px; 
               text-align: center; 
+            }
+            .header img {
+              height: 48px;
+              width: auto;
+              margin-bottom: 12px;
             }
             .header h1 {
               font-size: 24px;
@@ -157,6 +163,7 @@ class EmailService {
           <div class="container">
             <div class="email-wrapper">
               <div class="header">
+                <img src="cid:logo" alt="Engagium" />
                 <h1>Password Reset Request</h1>
               </div>
               <div class="content">
@@ -198,7 +205,14 @@ If you didn't request a password reset, you can safely ignore this email. Your p
 
 Best regards,
 The Engagium Team
-      `
+      `,
+      attachments: [
+        {
+          filename: 'logo.png',
+          path: path.join(__dirname, '../assets/images/logo-email.png'),
+          cid: 'logo'
+        }
+      ]
     };
 
     try {

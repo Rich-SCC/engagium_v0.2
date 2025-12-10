@@ -15,6 +15,8 @@ import {
 import LoginModal from '@/components/Auth/LoginModal';
 import SignUpModal from '@/components/Auth/SignUpModal';
 import ForgotPasswordModal from '@/components/Auth/ForgotPasswordModal';
+import heroLogo from '@/assets/images/hero-logo.png';
+import featureimg from '@/assets/images/feature-landing.png';
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -27,47 +29,50 @@ const LandingPage = () => {
       {/* Hero Section */}
       <section className="bg-gradient-to-br from-gray-50 via-white to-accent-50 py-24 px-6 relative overflow-hidden">
         <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-2 gap-16 items-center">
-            {/* Left Column: Text */}
-            <div>
-              <div className="flex items-center space-x-4 mb-10">
-                <h1 className="text-7xl font-bold text-accent-500 tracking-tight">engagium</h1>
-              </div>
-              <div className="text-gray-700 text-lg leading-relaxed space-y-6 font-light mb-10">
-                <p>
-                  <span className="font-semibold text-gray-900">Class Participation Tracker for Online Learning</span>, a system 
-                  designed by students and professors of St. Clare College of Caloocan for 
-                  monitoring and evaluating student participation during online 
-                  learning sessions.
-                </p>
-                <p>
-                  The system provides a fair, consistent, and partially automated way of tracking various forms 
-                  of student engagement — such as speaking turns, chat messages, and 
-                  reaction activity — during synchronous online classes.
-                </p>
-              </div>
-              
-              {/* Auth Buttons - Below Text */}
-              <div className="flex gap-4">
-                <button 
-                  onClick={() => setIsLoginOpen(true)}
-                  className="px-8 py-3 bg-white border-2 border-accent-500 text-accent-600 rounded-lg font-semibold hover:bg-accent-50 transition-all duration-300 shadow-sm hover:shadow-md"
-                >
-                  Log In
-                </button>
-                <button 
-                  onClick={() => setIsSignUpOpen(true)}
-                  className="px-8 py-3 bg-accent-500 text-white rounded-lg font-semibold hover:bg-accent-600 transition-all duration-300 shadow-md hover:shadow-lg"
-                >
-                  Sign Up
-                </button>
-              </div>
+          {/* App Name and Logo */}
+          <div className="flex items-center justify-center gap-10 mb-16">
+            {/* Logo - Clean, No Fill */}
+            <div className="relative">
+              <img 
+                src={heroLogo} 
+                alt="Engagium Logo" 
+                className="h-28 w-auto drop-shadow-xl"
+              />
             </div>
+            
+            <h1 className="text-8xl font-bold text-accent-500 tracking-tight">engagium</h1>
+          </div>
 
-            {/* Right Column: Image Placeholder */}
-            <div className="bg-gradient-to-br from-accent-100 to-accent-200 rounded-3xl h-96 flex items-center justify-center shadow-2xl border border-accent-200">
-              <span className="text-accent-600 text-lg font-medium">Hero Image Placeholder</span>
+          {/* Description Text - Horizontal Layout */}
+          <div className="max-w-6xl mx-auto mb-12">
+            <div className="text-gray-700 text-lg leading-relaxed space-y-6 font-light text-center">
+              <p>
+                <span className="font-semibold text-gray-900">Class Participation Tracker for Online Learning</span>, a system 
+                designed by students and professors of St. Clare College of Caloocan for 
+                monitoring and evaluating student participation during online learning sessions.
+              </p>
+              <p>
+                The system provides a fair, consistent, and partially automated way of tracking various forms 
+                of student engagement — such as speaking turns, chat messages, and 
+                reaction activity — during synchronous online classes.
+              </p>
             </div>
+          </div>
+          
+          {/* Auth Buttons - Left Aligned */}
+          <div className="flex gap-4 justify-center">
+            <button 
+              onClick={() => setIsLoginOpen(true)}
+              className="px-8 py-3 bg-white border-2 border-accent-500 text-accent-600 rounded-lg font-semibold hover:bg-accent-50 transition-all duration-300 shadow-sm hover:shadow-md"
+            >
+              Log In
+            </button>
+            <button 
+              onClick={() => setIsSignUpOpen(true)}
+              className="px-8 py-3 bg-accent-500 text-white rounded-lg font-semibold hover:bg-accent-600 transition-all duration-300 shadow-md hover:shadow-lg"
+            >
+              Sign Up
+            </button>
           </div>
         </div>
       </section>
@@ -82,9 +87,13 @@ const LandingPage = () => {
           </div>
 
           <div className="grid md:grid-cols-2 gap-16">
-            {/* Left Column: Image */}
+            {/* Left Column: Feature Image */}
             <div className="bg-gradient-to-br from-accent-100 to-accent-200 rounded-3xl h-full min-h-96 flex items-center justify-center shadow-2xl border border-accent-200">
-              <span className="text-accent-600 text-lg font-medium">Feature Image Placeholder</span>
+              <img 
+                src={featureimg} 
+                alt="Engagium Features" 
+                className="max-h-24 w-auto"
+              />
             </div>
 
             {/* Right Column: Benefits List */}
