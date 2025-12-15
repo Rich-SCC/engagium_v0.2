@@ -1,11 +1,18 @@
 /**
  * People Panel Controller for Google Meet
  * 
+ * UPDATED December 2025: Now uses centralized DOM and Panel managers
+ * This module now acts as a compatibility layer and re-exports functions
+ * from the centralized managers.
+ * 
  * PRIMARY SOURCE for participant detection:
  * - Complete list of all participants (not affected by video grid layout)
  * - Mic muted status
  * - Raised hands section
  * - Reliable for all view modes
+ * 
+ * SUPPORTS BOTH UI VERSIONS (December 2025):
+ * Google is A/B testing two different UIs - handled by DOM manager
  * 
  * Based on GOOGLE_MEET_DOM_REFERENCE.md (November 2025)
  * Uses ARIA-based accessibility selectors
@@ -13,8 +20,18 @@
 
 import { EVENT_TYPES, SELECTORS } from '../core/config.js';
 import { queueEvent, sendImmediate } from '../core/event-emitter.js';
-import { debounce, findPeopleButton } from '../core/utils.js';
+import { debounce } from '../core/utils.js';
 import { now } from '../../../utils/date-utils.js';
+import { 
+  isPeoplePanelOpen as checkPanelOpen,
+  findPeopleButton,
+  detectUIVersion,
+  findParticipantsList as findList
+} from '../dom/dom-manager.js';
+import {
+  openPeoplePanel as openPanel,
+  closePeoplePanel as closePanel
+} from '../dom/panel-manager.js';
 
 // Cache for known participants (to detect changes)
 let knownParticipants = new Map();
@@ -23,259 +40,48 @@ let isObserving = false;
 
 /**
  * Check if People Panel is currently open
+ * Re-exports from DOM manager for compatibility
  * @returns {boolean} True if panel is open
  */
 export function isPeoplePanelOpen() {
-  // FIRST: Check the People button's aria-expanded attribute (most reliable)
-  const peopleButton = findPeopleButton();
-  if (peopleButton) {
-    const ariaExpanded = peopleButton.getAttribute('aria-expanded');
-    if (ariaExpanded === 'true') {
-      console.log('[PeoplePanel] ✓ Detected as OPEN via button aria-expanded=true');
-      return true;
-    } else if (ariaExpanded === 'false') {
-      console.log('[PeoplePanel] ✗ Detected as CLOSED via button aria-expanded=false');
-      return false;
-    }
-    // If aria-expanded is not set, fall through to DOM checks
-  }
-  
-  // SECOND: Find side panel with aria-label="Side panel" (Google Meet's actual structure)
-  const sidePanels = document.querySelectorAll('aside[aria-label="Side panel"]');
-  
-  console.log('[PeoplePanel] Checking if open - found', sidePanels.length, 'side panels');
-  
-  if (sidePanels.length === 0) {
-    console.log('[PeoplePanel] ✗ No side panels found');
-    return false;
-  }
-  
-  // Check each side panel to find the one with People content
-  for (const panel of sidePanels) {
-    // Check if panel is visible
-    if (panel.offsetParent === null) {
-      continue; // Skip hidden panels
-    }
-    
-    // Check for "People" heading (h2 level=2)
-    const headings = panel.querySelectorAll('h2, h3, [role="heading"]');
-    const hasPeopleHeading = Array.from(headings).some(h => 
-      h.textContent?.toLowerCase().includes('people')
-    );
-    
-    // Check for Participants list (case-insensitive)
-    const lists = panel.querySelectorAll('[role="list"]');
-    const hasParticipantsList = Array.from(lists).some(list => {
-      const ariaLabel = list.getAttribute('aria-label') || '';
-      return ariaLabel.toLowerCase().includes('participant');
-    });
-    
-    // Check for "In the meeting" or "Contributors" text
-    const textElements = panel.querySelectorAll('h3, button, div');
-    const hasInMeetingContent = Array.from(textElements).some(el => {
-      const text = el.textContent?.toLowerCase() || '';
-      return text.includes('in the meeting') || 
-             text.includes('contributors') ||
-             text.includes('in call');
-    });
-    
-    // Check for specific list items that look like participants
-    const listItems = panel.querySelectorAll('[role="listitem"]');
-    const hasListItems = listItems.length > 0;
-    
-    // Always log what we're checking
-    console.log('[PeoplePanel] Panel check:', {
-      hasPeopleHeading,
-      hasParticipantsList,
-      hasInMeetingContent,
-      hasListItems,
-      listItemCount: listItems.length,
-      headingCount: headings.length,
-      listsCount: lists.length,
-      visible: panel.offsetParent !== null
-    });
-    
-    // If any of these checks pass, the People panel is open
-    if (hasPeopleHeading || hasParticipantsList || hasInMeetingContent || hasListItems) {
-      console.log('[PeoplePanel] ✓ Detected as OPEN');
-      return true;
-    }
-  }
-  
-  console.log('[PeoplePanel] ✗ Not detected as open');
-  return false;
+  return checkPanelOpen();
 }
 
 /**
  * Try to open the People Panel
+ * Re-exports from Panel manager for compatibility
  * @returns {Promise<boolean>} True if panel was opened successfully
  */
 export async function openPeoplePanel() {
-  // Check if already open BEFORE attempting to click
-  if (isPeoplePanelOpen()) {
-    console.log('[PeoplePanel] Already open, no action needed');
-    return true;
-  }
-  
-  // Try to find and click the People button
-  const peopleButton = findPeopleButton();
-  
-  if (!peopleButton) {
-    console.warn('[PeoplePanel] Could not find People button');
-    return false;
-  }
-  
-  console.log('[PeoplePanel] Opening People panel...');
-  peopleButton.click();
-  
-  // Wait for panel to open (with animation delay)
-  await new Promise(resolve => setTimeout(resolve, 300));
-  return await waitForPanelOpen(5000);
+  return openPanel();
 }
 
 /**
- * Close the People Panel if it's currently open
+ * Close the People Panel
+ * Re-exports from Panel manager for compatibility
  * @returns {Promise<boolean>} True if panel was closed successfully
  */
 export async function closePeoplePanel() {
-  // Check if panel is open
-  if (!isPeoplePanelOpen()) {
-    console.log('[PeoplePanel] Already closed, no action needed');
-    return true;
-  }
-  
-  // Try to find and click the People button to close it
-  const peopleButton = findPeopleButton();
-  
-  if (!peopleButton) {
-    console.warn('[PeoplePanel] Could not find People button to close');
-    return false;
-  }
-  
-  console.log('[PeoplePanel] Closing People panel...');
-  peopleButton.click();
-  
-  // Wait for panel to close (with animation delay)
-  await new Promise(resolve => setTimeout(resolve, 300));
-  return await waitForPanelClose(2000);
-}
-
-/**
- * Wait for the People Panel to open
- * @param {number} timeout - Maximum wait time in ms
- * @returns {Promise<boolean>} True if panel opened
- */
-function waitForPanelOpen(timeout = 5000) {
-  return new Promise((resolve) => {
-    console.log('[PeoplePanel] Waiting for panel to appear...');
-    const startTime = Date.now();
-    const checkInterval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      
-      if (isPeoplePanelOpen()) {
-        console.log(`[PeoplePanel] Panel detected as open after ${elapsed}ms`);
-        clearInterval(checkInterval);
-        resolve(true);
-      } else if (elapsed > timeout) {
-        console.warn(`[PeoplePanel] Timeout waiting for panel after ${elapsed}ms`);
-        
-        // DOM SNAPSHOT for debugging
-        console.group('[PeoplePanel] DOM Snapshot');
-        console.log('=== Full body innerHTML (first 5000 chars) ===');
-        console.log(document.body.innerHTML.substring(0, 5000));
-        console.log('\n=== All elements with role="complementary" ===');
-        const complementary = document.querySelectorAll('[role="complementary"]');
-        console.log('Count:', complementary.length);
-        complementary.forEach((el, i) => {
-          console.log(`Panel ${i}:`, {
-            visible: el.offsetParent !== null,
-            innerHTML: el.innerHTML.substring(0, 500),
-            ariaLabel: el.getAttribute('aria-label'),
-            classes: el.className
-          });
-        });
-        console.log('\n=== All side panels (alternative selectors) ===');
-        const sidePanels = document.querySelectorAll('aside, [role="dialog"], [role="region"]');
-        console.log('Count:', sidePanels.length);
-        sidePanels.forEach((el, i) => {
-          if (el.textContent?.toLowerCase().includes('people') || 
-              el.textContent?.toLowerCase().includes('participant')) {
-            console.log(`Potential panel ${i}:`, {
-              tagName: el.tagName,
-              role: el.getAttribute('role'),
-              ariaLabel: el.getAttribute('aria-label'),
-              visible: el.offsetParent !== null,
-              innerHTML: el.innerHTML.substring(0, 500)
-            });
-          }
-        });
-        console.log('\n=== People button state ===');
-        const peopleButton = findPeopleButton();
-        if (peopleButton) {
-          console.log({
-            text: peopleButton.textContent,
-            ariaLabel: peopleButton.getAttribute('aria-label'),
-            ariaPressed: peopleButton.getAttribute('aria-pressed'),
-            ariaExpanded: peopleButton.getAttribute('aria-expanded'),
-            disabled: peopleButton.disabled
-          });
-        } else {
-          console.log('People button not found');
-        }
-        console.groupEnd();
-        
-        clearInterval(checkInterval);
-        resolve(false);
-      }
-    }, 100);
-  });
-}
-
-/**
- * Wait for the People Panel to close
- * @param {number} timeout - Maximum wait time in ms
- * @returns {Promise<boolean>} True if panel closed
- */
-function waitForPanelClose(timeout = 2000) {
-  return new Promise((resolve) => {
-    const startTime = Date.now();
-    const checkInterval = setInterval(() => {
-      if (!isPeoplePanelOpen()) {
-        console.log(`[PeoplePanel] Panel detected as closed after ${Date.now() - startTime}ms`);
-        clearInterval(checkInterval);
-        resolve(true);
-      } else if (Date.now() - startTime > timeout) {
-        clearInterval(checkInterval);
-        resolve(false);
-      }
-    }, 100);
-  });
+  return closePanel();
 }
 
 /**
  * Get all current participant names from the People Panel
+ * Uses DOM manager for cached queries
  * @returns {Array<{name: string, isMuted: boolean, isHost: boolean, isSelf: boolean, isPresenting: boolean}>}
  */
 export function getCurrentParticipants() {
   const participants = [];
   
-  // Find the participants list
-  const participantsList = document.querySelector(PANEL_SELECTORS.participantsList);
+  // Find the participants list using DOM manager
+  const participantsList = findList();
   
   if (!participantsList) {
-    // Try alternative: find list by looking in side panel
-    const sidePanel = document.querySelector('aside[aria-label="Side panel"]');
-    if (!sidePanel) {
-      console.warn('[PeoplePanel] No side panel found');
-      return participants;
-    }
-    
-    // Look for list items in the side panel
-    const listItems = sidePanel.querySelectorAll(PANEL_SELECTORS.participantItem);
-    return parseParticipantItems(listItems);
+    console.warn('[PeoplePanel] No participants list found');
+    return participants;
   }
   
-  const listItems = participantsList.querySelectorAll(PANEL_SELECTORS.participantItem);
+  const listItems = participantsList.querySelectorAll(SELECTORS.participantItem);
   return parseParticipantItems(listItems);
 }
 
@@ -377,7 +183,7 @@ export function getRaisedHands() {
   const raisedHands = [];
   
   // Find the raised hands region
-  const raisedHandsRegion = document.querySelector(PANEL_SELECTORS.raisedHandsRegion);
+  const raisedHandsRegion = document.querySelector(SELECTORS.raisedHandsRegion);
   
   if (!raisedHandsRegion) {
     // No raised hands section = no hands raised
@@ -385,7 +191,7 @@ export function getRaisedHands() {
   }
   
   // Find list items in the raised hands region
-  const listItems = raisedHandsRegion.querySelectorAll(PANEL_SELECTORS.participantItem);
+  const listItems = raisedHandsRegion.querySelectorAll(SELECTORS.participantItem);
   
   let position = 1;
   for (const item of listItems) {
@@ -483,15 +289,15 @@ export function startObserving() {
     }
   }, 500)); // Increased debounce from 250ms to 500ms
   
-  // Try to observe just the side panel instead of entire body
-  const sidePanel = document.querySelector('aside[aria-label="Side panel"]');
+  // Use DOM manager to find side panel (cached)
+  const sidePanel = findSidePanel();
   if (sidePanel) {
     panelObserver.observe(sidePanel, {
       childList: true,
       subtree: true
       // Removed attributes observer - too noisy
     });
-    console.log('[PeoplePanel] Observing side panel');
+    console.log('[PeoplePanel] Observing side panel (cached query)');
   } else {
     // Fallback: observe body but only for childList changes
     panelObserver.observe(document.body, {
@@ -581,10 +387,15 @@ export function refreshParticipants() {
   return Array.from(knownParticipants.values());
 }
 
+// Import missing findSidePanel from DOM manager
+import { findSidePanel } from '../dom/dom-manager.js';
+
 // Export for testing
 export const _internal = {
   parseParticipantItem,
   parseParticipantItems,
-  findPeopleButton,
   detectChanges
 };
+
+// Re-export detectUIVersion and findPeopleButton from DOM manager
+export { detectUIVersion, findPeopleButton } from '../dom/dom-manager.js';

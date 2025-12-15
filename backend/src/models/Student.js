@@ -69,8 +69,17 @@ class Student {
 
     for (const studentData of studentsData) {
       try {
-        const student = await this.create(studentData);
-        results.push({ success: true, data: student });
+        // Check if student already exists
+        const existing = await this.findByClassIdAndName(studentData.class_id, studentData.full_name);
+        
+        if (existing) {
+          // Student already exists - return it but mark as not newly created
+          results.push({ success: true, data: existing, existing: true });
+        } else {
+          // Create new student
+          const student = await this.create(studentData);
+          results.push({ success: true, data: student, existing: false });
+        }
       } catch (error) {
         results.push({ success: false, error: error.message, data: studentData });
       }

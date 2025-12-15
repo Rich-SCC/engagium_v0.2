@@ -142,43 +142,6 @@ export function isInvalidParticipant(name, CONFIG) {
   return false;
 }
 
-/**
- * Finds the People button in Google Meet
- * Uses multiple selectors and fallback methods for reliability
- * @returns {Element|null} The People button element or null if not found
- */
-export function findPeopleButton() {
-  // Try aria-label based selector
-  let button = document.querySelector('button[aria-label*="people" i]');
-  if (button) return button;
-  
-  // Try finding by visible text
-  const buttons = document.querySelectorAll('button');
-  for (const btn of buttons) {
-    const text = btn.textContent?.toLowerCase() || '';
-    const ariaLabel = btn.getAttribute('aria-label')?.toLowerCase() || '';
-    
-    if (text.includes('people') || ariaLabel.includes('people')) {
-      return btn;
-    }
-  }
-  
-  // Try tab button if side panel is open with different tab
-  const peopleTab = document.querySelector('[role="tab"][aria-label*="People" i]');
-  if (peopleTab && !peopleTab.getAttribute('aria-selected')?.includes('true')) {
-    return peopleTab;
-  }
-  
-  return null;
-}
-
-/**
- * Finds the Join button in Google Meet waiting room
- * Uses multiple selectors as fallback
- * @returns {Element|null} The Join button element or null if not found
- */
-export function findJoinButton() {
-  return document.querySelector('button[jsname="Qx7Oae"]') || // Primary join button
-         document.querySelector('button[aria-label*="Join"]') ||
-         document.querySelector('button[aria-label*="join"]');
-}
+// DOM query functions moved to dom/dom-manager.js for centralized caching
+// Re-export them here for backward compatibility
+export { findPeopleButton, findJoinButton } from '../dom/dom-manager.js';

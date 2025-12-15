@@ -400,9 +400,21 @@ class AttendanceRecord {
 
   // Mark students as absent who are in the roster but not in attendance
   static async markAbsentStudents(sessionId, classId) {
-    // Get students who are in the class but don't have an attendance record
-    // Check both student_id AND participant_name to avoid duplicate key errors
-    const query = `
+    // First, update any existing unmatched records that match by name to link the student
+    const updateQuery = `
+      UPDATE attendance_records
+      SET student_id = s.id, updated_at = NOW()
+      FROM students s
+      WHERE attendance_records.session_id = $1
+        AND s.class_id = $2
+        AND attendance_records.student_id IS NULL
+        AND attendance_records.participant_name = s.full_name
+    `;
+    await db.query(updateQuery, [sessionId, classId]);
+
+    // Then insert truly absent students (not in attendance at all)
+    // Use ON CONFLICT DO NOTHING to safely handle any edge cases
+    const insertQuery = `
       INSERT INTO attendance_records (session_id, student_id, participant_name, status)
       SELECT $1, s.id, s.full_name, 'absent'
       FROM students s
@@ -412,10 +424,11 @@ class AttendanceRecord {
           WHERE ar.session_id = $1 
             AND (ar.student_id = s.id OR ar.participant_name = s.full_name)
         )
+      ON CONFLICT (session_id, participant_name) DO NOTHING
       RETURNING *
     `;
 
-    const result = await db.query(query, [sessionId, classId]);
+    const result = await db.query(insertQuery, [sessionId, classId]);
     return result.rows;
   }
 

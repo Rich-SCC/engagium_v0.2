@@ -1,6 +1,6 @@
 /**
  * Google Meet Content Script - Participant Detector
- * Updated November 2025 for new ARIA-based DOM structure
+ * Updated December 2025 with centralized DOM management
  * 
  * Detection Strategy:
  * 1. PRIMARY: People Panel (list[aria-label="Participants"])
@@ -8,6 +8,11 @@
  *    - Shows mic muted status via disabled "unmute" button
  * 
  * 2. SECONDARY: Toast notifications for join/leave timestamps
+ * 
+ * Optimizations:
+ * - Uses centralized DOM manager for cached element queries
+ * - Uses panel manager to prevent unnecessary open/close operations
+ * - Batches multiple detection requests to minimize panel toggles
  * 
  * Reference: __documentation/Extension/GOOGLE_MEET_DOM_REFERENCE.md
  */
@@ -17,48 +22,73 @@ import { generateParticipantId, log, warn, sleep, isInvalidParticipant } from '.
 import { sendImmediate } from '../core/event-emitter.js';
 import { MESSAGE_TYPES, PLATFORMS } from '../../../utils/constants.js';
 import { now } from '../../../utils/date-utils.js';
-import { openPeoplePanel, closePeoplePanel, isPeoplePanelOpen } from './people-panel.js';
+import { withPanelOpen } from '../dom/panel-manager.js';
+import { findParticipantsList, findSidePanel, detectUIVersion } from '../dom/dom-manager.js';
 import { showRetroactiveCaptureNotification } from '../ui/meeting-notifications.js';
 
 let peoplePanelObserver = null;
 let toastObserver = null;
 let panelWatcher = null;
 let recentToasts = new Map(); // Track recent toasts to prevent duplicates
+let pendingScans = []; // Queue for batching scan requests
+let scanTimeout = null;
 
 /**
  * CENTRALIZED WORKFLOW: open → scan → send → close
- * Ensures consistent behavior across all detection triggers
+ * Uses panel manager for intelligent state management
  * @param {Object} state - State object
  * @param {Function} scanFunction - Function to call for scanning (receives state)
  * @param {string} reason - Reason for workflow (for logging)
  */
 async function executeDetectionWorkflow(state, scanFunction, reason) {
-  log(`Detection workflow started: ${reason}`);
+  log(`Detection workflow: ${reason}`);
   
-  // Remember if panel was already open
-  const wasAlreadyOpen = isPeoplePanelOpen();
+  return withPanelOpen(async () => {
+    // Small delay to ensure DOM is ready
+    await sleep(50);
+    
+    // Execute the scan function (which sends events)
+    scanFunction(state);
+    
+    return true;
+  }, reason);
+}
+
+/**
+ * Batch multiple scan requests together to prevent rapid panel toggles
+ * @param {Object} state - State object
+ * @param {Function} scanFunction - Scan function to queue
+ * @param {string} reason - Reason for scan
+ */
+function queueScan(state, scanFunction, reason) {
+  // Add to pending queue
+  pendingScans.push({ state, scanFunction, reason });
   
-  // 1. OPEN: Ensure panel is open
-  const opened = await openPeoplePanel();
-  if (!opened) {
-    warn(`Failed to open panel for: ${reason}`);
-    return false;
+  // Clear existing timeout
+  if (scanTimeout) {
+    clearTimeout(scanTimeout);
   }
   
-  // Small delay to ensure DOM is ready
-  await sleep(100);
-  
-  // 2. SCAN & SEND: Execute the scan function (which sends events)
-  scanFunction(state);
-  
-  // 3. CLOSE: Close panel if we opened it (not if user had it open)
-  if (!wasAlreadyOpen) {
-    await sleep(500); // Ensure all events are sent
-    await closePeoplePanel();
-    log(`Panel closed after: ${reason}`);
-  }
-  
-  return true;
+  // Execute all pending scans after a short delay
+  scanTimeout = setTimeout(async () => {
+    if (pendingScans.length === 0) return;
+    
+    const scans = [...pendingScans];
+    pendingScans = [];
+    
+    log(`Executing ${scans.length} batched scans`);
+    
+    // Execute all scans together with panel open once
+    await withPanelOpen(async () => {
+      await sleep(50); // DOM stability
+      
+      for (const { state, scanFunction, reason } of scans) {
+        log(`  - ${reason}`);
+        scanFunction(state);
+        await sleep(20); // Small delay between scans
+      }
+    }, `batch of ${scans.length} scans`);
+  }, 200); // 200ms debounce
 }
 
 /**
@@ -66,7 +96,11 @@ async function executeDetectionWorkflow(state, scanFunction, reason) {
  * @param {Object} state - State object
  */
 export function startParticipantMonitoring(state) {
-  log('Starting participant monitoring (ARIA-based)...');
+  log('Starting participant monitoring (optimized with centralized DOM)...');
+  
+  // Detect UI version
+  const uiVersion = detectUIVersion();
+  log(`Detected UI version: ${uiVersion}`);
   
   // Initial scan using centralized workflow
   executeDetectionWorkflow(state, (state) => {
@@ -86,8 +120,14 @@ export function startParticipantMonitoring(state) {
     }
   });
   
-  // Set up toast observer for join/leave events (provides timestamps)
-  setupToastObserver(state);
+  // Set up toast observer for join/leave events ONLY for old UI
+  // New UI: Data remains accessible after first panel open, toasts cause unnecessary operations
+  if (uiVersion === 'old') {
+    setupToastObserver(state);
+    log('Toast observer enabled for old UI');
+  } else {
+    log('Toast observer disabled for new UI (data remains accessible)');
+  }
 }
 
 /**
@@ -107,6 +147,14 @@ export function stopParticipantMonitoring(state) {
     panelWatcher.disconnect();
     panelWatcher = null;
   }
+  
+  // Clear any pending scans
+  if (scanTimeout) {
+    clearTimeout(scanTimeout);
+    scanTimeout = null;
+  }
+  pendingScans = [];
+  
   log('Participant monitoring stopped');
 }
 
@@ -128,10 +176,16 @@ function setupToastObserver(state) {
         const text = node.textContent?.trim() || '';
         const textLower = text.toLowerCase();
         
+        // Skip if this looks like a UI element (tooltips, button text, etc.)
+        // Common patterns: "People" + number, single words, short text
+        if (isLikelyUIElement(text)) {
+          continue;
+        }
+        
         // Check for join notification
         if (textLower.includes(CONFIG.PATTERNS.joined)) {
           const name = extractNameFromToast(text, CONFIG.PATTERNS.joined);
-          if (name && !isInvalidParticipant(name, CONFIG)) {
+          if (name && !isInvalidParticipant(name, CONFIG) && isValidToastName(name)) {
             // Prevent duplicate processing of the same toast
             const recentKey = `join:${name}`;
             const lastSeen = recentToasts.get(recentKey);
@@ -147,8 +201,8 @@ function setupToastObserver(state) {
             
             log('Toast: Participant joined:', name);
             
-            // Use centralized workflow: open → scan → send → close
-            executeDetectionWorkflow(state, (state) => {
+            // Queue scan to batch with other potential toasts
+            queueScan(state, (state) => {
               rescanAndDetectNew(state);
             }, `join toast: ${name}`);
           }
@@ -157,7 +211,7 @@ function setupToastObserver(state) {
         // Check for leave notification
         if (textLower.includes(CONFIG.PATTERNS.left)) {
           const name = extractNameFromToast(text, CONFIG.PATTERNS.left);
-          if (name && !isInvalidParticipant(name, CONFIG)) {
+          if (name && !isInvalidParticipant(name, CONFIG) && isValidToastName(name)) {
             // Prevent duplicate processing of the same toast
             const recentKey = `leave:${name}`;
             const lastSeen = recentToasts.get(recentKey);
@@ -173,8 +227,8 @@ function setupToastObserver(state) {
             
             log('Toast: Participant left:', name);
             
-            // Use centralized workflow: open → scan → send → close
-            executeDetectionWorkflow(state, (state) => {
+            // Queue scan to batch with other potential toasts
+            queueScan(state, (state) => {
               detectLeftParticipants(state);
             }, `leave toast: ${name}`);
           }
@@ -189,6 +243,60 @@ function setupToastObserver(state) {
   });
   
   log('Toast observer active for join/leave notifications');
+}
+
+/**
+ * Check if text looks like a UI element rather than a toast notification
+ * @param {string} text - Text to check
+ * @returns {boolean} True if likely a UI element
+ */
+function isLikelyUIElement(text) {
+  if (!text || text.length < 3) return true;
+  
+  const textLower = text.toLowerCase().trim();
+  
+  // Common UI patterns to ignore
+  const uiPatterns = [
+    /^people\d*$/i,           // "People", "People3", etc. (button text)
+    /^\d+$/,                   // Just numbers
+    /^[a-z]+\d+$/i,           // Single word + number (like "people3")
+    /^(chat|activities|details)$/i,  // Tab names
+    /^(mute|unmute|camera|settings)$/i, // Control labels
+    /aria-label/i,             // ARIA attributes
+    /^tooltip/i,               // Tooltip indicators
+  ];
+  
+  return uiPatterns.some(pattern => pattern.test(textLower));
+}
+
+/**
+ * Validate that a name extracted from toast is a real participant name
+ * @param {string} name - Name to validate
+ * @returns {boolean} True if valid toast name
+ */
+function isValidToastName(name) {
+  if (!name || name.length < 2) return false;
+  
+  const nameLower = name.toLowerCase().trim();
+  
+  // Must not be a UI element
+  if (isLikelyUIElement(name)) return false;
+  
+  // Must not be just a number or single character
+  if (/^\d+$/.test(name) || name.length === 1) return false;
+  
+  // Common false positives to exclude
+  const falsePositives = [
+    'people', 'chat', 'activities', 'details',
+    'mute', 'unmute', 'camera', 'mic', 'video'
+  ];
+  
+  if (falsePositives.includes(nameLower)) return false;
+  
+  // Valid name should have at least one letter
+  if (!/[a-z]/i.test(name)) return false;
+  
+  return true;
 }
 
 /**
@@ -208,11 +316,12 @@ function extractNameFromToast(text, action) {
 
 /**
  * Sets up observer on People Panel for participant changes
+ * Uses DOM manager for cached element queries
  * @param {Object} state - State object
  * @returns {boolean} True if observer was set up successfully
  */
 function setupPeoplePanelObserver(state) {
-  // Find the participants list in the People Panel
+  // Find the participants list using DOM manager
   const participantsList = findParticipantsList();
   
   if (!participantsList) {
@@ -223,22 +332,23 @@ function setupPeoplePanelObserver(state) {
   peoplePanelObserver = new MutationObserver(() => {
     if (!state.isTracking) return;
     
-    // Debounce the rescan
+    // Debounce the rescan and batch multiple changes
     clearTimeout(state._panelRescanTimeout);
     state._panelRescanTimeout = setTimeout(() => {
-      rescanAndDetectNew(state);
-      detectLeftParticipants(state);
+      // Queue scans to be batched together
+      queueScan(state, rescanAndDetectNew, 'panel mutation - new');
+      queueScan(state, detectLeftParticipants, 'panel mutation - left');
     }, CONFIG.DEBOUNCE.PANEL_SCAN);
   });
   
-  // Observe the side panel for changes
-  const sidePanel = document.querySelector(CONFIG.SELECTORS.sidePanel);
+  // Observe the side panel using DOM manager
+  const sidePanel = findSidePanel();
   if (sidePanel) {
     peoplePanelObserver.observe(sidePanel, {
       childList: true,
       subtree: true
     });
-    log('People Panel observer active');
+    log('People Panel observer active (using cached DOM queries)');
     return true;
   }
   
@@ -266,34 +376,7 @@ function setupPanelWatcher(state) {
   });
 }
 
-/**
- * Finds the participants list element
- * @returns {Element|null} Participants list or null
- */
-function findParticipantsList() {
-  // Try direct selector first
-  let list = document.querySelector(CONFIG.SELECTORS.participantsList);
-  if (list) return list;
-  
-  // Fallback: find list inside side panel with listitem children
-  const sidePanel = document.querySelector(CONFIG.SELECTORS.sidePanel);
-  if (sidePanel) {
-    const lists = sidePanel.querySelectorAll('[role="list"]');
-    for (const l of lists) {
-      // Check if this list has listitems that look like participants
-      const items = l.querySelectorAll('[role="listitem"]');
-      if (items.length > 0) {
-        const ariaLabel = l.getAttribute('aria-label') || '';
-        // Skip if it's explicitly the raised hands list
-        if (!ariaLabel.toLowerCase().includes('raised hand')) {
-          return l;
-        }
-      }
-    }
-  }
-  
-  return null;
-}
+// Removed: findParticipantsList() - now using DOM manager's cached version
 
 /**
  * Scans current participants in the People Panel
@@ -469,7 +552,7 @@ function extractAllParticipants() {
   
   if (!list) {
     // Fallback: try to find any listitems in side panel
-    const sidePanel = document.querySelector(CONFIG.SELECTORS.sidePanel);
+    const sidePanel = findSidePanel();
     if (!sidePanel) return participants;
     
     const items = sidePanel.querySelectorAll('[role="listitem"]');

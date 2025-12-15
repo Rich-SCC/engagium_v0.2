@@ -2,16 +2,20 @@
  * Google Meet Content Script - Main Entry Point
  * Coordinates core tracking for Google Meet (Join/Leave only)
  * 
+ * Updated December 2025: Now uses centralized DOM and Panel managers
+ * 
  * Module Structure:
- * - config.js: DOM selectors and timing configuration
- * - state.js: State management factory
- * - utils.js: Shared utility functions
- * - event-emitter.js: Batching and deduplication for events
- * - url-monitor.js: URL change detection for platform switches
- * - meeting-exit-detector.js: Meeting exit/end detection via DOM monitoring
- * - participant-detector.js: Participant join/leave monitoring
- * - tracking-indicator.js: Visual UI overlay
- * - meeting-notifications.js: User prompts and notifications
+ * - dom/dom-manager.js: Centralized DOM queries with caching
+ * - dom/panel-manager.js: Smart panel state management
+ * - core/config.js: DOM selectors and timing configuration
+ * - core/state.js: State management factory
+ * - core/utils.js: Shared utility functions
+ * - core/event-emitter.js: Batching and deduplication for events
+ * - detection/url-monitor.js: URL change detection for platform switches
+ * - detection/meeting-exit-detector.js: Meeting exit/end detection via DOM monitoring
+ * - detection/participant-detector.js: Participant join/leave monitoring
+ * - ui/tracking-indicator.js: Visual UI overlay
+ * - ui/meeting-notifications.js: User prompts and notifications
  * 
  * Removed modules (see __documentation/Extension/PLANNED_FEATURES.md):
  * - chat-monitor.js, hand-raise-detector.js, reaction-detector.js,
@@ -38,6 +42,8 @@ import {
 } from './ui/meeting-notifications.js';
 import { MESSAGE_TYPES, STORAGE_KEYS, PLATFORMS } from '../../utils/constants.js';
 import { now } from '../../utils/date-utils.js';
+import { initDOMManager, stopDOMManager } from './dom/dom-manager.js';
+import { initPanelManager, resetPanelState } from './dom/panel-manager.js';
 
 // Create state instance
 const state = createState();
@@ -50,13 +56,17 @@ let trackingReminderTimeout = null;
 // ============================================================================
 
 async function init() {
-  log('Initializing...');
+  log('Initializing with optimized DOM management...');
+  
+  // Initialize centralized DOM and Panel managers
+  initDOMManager();
+  initPanelManager();
   
   // Extract meeting ID from URL
   state.meetingId = extractMeetingId();
   
   if (!state.meetingId) {
-    warn('Could not extract meeting ID from URL');
+    log('Not on a meeting page (landing, settings, etc.) - skipping initialization');
     return;
   }
   
@@ -288,6 +298,12 @@ function stopTracking() {
   // Stop participant monitoring
   stopParticipantMonitoring(state);
   stopMeetingExitMonitoring(state);
+  
+  // Stop DOM manager
+  stopDOMManager();
+  
+  // Reset panel state
+  resetPanelState();
   
   // Clear event queue
   clearEventQueue();

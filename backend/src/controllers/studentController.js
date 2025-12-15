@@ -724,12 +724,15 @@ const bulkAddStudents = async (req, res) => {
     const results = await Student.bulkCreate(studentsData);
 
     const successful = results.filter(r => r.success);
+    const newlyCreated = results.filter(r => r.success && !r.existing);
+    const alreadyExisted = results.filter(r => r.success && r.existing);
     const failed = results.filter(r => !r.success);
 
     res.status(201).json({
       success: true,
       data: {
-        added: successful.length,
+        added: newlyCreated.length,
+        existing: alreadyExisted.length,
         failed: failed.length,
         students: successful.map(r => r.data),
         errors: failed

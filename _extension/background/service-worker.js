@@ -22,7 +22,8 @@ import {
   getParticipantsBySession,
   getEventsBySession,
   clearSessionData,
-  clearAllData
+  clearAllData,
+  setSetting
 } from '../utils/storage.js';
 import { now } from '../utils/date-utils.js';
 import { debug } from '../utils/debug-logger.js';

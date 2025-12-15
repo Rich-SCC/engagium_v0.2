@@ -30,7 +30,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://meet.google.com/*"
+        "https://meet.google.com/*-*-*"
       ],
       "js": ["content/loader.js"],
       "run_at": "document_idle"
