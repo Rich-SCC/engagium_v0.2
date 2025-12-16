@@ -7,7 +7,6 @@ import { log } from '../core/utils.js';
 
 const INDICATOR_ID = 'engagium-indicator';
 const STATUS_DOT_ID = 'engagium-status-dot';
-const STATUS_TEXT_ID = 'engagium-status-text';
 
 /**
  * Injects the tracking indicator into the page
@@ -23,31 +22,31 @@ export function injectTrackingIndicator() {
   indicator.id = INDICATOR_ID;
   indicator.style.cssText = `
     position: fixed;
-    top: 10px;
-    right: 10px;
-    background: #1f2937;
-    color: white;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-family: system-ui, -apple-system, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
+    top: 12px;
+    left: 12px;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 6px 10px;
+    border-radius: 20px;
     z-index: 10000;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     display: flex;
     align-items: center;
     gap: 8px;
     transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
   `;
   
   indicator.innerHTML = `
+    <img src="${chrome.runtime.getURL('assets/icons/icon32.png')}" 
+         alt="Engagium" 
+         style="width: 20px; height: 20px; display: block;">
     <div id="${STATUS_DOT_ID}" style="
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
-      background: #6b7280;
+      background: #9ca3af;
+      transition: all 0.3s ease;
     "></div>
-    <span id="${STATUS_TEXT_ID}">Engagium: Idle</span>
   `;
   
   document.body.appendChild(indicator);
@@ -61,18 +60,15 @@ export function injectTrackingIndicator() {
  */
 export function updateIndicator(status, participantCount = 0) {
   const dot = document.getElementById(STATUS_DOT_ID);
-  const text = document.getElementById(STATUS_TEXT_ID);
   
-  if (!dot || !text) return;
+  if (!dot) return;
   
   if (status === 'active') {
     dot.style.background = '#10b981'; // Green
-    dot.style.boxShadow = '0 0 8px rgba(16, 185, 129, 0.6)';
-    text.textContent = `Engagium: Tracking (${participantCount})`;
+    dot.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.8)';
   } else {
-    dot.style.background = '#6b7280'; // Gray
+    dot.style.background = '#9ca3af'; // Gray
     dot.style.boxShadow = 'none';
-    text.textContent = 'Engagium: Idle';
   }
 }
 
