@@ -65,7 +65,12 @@ class SessionManager {
         platform: sessionData.meeting_platform
       });
 
-      logger.log(' API response:', JSON.stringify(response));
+      logger.log(' Session start API result:', {
+        success: !!response?.success,
+        hasData: !!response?.data,
+        message: response?.message || null,
+        error: response?.error || null
+      });
 
       if (!response.success) {
         throw new Error(response.message || response.error || 'Failed to start session');
@@ -74,7 +79,10 @@ class SessionManager {
       // Backend returns { success: true, data: session } (session object directly in data)
       const backendSession = response.data;
       
-      logger.log(' Backend session:', JSON.stringify(backendSession));
+      logger.log(' Backend session created:', {
+        id: backendSession?.id,
+        startedAt: backendSession?.started_at || null
+      });
       
       if (!backendSession || !backendSession.id) {
         logger.error(' Invalid response structure:', response);
@@ -388,22 +396,6 @@ class SessionManager {
       }
     }
 
-    // Emit real-time event via WebSocket
-    if (socketClient.isSessionConnected()) {
-      try {
-        await socketClient.emitParticipantJoined({
-          id: data.participant?.id || participantName,
-          name: participantName,
-          joinedAt: joinedAt,
-          isMatched: !!match,
-          studentId: match?.student?.id,
-          studentName: match?.student?.name
-        });
-      } catch (wsError) {
-        // Silent fail for WebSocket - non-critical
-      }
-    }
-
     debug.success('background', 'PARTICIPANT_TRACKED', { 
       name: participantName,
       matched: !!match
@@ -483,30 +475,141 @@ class SessionManager {
       }
     }
 
-    // Emit real-time event via WebSocket
-    if (socketClient.isSessionConnected()) {
-      try {
-        await socketClient.emitParticipantLeft(participantName, leftAt);
-      } catch (wsError) {
-        logger.warn(' WebSocket emit failed:', wsError);
-      }
-    }
-
     logger.log(' Participant left:', participantName);
   }
 
   /**
-   * Handle participation event (REMOVED - see PLANNED_FEATURES.md)
-   * Kept as stub for backwards compatibility
+   * Handle participation event (chat activity, reaction, mic toggle)
    * @param {Object} data - { type, platform, meeting_id, participant_id, ... }
    */
   async handleParticipationEvent(data) {
-    logger.warn(' handleParticipationEvent called but participation events are disabled');
-    debug.warn('background', 'PARTICIPATION_DISABLED', { 
-      type: data.type, 
-      message: 'Participation events removed - see PLANNED_FEATURES.md' 
-    });
-    return null;
+    const session = await this.getActiveSession();
+    if (!session) {
+      logger.warn(' ⚠️ No active session, cannot process participation event');
+      return null;
+    }
+
+    // Service workers can be suspended/restarted during long meetings.
+    // Re-establish socket session state lazily so participation events
+    // (especially mic toggles) keep reaching the backend.
+    if (!socketClient.isSessionConnected() && session.backend_id) {
+      try {
+        const connected = await socketClient.connect(session.backend_id);
+        if (!connected) {
+          logger.warn(' ⚠️ Could not reconnect socket for participation events');
+        }
+      } catch (reconnectError) {
+        logger.warn(' ⚠️ Socket reconnect failed for participation events:', reconnectError);
+      }
+    }
+
+    const interactionType = this.mapEventType(data.type);
+    if (!interactionType) {
+      logger.warn(' ⚠️ Unknown interaction type:', data.type);
+      return null;
+    }
+
+    const eventTimestamp = data.timestamp || now();
+    const participantName =
+      data.name ||
+      data.sender ||
+      data.participant?.name ||
+      data.participant_name ||
+      null;
+
+    logger.log(`\n🔍 PROCESSING ${interactionType.toUpperCase()} EVENT`);
+    logger.log(' ├─ Participant:', participantName);
+    logger.log(' ├─ Session:', session.id);
+    logger.log(' └─ Type:', data.type);
+
+    let matchedParticipant = null;
+    if (participantName) {
+      const participants = await getParticipantsBySession(session.id);
+      const participantNameLower = participantName.toLowerCase().trim();
+
+      matchedParticipant = participants.find(
+        p => p.name.toLowerCase().trim() === participantNameLower
+      ) || null;
+
+      logger.log(` Roster lookup: found ${participants.length} total participants`);
+      if (matchedParticipant) {
+        logger.log(` ✅ MATCHED to student: ${matchedParticipant.matched_student_name || 'N/A'}`);
+      } else {
+        logger.log(` ❌ NO MATCH for: "${participantName}"`);
+      }
+    }
+
+    const eventRecord = {
+      id: uuidv4(),
+      session_id: session.id,
+      participant_id: matchedParticipant?.id || null,
+      interaction_type: interactionType,
+      timestamp: eventTimestamp,
+      metadata: this.extractEventData(data)
+    };
+
+    await createEvent(eventRecord);
+
+    const participantDisplayName = matchedParticipant?.matched_student_name || participantName || 'Unknown participant';
+
+    // Always broadcast live participation events so frontend feed can show full pipeline,
+    // even when roster matching is incomplete.
+    try {
+      debug.event('background', `PARTICIPATION_EVENT_READY`, {
+        type: interactionType,
+        name: participantDisplayName,
+        socketConnected: socketClient.isSessionConnected()
+      });
+      
+      if (socketClient.isSessionConnected()) {
+        logger.log(' 📡 Socket connected, emitting participation event via WebSocket');
+        await socketClient.emitParticipation({
+          studentId: matchedParticipant?.matched_student_id || null,
+          studentName: participantDisplayName,
+          type: interactionType,
+          metadata: {
+            source_event_id: eventRecord.id,
+            ...eventRecord.metadata,
+            participant_name: participantName || matchedParticipant?.name || null,
+            participant_id: matchedParticipant?.platform_participant_id || null,
+            is_matched: !!matchedParticipant?.matched_student_id
+          }
+        });
+        debug.success('background', 'PARTICIPATION_EMITTED', { type: interactionType });
+      } else {
+        // If socket not yet connected, still queue/send via REST as fallback
+        logger.warn(' ⚠️ Socket not connected, attempting fallback via REST API');
+        try {
+          // Ensure we have sessionId before sending
+          if (session.backend_id) {
+            await socketClient.emitParticipation({
+              studentId: matchedParticipant?.matched_student_id || null,
+              studentName: participantDisplayName,
+              type: interactionType,
+              metadata: {
+                source_event_id: eventRecord.id,
+                ...eventRecord.metadata,
+                participant_name: participantName || matchedParticipant?.name || null,
+                participant_id: matchedParticipant?.platform_participant_id || null,
+                is_matched: !!matchedParticipant?.matched_student_id
+              }
+            });
+            logger.log(' REST fallback sent for:', interactionType);
+            debug.success('background', 'PARTICIPATION_FALLBACK_REST', { type: interactionType });
+          }
+        } catch (restError) {
+          logger.warn(' Fallback REST send failed:', restError);
+        }
+      }
+    } catch (wsError) {
+      logger.error(' ❌ Participation event emission failed:', wsError);
+      debug.error('background', 'PARTICIPATION_EMIT_ERROR', { 
+        type: interactionType, 
+        error: wsError.message 
+      });
+    }
+
+    return eventRecord;
   }
 
   /**
@@ -514,28 +617,66 @@ class SessionManager {
    * Must match database ENUM: 'manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'platform_switch', 'hand_raise'
    */
   mapEventType(messageType) {
-    // Legacy mapping - kept for when participation events are re-enabled
     const mapping = {
-      // MESSAGE_TYPES.CHAT_MESSAGE: 'chat', (removed)
-      // MESSAGE_TYPES.REACTION: 'reaction', (removed)
-      // MESSAGE_TYPES.HAND_RAISE: 'hand_raise', (removed)
-      // MESSAGE_TYPES.MIC_TOGGLE: 'mic_toggle', (removed)
-      // MESSAGE_TYPES.CAMERA_TOGGLE: 'camera_toggle', (removed)
+      [MESSAGE_TYPES.CHAT_ACTIVITY]: 'chat',
+      [MESSAGE_TYPES.REACTION]: 'reaction',
+      [MESSAGE_TYPES.HAND_RAISE]: 'hand_raise',
+      [MESSAGE_TYPES.MIC_TOGGLE]: 'mic_toggle',
       [MESSAGE_TYPES.PLATFORM_SWITCH]: 'platform_switch'
     };
-    return mapping[messageType] || 'manual_entry';
+    return mapping[messageType] || null;
   }
 
   /**
    * Extract relevant event data (LEGACY)
    */
   extractEventData(data) {
-    const { type, message, reaction, ...rest } = data;
-    return {
-      message,
-      reaction,
-      ...rest
+    const metadata = {
+      source: data.source || null,
+      platform: data.platform || null,
+      meetingId: data.meetingId || null,
+      oldMeetingId: data.old_meeting_id || null,
+      newMeetingId: data.new_meeting_id || null,
+      participantId: data.participantId || null,
+      isMuted: typeof data.isMuted === 'boolean' ? data.isMuted : undefined,
+      reaction: data.reaction || null,
+      handState: data.handState || null,
+      queuePosition: Number.isFinite(data.queuePosition) ? data.queuePosition : undefined,
+      hasContent: typeof data.hasContent === 'boolean' ? data.hasContent : undefined
     };
+
+    return Object.fromEntries(
+      Object.entries(metadata).filter(([, value]) => value !== null && value !== undefined)
+    );
+  }
+
+  /**
+   * Extract interaction value for backend analytics
+   * @param {Object} data
+   * @returns {string|null}
+   */
+  extractInteractionValue(data) {
+    if (data.type === MESSAGE_TYPES.MIC_TOGGLE) {
+      return data.isMuted ? 'muted' : 'unmuted';
+    }
+
+    if (data.type === MESSAGE_TYPES.REACTION) {
+      return data.reaction || 'unknown';
+    }
+
+    if (data.type === MESSAGE_TYPES.HAND_RAISE) {
+      return data.handState || 'raised';
+    }
+
+    if (data.type === MESSAGE_TYPES.CHAT_ACTIVITY) {
+      return 'activity';
+    }
+
+    if (data.type === MESSAGE_TYPES.PLATFORM_SWITCH) {
+      return 'platform_switch';
+    }
+
+    return null;
   }
 
   /**

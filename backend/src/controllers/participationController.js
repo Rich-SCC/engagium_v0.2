@@ -32,7 +32,8 @@ const getParticipationLogs = async (req, res) => {
       result = await ParticipationLog.findBySessionIdWithPagination(
         sessionId,
         parseInt(page),
-        parseInt(limit)
+        parseInt(limit),
+        interaction_type || null
       );
     } else {
       // Simple results
@@ -113,7 +114,7 @@ const addParticipationLog = async (req, res) => {
     }
 
     // Validate interaction type
-    const validTypes = ['manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle'];
+    const validTypes = ['manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'hand_raise'];
     if (!validTypes.includes(interaction_type)) {
       return res.status(400).json({
         success: false,
@@ -290,6 +291,7 @@ const addBulkParticipationLogs = async (req, res) => {
 
     const results = [];
     const errors = [];
+    const emittedLogs = [];
 
     for (const logData of logs) {
       try {
@@ -315,7 +317,7 @@ const addBulkParticipationLogs = async (req, res) => {
         }
 
         // Validate interaction type
-        const validTypes = ['manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle'];
+        const validTypes = ['manual_entry', 'chat', 'reaction', 'mic_toggle', 'camera_toggle', 'hand_raise'];
         if (!validTypes.includes(interaction_type)) {
           errors.push({
             data: logData,
@@ -333,6 +335,16 @@ const addBulkParticipationLogs = async (req, res) => {
         });
 
         results.push(log);
+        emittedLogs.push({
+          session_id: sessionId,
+          student_id,
+          student_name: student.full_name,
+          participant_name: additional_data?.participant_name || student.full_name,
+          is_matched: true,
+          interaction_type,
+          metadata: additional_data || {},
+          timestamp: log.timestamp || new Date().toISOString()
+        });
       } catch (error) {
         errors.push({
           data: logData,
@@ -343,10 +355,20 @@ const addBulkParticipationLogs = async (req, res) => {
 
     // Emit socket event for bulk updates
     if (results.length > 0) {
-      req.app.get('io')?.emit('participation:bulk_added', {
+      const io = req.app.get('io');
+
+      io?.emit('participation:bulk_added', {
         sessionId,
         count: results.length
       });
+
+      // Also emit normalized realtime events so the live feed updates immediately.
+      if (io) {
+        emittedLogs.forEach((event) => {
+          io.to(`session:${sessionId}`).emit('participation:logged', event);
+          io.to(`instructor_${req.user.id}`).emit('participation:logged', event);
+        });
+      }
     }
 
     res.status(201).json({

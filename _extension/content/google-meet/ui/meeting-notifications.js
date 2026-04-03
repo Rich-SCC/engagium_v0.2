@@ -3,101 +3,14 @@
  * Provides visual prompts and notifications within the meeting UI
  */
 
-import { log, findJoinButton } from '../core/utils.js';
+import { log } from '../core/utils.js';
 
 /**
  * Show a notification for Join Now button (when tracking started but still in waiting room)
  * @param {Object} classInfo - { class_id, class_name } if known
  */
 export function showJoinNowPrompt(classInfo) {
-  // Check if already showing
-  if (document.getElementById('engagium-join-prompt')) {
-    return;
-  }
-  
-  // Find the Join Now button
-  const joinButton = findJoinButton();
-  
-  if (!joinButton) {
-    log('Join button not found - user may have already joined');
-    return;
-  }
-  
-  log('Showing Join Now prompt');
-  
-  const prompt = document.createElement('div');
-  prompt.id = 'engagium-join-prompt';
-  prompt.style.cssText = `
-    position: fixed !important;
-    top: 80px !important;
-    right: 20px !important;
-    background: linear-gradient(135deg, #1a73e8 0%, #174ea6 100%) !important;
-    color: white !important;
-    border-radius: 8px !important;
-    padding: 16px 20px !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
-    z-index: 2147483647 !important;
-    font-family: 'Google Sans', Roboto, sans-serif !important;
-    min-width: 300px !important;
-    animation: slideInRight 0.3s ease-out !important;
-    display: block !important;
-    visibility: visible !important;
-  `;
-  
-  prompt.innerHTML = `
-    <style>
-      @keyframes slideInRight {
-        from {
-          transform: translateX(400px);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
-      }
-    </style>
-    <div style="display: flex; align-items: center; gap: 12px;">
-      <div style="font-size: 24px;">📊</div>
-      <div style="flex: 1;">
-        <div style="font-weight: 500; font-size: 14px; margin-bottom: 4px;">
-          Ready to start tracking?
-        </div>
-        <div style="font-size: 12px; opacity: 0.9;">
-          Click "Join now" to enter the meeting
-        </div>
-      </div>
-      <button id="engagium-join-dismiss" style="
-        background: rgba(255,255,255,0.2);
-        border: none;
-        color: white;
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        cursor: pointer;
-        font-size: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      ">×</button>
-    </div>
-  `;
-  
-  document.body.appendChild(prompt);
-  
-  // Dismiss button
-  document.getElementById('engagium-join-dismiss').addEventListener('click', () => {
-    prompt.style.animation = 'slideInRight 0.2s ease-out reverse';
-    setTimeout(() => prompt.remove(), 200);
-  });
-  
-  // Auto-dismiss after 15 seconds
-  setTimeout(() => {
-    if (document.getElementById('engagium-join-prompt')) {
-      prompt.style.animation = 'slideInRight 0.2s ease-out reverse';
-      setTimeout(() => prompt.remove(), 200);
-    }
-  }, 15000);
+  log('Join Now prompt disabled by configuration');
 }
 
 /**
@@ -149,7 +62,7 @@ export function showTrackingReminder(classInfo, onStartTracking) {
       }
     </style>
     <div style="display: flex; align-items: center; gap: 12px;">
-      <div style="font-size: 32px;">🎓</div>
+      <img src="${chrome.runtime.getURL('assets/icons/icon32.png')}" alt="Engagium" style="width: 32px; height: 32px; display: block;">
       <div style="flex: 1;">
         <div style="font-weight: 500; font-size: 15px; color: #202124; margin-bottom: 4px;">
           ${classInfo ? `Start tracking for ${classInfo.class_name}?` : 'Start tracking attendance?'}

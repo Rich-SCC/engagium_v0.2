@@ -136,19 +136,6 @@ class SocketClient {
   }
 
   /**
-   * Emit a chat message event
-   * @param {Object} chatData - { sender, message, timestamp }
-   */
-  async emitChatMessage(chatData) {
-    await this._sendEvent('chat:message', {
-      sessionId: this.sessionId,
-      sender: chatData.sender,
-      message: chatData.message,
-      timestamp: chatData.timestamp || new Date().toISOString()
-    });
-  }
-
-  /**
    * Emit attendance update (participant matched to student)
    * @param {Object} attendanceData - { studentId, studentName, status, joinedAt, leftAt }
    */
@@ -185,19 +172,22 @@ class SocketClient {
    * @param {Object} data 
    */
   async _sendEvent(eventType, data) {
+    // Check if sessionId is missing
     if (!this.sessionId && eventType !== 'session:extension_connected') {
       logger.warn(' No session connected, queuing event:', eventType);
       this.pendingEvents.push({ eventType, data, timestamp: Date.now() });
       return;
     }
 
-    console.log('\n========================================');
     logger.log(' 📤 SENDING EVENT TO BACKEND');
-    console.log('========================================');
     logger.log(' Event Type:', eventType);
     logger.log(' Session ID:', this.sessionId);
-    logger.log(' Data:', JSON.stringify(data, null, 2));
-    console.log('========================================\n');
+    logger.log(' Data summary:', {
+      hasParticipant: !!data?.participant,
+      hasStudentId: !!data?.studentId,
+      hasParticipantId: !!data?.participantId,
+      hasMetadata: !!data?.metadata
+    });
 
     // Debug log - outgoing API call
     debug.send('socket', eventType, { sessionId: this.sessionId, data });
@@ -240,7 +230,10 @@ class SocketClient {
 
       const responseData = await response.json();
       logger.log(' ✅ Event sent successfully:', eventType);
-      logger.log(' Backend response:', responseData);
+      logger.log(' Backend response summary:', {
+        success: responseData?.success ?? null,
+        message: responseData?.message || null
+      });
       debug.success('socket', `${eventType}_RESPONSE`, responseData);
 
     } catch (error) {
@@ -255,7 +248,9 @@ class SocketClient {
    * Flush pending events (called after reconnect)
    */
   async _flushPendingEvents() {
-    if (this.pendingEvents.length === 0) return;
+    if (this.pendingEvents.length === 0) {
+      return;
+    }
 
     logger.log(' Flushing', this.pendingEvents.length, 'pending events');
     
@@ -263,8 +258,10 @@ class SocketClient {
     this.pendingEvents = [];
 
     for (const event of events) {
-      // Only send events from last 5 minutes
-      if (Date.now() - event.timestamp < 5 * 60 * 1000) {
+      const age = Date.now() - event.timestamp;
+      const isRecent = age < 5 * 60 * 1000;
+      
+      if (isRecent) {
         await this._sendEvent(event.eventType, event.data);
       }
     }

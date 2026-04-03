@@ -1,0 +1,90 @@
+services:
+  db:
+    image: postgres:15
+    container_name: engagium-db
+    restart: unless-stopped
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-engagium}
+      POSTGRES_USER: ${POSTGRES_USER:-engagium_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-engagium_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-engagium_user} -d ${POSTGRES_DB:-engagium}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: engagium-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-engagium}
+      DB_USER: ${POSTGRES_USER:-engagium_user}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-engagium_password}
+      CORS_ORIGIN: http://localhost:${FRONTEND_PORT:-5173}
+      FRONTEND_URL: http://localhost:${FRONTEND_PORT:-5173}
+      JWT_SECRET: ${JWT_SECRET:-replace-me-jwt-secret}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-replace-me-refresh-secret}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      SESSION_SECRET: ${SESSION_SECRET:-replace-me-session-secret}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Engagium}
+    volumes:
+      - ./backend:/app
+      - type: volume
+        source: backend_node_modules
+        target: /app/node_modules
+        volume:
+          nocopy: true
+    command: sh -c "if [ ! -d node_modules/.bin ]; then npm ci; fi && npm run dev"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: engagium-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    environment:
+      VITE_API_URL: http://localhost:${BACKEND_PORT:-3001}/api
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "300"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./frontend:/app
+      - type: volume
+        source: frontend_node_modules
+        target: /app/node_modules
+        volume:
+          nocopy: true
+    command: sh -c "if [ ! -d node_modules/.bin ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 5173"
+
+volumes:
+  postgres_data:
+  backend_node_modules:
+  frontend_node_modules:

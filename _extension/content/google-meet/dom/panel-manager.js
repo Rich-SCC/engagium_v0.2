@@ -11,8 +11,16 @@
  * - Prevents closing if user manually opened panel
  */
 
-import { findPeopleButton, isPeoplePanelOpen as checkPanelOpen, detectUIVersion, findCloseButton } from './dom-manager.js';
+import {
+  findPeopleButton,
+  isPeoplePanelOpen as checkPanelOpen,
+  detectPeoplePanelBehavior,
+  PANEL_BEHAVIOR,
+  findCloseButton
+} from './dom-manager.js';
 import { sleep } from '../core/utils.js';
+
+const PANEL_SETTLE_DELAY = 200;
 
 // Panel state tracking
 let panelState = {
@@ -25,6 +33,37 @@ let panelState = {
 
 // Debounce timer for state checks
 const STATE_CHECK_DEBOUNCE = 50;
+
+/**
+ * Dispatches a pointer-driven activation sequence used by Meet controls.
+ * @param {Element} element - Target control element
+ */
+function dispatchPointerActivation(element) {
+  if (!element) return;
+
+  const eventTypes = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+  for (const type of eventTypes) {
+    element.dispatchEvent(new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      view: window
+    }));
+  }
+}
+
+/**
+ * Activates a Meet control with click first, then pointer sequence fallback.
+ * @param {Element} control - Target control element
+ */
+async function activateMeetControl(control) {
+  control.click();
+  await sleep(120);
+
+  if (!checkPanelOpen()) {
+    dispatchPointerActivation(control);
+    await sleep(120);
+  }
+}
 
 /**
  * Initialize panel manager
@@ -104,10 +143,10 @@ export async function openPeoplePanel(force = false) {
       return false;
     }
     
-    const uiVersion = detectUIVersion();
-    console.log(`[PanelManager] Opening panel (UI: ${uiVersion})...`);
-    
-    peopleButton.click();
+    const panelBehavior = detectPeoplePanelBehavior();
+    console.log(`[PanelManager] Opening panel (mode: ${panelBehavior})...`);
+
+    await activateMeetControl(peopleButton);
     
     // Wait for panel to open
     const success = await waitForPanelState(true, 5000);
@@ -151,21 +190,21 @@ export async function closePeoplePanel(force = false) {
   panelState.isOperationInProgress = true;
   
   try {
-    const uiVersion = detectUIVersion();
+    const panelBehavior = detectPeoplePanelBehavior();
     
-    // NEW UI: Use the Close button inside the panel
-    if (uiVersion === 'new') {
+    // Persistent-data mode: use in-panel Close control when available
+    if (panelBehavior === PANEL_BEHAVIOR.PERSISTENT_DATA) {
       const closeButton = findCloseButton();
       
       if (!closeButton) {
-        console.warn('[PanelManager] Cannot close - Close button not found (new UI)');
+        console.warn('[PanelManager] Cannot close - dedicated Close button not found');
         return false;
       }
       
-      console.log('[PanelManager] Closing panel (new UI - using Close button)...');
+      console.log('[PanelManager] Closing panel (persistent-data mode - using Close button)...');
       closeButton.click();
     } else {
-      // OLD UI: Toggle the People button
+      // Toggle-data mode: close by toggling People button
       const peopleButton = findPeopleButton();
       
       if (!peopleButton) {
@@ -173,8 +212,8 @@ export async function closePeoplePanel(force = false) {
         return false;
       }
       
-      console.log('[PanelManager] Closing panel (old UI - toggling People button)...');
-      peopleButton.click();
+      console.log('[PanelManager] Closing panel (toggle-data mode - toggling People button)...');
+      await activateMeetControl(peopleButton);
     }
     
     // Wait for panel to close
@@ -184,6 +223,7 @@ export async function closePeoplePanel(force = false) {
       panelState.isOpen = false;
       panelState.wasOpenedByUser = false;
       console.log('[PanelManager] Panel closed successfully');
+      await sleep(PANEL_SETTLE_DELAY);
     } else {
       console.warn('[PanelManager] Failed to close panel (timeout)');
     }
@@ -227,7 +267,7 @@ async function waitForPanelState(shouldBeOpen, timeout) {
 export async function withPanelOpen(operation, reason = 'operation') {
   console.log(`[PanelManager] Starting operation: ${reason}`);
   
-  const uiVersion = detectUIVersion();
+  const panelBehavior = detectPeoplePanelBehavior();
   updatePanelState();
   const wasAlreadyOpen = panelState.isOpen;
   const wasOpenedByUser = panelState.wasOpenedByUser;
@@ -246,21 +286,21 @@ export async function withPanelOpen(operation, reason = 'operation') {
     // 2. EXECUTE: Run the operation
     const result = await operation();
     
-    // 3. CLOSE: Handle differently for new vs old UI
+    // 3. CLOSE: Handle by panel behavior mode
     if (!wasAlreadyOpen && !wasOpenedByUser) {
-      if (uiVersion === 'new') {
-        // NEW UI: Data persists, just close visually (don't wait for timeout)
+      if (panelBehavior === PANEL_BEHAVIOR.PERSISTENT_DATA) {
+        // Persistent-data mode: close visually without waiting for a long timeout.
         await sleep(100); // Brief delay for operation completion
         const closeButton = findCloseButton();
         if (closeButton) {
-          closeButton.click();
-          console.log(`[PanelManager] Closed panel visually (new UI - data persists)`);
+          await activateMeetControl(closeButton);
+          console.log('[PanelManager] Closed panel visually (persistent-data mode)');
           // Update state immediately - don't wait for visual confirmation
           panelState.isOpen = false;
           panelState.wasOpenedByUser = false;
         }
       } else {
-        // OLD UI: Normal close with wait
+        // Toggle-data mode: normal close with wait.
         await sleep(300);
         await closePeoplePanel();
         console.log(`[PanelManager] Closed panel after: ${reason}`);
@@ -275,9 +315,9 @@ export async function withPanelOpen(operation, reason = 'operation') {
     
     // Cleanup: close panel if we opened it
     if (!wasAlreadyOpen && !wasOpenedByUser) {
-      if (uiVersion === 'new') {
+      if (panelBehavior === PANEL_BEHAVIOR.PERSISTENT_DATA) {
         const closeButton = findCloseButton();
-        if (closeButton) closeButton.click();
+        if (closeButton) await activateMeetControl(closeButton);
         panelState.isOpen = false;
       } else {
         await closePeoplePanel().catch(() => {});

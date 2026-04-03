@@ -1,9 +1,52 @@
 const Session = require('../models/Session');
 const Class = require('../models/Class');
 const Student = require('../models/Student');
+const ParticipationLog = require('../models/ParticipationLog');
 const AttendanceRecord = require('../models/AttendanceRecord');
 const AttendanceInterval = require('../models/AttendanceInterval');
 const { normalizeMeetingLink } = require('../utils/urlUtils');
+
+// Tracks active speaking windows keyed by "sessionId:participantName".
+const activeMicWindows = new Map();
+
+const buildMicWindowKey = (sessionId, participantName) => {
+  if (!sessionId || !participantName) return null;
+  return `${sessionId}:${String(participantName).trim().toLowerCase()}`;
+};
+
+const toFiniteTimestamp = (value) => {
+  const date = new Date(value);
+  const ms = date.getTime();
+  return Number.isFinite(ms) ? ms : null;
+};
+
+const computeSpeakingDurationSeconds = (startedAt, endedAt) => {
+  const startMs = toFiniteTimestamp(startedAt);
+  const endMs = toFiniteTimestamp(endedAt);
+  if (startMs === null || endMs === null || endMs < startMs) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((endMs - startMs) / 1000));
+};
+
+const formatSpeakingDuration = (seconds) => {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '0s';
+  }
+
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (secs === 0) {
+    return `${mins}m`;
+  }
+
+  return `${mins}m ${secs}s`;
+};
 
 // Get all sessions for current instructor
 const getSessions = async (req, res) => {
@@ -760,15 +803,15 @@ const handleLiveEvent = async (req, res) => {
       });
     }
 
-    // Get the io instance
+    // Get the io instance. Persistence must not depend on broadcast availability.
     const io = global.io || req.app.get('io');
-    
-    if (!io) {
-      console.warn('[LiveEvent] ⚠️ Socket.io not available - cannot broadcast');
-      return res.json({ success: true, broadcasted: false });
-    }
+    const canBroadcast = Boolean(io);
 
-    console.log('[LiveEvent] ✅ Socket.io available, preparing to broadcast...');
+    if (!canBroadcast) {
+      console.warn('[LiveEvent] ⚠️ Socket.io not available - will persist event without broadcast');
+    } else {
+      console.log('[LiveEvent] ✅ Socket.io available, preparing to broadcast...');
+    }
 
     // Broadcast event to session room and instructor room
     const eventData = {
@@ -780,122 +823,280 @@ const handleLiveEvent = async (req, res) => {
     // Map extension event types to frontend event types
     switch (eventType) {
       case 'participant:joined':
+        {
+          const participantName =
+            data.participant?.name ||
+            data.participant_name ||
+            data.studentName ||
+            data.participantId;
+          const joinedAt = data.participant?.joinedAt || data.joinedAt || data.joined_at || eventData.timestamp;
+
+          // Persist join event so live feed survives reload and is visible across devices.
+          if (participantName) {
+            const hasOpenInterval = await AttendanceInterval.hasOpenInterval(sessionId, participantName);
+
+            if (!hasOpenInterval) {
+              await AttendanceRecord.upsertFromParticipant(sessionId, participantName, null);
+              await AttendanceInterval.create({
+                session_id: sessionId,
+                student_id: null,
+                participant_name: participantName,
+                joined_at: joinedAt
+              });
+            }
+          }
+
         console.log('[LiveEvent] 📤 Broadcasting participant:joined to:', {
           sessionRoom: `session:${sessionId}`,
           instructorRoom: `instructor_${req.user.id}`,
-          participantName: data.participant?.name
+          participantName
         });
-        io.to(`session:${sessionId}`).emit('participant:joined', {
-          session_id: sessionId,
-          participant: data.participant,
-          timestamp: eventData.timestamp
-        });
-        io.to(`instructor_${req.user.id}`).emit('attendance:updated', {
-          session_id: sessionId,
-          student_name: data.participant?.name || 'Unknown',
-          action: 'joined',
-          timestamp: eventData.timestamp
-        });
+        if (canBroadcast) {
+          io.to(`session:${sessionId}`).emit('participant:joined', {
+            session_id: sessionId,
+            participant_name: participantName,
+            student_id: null,
+            joined_at: joinedAt,
+            is_matched: false,
+            participant: data.participant,
+            timestamp: eventData.timestamp
+          });
+          io.to(`instructor_${req.user.id}`).emit('attendance:updated', {
+            session_id: sessionId,
+            student_name: participantName || 'Unknown',
+            action: 'joined',
+            timestamp: eventData.timestamp
+          });
+        }
         console.log('[LiveEvent] ✅ Broadcasted participant:joined');
         break;
+        }
 
       case 'participant:left':
-        io.to(`session:${sessionId}`).emit('participant:left', {
-          session_id: sessionId,
-          participantId: data.participantId,
-          leftAt: data.leftAt,
-          timestamp: eventData.timestamp
-        });
+        {
+          const participantName =
+            data.participant_name ||
+            data.participantId ||
+            data.participant?.name ||
+            data.studentName;
+          const leftAt = data.leftAt || data.left_at || eventData.timestamp;
+
+          let totalDurationMinutes = null;
+
+          // Persist leave event and recalculate cumulative duration for reload-safe history.
+          if (participantName) {
+            const closedInterval = await AttendanceInterval.closeInterval(sessionId, participantName, leftAt);
+
+            if (closedInterval) {
+              const durationData = await AttendanceInterval.calculateTotalDuration(sessionId, participantName);
+              totalDurationMinutes = durationData?.total_minutes || 0;
+
+              await AttendanceRecord.updateDuration(
+                sessionId,
+                participantName,
+                totalDurationMinutes,
+                leftAt
+              );
+            }
+          }
+
+        if (canBroadcast) {
+          io.to(`session:${sessionId}`).emit('participant:left', {
+            session_id: sessionId,
+            participant_name: participantName,
+            left_at: leftAt,
+            total_duration_minutes: totalDurationMinutes,
+            participantId: data.participantId,
+            leftAt: leftAt,
+            timestamp: eventData.timestamp
+          });
+        }
         break;
+        }
 
       case 'attendance:update':
-        io.to(`session:${sessionId}`).emit('attendance:updated', {
-          session_id: sessionId,
-          student_id: data.studentId,
-          student_name: data.studentName,
-          status: data.status,
-          joined_at: data.joinedAt,
-          left_at: data.leftAt,
-          timestamp: eventData.timestamp
-        });
-        io.to(`instructor_${req.user.id}`).emit('attendance:updated', {
-          session_id: sessionId,
-          student_name: data.studentName,
-          action: data.status,
-          timestamp: eventData.timestamp
-        });
+        if (canBroadcast) {
+          io.to(`session:${sessionId}`).emit('attendance:updated', {
+            session_id: sessionId,
+            student_id: data.studentId,
+            student_name: data.studentName,
+            status: data.status,
+            joined_at: data.joinedAt,
+            left_at: data.leftAt,
+            timestamp: eventData.timestamp
+          });
+          io.to(`instructor_${req.user.id}`).emit('attendance:updated', {
+            session_id: sessionId,
+            student_name: data.studentName,
+            action: data.status,
+            timestamp: eventData.timestamp
+          });
+        }
         break;
 
       case 'participation:logged':
-        console.log('[LiveEvent] 📤 Broadcasting participation:logged to rooms:', {
-          sessionRoom: `session:${sessionId}`,
-          instructorRoom: `instructor_${req.user.id}`,
-          data: {
-            studentName: data.studentName,
-            interactionType: data.interactionType
+        {
+        const participantName =
+          data.metadata?.participant_name ||
+          data.studentName ||
+          data.student_name ||
+          'Unknown participant';
+
+        const isMatched = Boolean(data.studentId);
+        const sourceEventId = data.metadata?.source_event_id || null;
+        const normalizedMetadata = {
+          ...(data.metadata || {}),
+          participant_name: participantName,
+          participant_id: data.metadata?.participant_id || null,
+          source: data.metadata?.source || 'extension',
+          is_matched: Boolean(data.studentId)
+        };
+
+        if (data.interactionType === 'mic_toggle') {
+          const eventTimestamp = eventData.timestamp;
+          const micWindowKey = buildMicWindowKey(sessionId, participantName);
+          const isMuted = typeof normalizedMetadata.isMuted === 'boolean'
+            ? normalizedMetadata.isMuted
+            : null;
+
+          if (isMuted === false && micWindowKey) {
+            activeMicWindows.set(micWindowKey, {
+              startedAt: eventTimestamp,
+              sourceEventId
+            });
+            normalizedMetadata.speakingAction = 'start';
+            normalizedMetadata.speakingStartedAt = eventTimestamp;
+          }
+
+          if (isMuted === true) {
+            let speakingStartedAt = null;
+
+            if (micWindowKey && activeMicWindows.has(micWindowKey)) {
+              speakingStartedAt = activeMicWindows.get(micWindowKey).startedAt;
+              activeMicWindows.delete(micWindowKey);
+            }
+
+            if (!speakingStartedAt) {
+              const previousUnmute = await ParticipationLog.findMostRecentMicUnmute(sessionId, participantName, eventTimestamp);
+              if (previousUnmute) {
+                speakingStartedAt = previousUnmute.timestamp;
+              }
+            }
+
+            if (speakingStartedAt) {
+              const speakingDurationSeconds = computeSpeakingDurationSeconds(speakingStartedAt, eventTimestamp);
+              if (Number.isFinite(speakingDurationSeconds)) {
+                normalizedMetadata.speakingAction = 'stop';
+                normalizedMetadata.speakingStartedAt = speakingStartedAt;
+                normalizedMetadata.speakingEndedAt = eventTimestamp;
+                normalizedMetadata.speakingDurationSeconds = speakingDurationSeconds;
+                normalizedMetadata.speakingDurationLabel = formatSpeakingDuration(speakingDurationSeconds);
+              }
+            }
+          }
+        }
+
+        // Idempotency guard: skip duplicate inserts from retries/reconnects.
+        if (sourceEventId) {
+          const existing = await ParticipationLog.findBySourceEventId(sessionId, sourceEventId);
+          if (existing) {
+            return res.json({
+              success: true,
+              broadcasted: false,
+              deduped: true,
+              eventType
+            });
+          }
+        }
+
+        const interactionValue = data.interactionValue || (
+          data.interactionType === 'mic_toggle'
+            ? (data.metadata?.isMuted ? 'muted' : 'unmuted')
+            : data.interactionType === 'reaction'
+              ? data.metadata?.reaction || 'unknown'
+              : data.interactionType === 'chat'
+                ? 'activity'
+                : data.interactionType === 'camera_toggle'
+                  ? 'camera_toggle'
+                  : null
+        );
+
+        const log = await ParticipationLog.create({
+          session_id: sessionId,
+          student_id: data.studentId || null,
+          interaction_type: data.interactionType,
+          interaction_value: interactionValue,
+          timestamp: eventData.timestamp,
+          additional_data: {
+            ...normalizedMetadata,
+            source_event_id: sourceEventId
           }
         });
         
-        // Check room membership
-        const sessionRoomMembers = io.sockets.adapter.rooms.get(`session:${sessionId}`)?.size || 0;
-        const instructorRoomMembers = io.sockets.adapter.rooms.get(`instructor_${req.user.id}`)?.size || 0;
-        console.log('[LiveEvent] Room membership:', {
-          sessionRoom: sessionRoomMembers,
-          instructorRoom: instructorRoomMembers
-        });
-        
-        io.to(`session:${sessionId}`).emit('participation:logged', {
+        const socketPayload = {
+          id: log.id,
           session_id: sessionId,
-          student_id: data.studentId,
-          student_name: data.studentName,
+          student_id: data.studentId || null,
+          student_name: data.studentName || participantName,
+          participant_name: participantName,
+          is_matched: isMatched,
           interaction_type: data.interactionType,
-          metadata: data.metadata,
+          metadata: {
+            ...normalizedMetadata,
+            source_event_id: sourceEventId
+          },
           timestamp: eventData.timestamp
-        });
-        io.to(`instructor_${req.user.id}`).emit('participation:logged', {
-          session_id: sessionId,
-          student_name: data.studentName,
-          interaction_type: data.interactionType,
-          timestamp: eventData.timestamp
-        });
-        console.log('[LiveEvent] ✅ Broadcasted participation:logged to', sessionRoomMembers + instructorRoomMembers, 'clients');
+        };
+
+        if (canBroadcast) {
+          io.to(`session:${sessionId}`).emit('participation:logged', socketPayload);
+          io.to(`instructor_${req.user.id}`).emit('participation:logged', socketPayload);
+        }
         break;
+        }
 
       case 'chat:message':
-        io.to(`session:${sessionId}`).emit('chat:message', {
-          session_id: sessionId,
-          sender: data.sender,
-          message: data.message,
-          timestamp: eventData.timestamp
-        });
+        if (canBroadcast) {
+          io.to(`session:${sessionId}`).emit('chat:message', {
+            session_id: sessionId,
+            sender: data.sender,
+            message: data.message,
+            timestamp: eventData.timestamp
+          });
+        }
         break;
 
       case 'session:extension_connected':
-        io.to(`instructor_${req.user.id}`).emit('session:extension_connected', {
-          session_id: sessionId,
-          timestamp: eventData.timestamp
-        });
+        if (canBroadcast) {
+          io.to(`instructor_${req.user.id}`).emit('session:extension_connected', {
+            session_id: sessionId,
+            timestamp: eventData.timestamp
+          });
+        }
         console.log(`[LiveEvent] Extension connected to session ${sessionId}`);
         break;
 
       case 'session:extension_disconnected':
-        io.to(`instructor_${req.user.id}`).emit('session:extension_disconnected', {
-          session_id: sessionId,
-          timestamp: eventData.timestamp
-        });
+        if (canBroadcast) {
+          io.to(`instructor_${req.user.id}`).emit('session:extension_disconnected', {
+            session_id: sessionId,
+            timestamp: eventData.timestamp
+          });
+        }
         console.log(`[LiveEvent] Extension disconnected from session ${sessionId}`);
         break;
 
       default:
         console.log('[LiveEvent] 📤 Broadcasting unknown event type:', eventType);
         // Forward unknown events as-is
-        io.to(`session:${sessionId}`).emit(eventType, eventData);
+        if (canBroadcast) {
+          io.to(`session:${sessionId}`).emit(eventType, eventData);
+        }
     }
 
-    console.log('[LiveEvent] ✅ Response: Broadcasting complete for', eventType);
     res.json({
       success: true,
-      broadcasted: true,
+      broadcasted: canBroadcast,
       eventType
     });
 

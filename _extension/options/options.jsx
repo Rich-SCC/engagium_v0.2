@@ -17,11 +17,6 @@ function OptionsApp() {
   const [userInfo, setUserInfo] = useState(null);
   const [classes, setClasses] = useState([]);
   const [meetingMappings, setMeetingMappings] = useState({});
-  const [autoStart, setAutoStart] = useState(false);
-  const [matchThreshold, setMatchThreshold] = useState(0.7);
-  const [autoOpenPopup, setAutoOpenPopup] = useState(false);
-  const [showJoinPrompt, setShowJoinPrompt] = useState(false);
-  const [showTrackingReminder, setShowTrackingReminder] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isVerifyingAuth, setIsVerifyingAuth] = useState(false);
   const [message, setMessage] = useState(null);
@@ -49,12 +44,7 @@ function OptionsApp() {
       const storage = await chrome.storage.local.get([
         STORAGE_KEYS.AUTH_TOKEN,
         STORAGE_KEYS.USER_INFO,
-        STORAGE_KEYS.MEETING_MAPPINGS,
-        STORAGE_KEYS.AUTO_START,
-        STORAGE_KEYS.MATCH_THRESHOLD,
-        STORAGE_KEYS.AUTO_OPEN_POPUP,
-        STORAGE_KEYS.SHOW_JOIN_PROMPT,
-        STORAGE_KEYS.SHOW_TRACKING_REMINDER
+        STORAGE_KEYS.MEETING_MAPPINGS
       ]);
 
       if (storage[STORAGE_KEYS.AUTH_TOKEN]) {
@@ -96,11 +86,6 @@ function OptionsApp() {
       }
 
       setMeetingMappings(storage[STORAGE_KEYS.MEETING_MAPPINGS] || {});
-      setAutoStart(storage[STORAGE_KEYS.AUTO_START] || false);
-      setMatchThreshold(storage[STORAGE_KEYS.MATCH_THRESHOLD] || 0.7);
-      setAutoOpenPopup(storage[STORAGE_KEYS.AUTO_OPEN_POPUP] || false);
-      setShowJoinPrompt(storage[STORAGE_KEYS.SHOW_JOIN_PROMPT] || false);
-      setShowTrackingReminder(storage[STORAGE_KEYS.SHOW_TRACKING_REMINDER] !== undefined ? storage[STORAGE_KEYS.SHOW_TRACKING_REMINDER] : true);
 
       setIsVerifyingAuth(false);
       setIsLoading(false);
@@ -220,18 +205,6 @@ function OptionsApp() {
     showMessage('success', 'Mapping removed');
   }
 
-  async function handleSavePreferences() {
-    await chrome.storage.local.set({
-      [STORAGE_KEYS.AUTO_START]: autoStart,
-      [STORAGE_KEYS.MATCH_THRESHOLD]: matchThreshold,
-      [STORAGE_KEYS.AUTO_OPEN_POPUP]: autoOpenPopup,
-      [STORAGE_KEYS.SHOW_JOIN_PROMPT]: showJoinPrompt,
-      [STORAGE_KEYS.SHOW_TRACKING_REMINDER]: showTrackingReminder
-    });
-
-    showMessage('success', 'Preferences saved successfully');
-  }
-
   function sendMessage(type, data = {}) {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ type, ...data }, (response) => {
@@ -303,18 +276,6 @@ function OptionsApp() {
             disabled={!isAuthenticated}
           >
             Class Mapping
-          </button>
-          <button 
-            className={`tab ${activeTab === 'preferences' ? 'active' : ''}`}
-            onClick={() => setActiveTab('preferences')}
-          >
-            Preferences
-          </button>
-          <button 
-            className={`tab ${activeTab === 'debug' ? 'active' : ''}`}
-            onClick={() => setActiveTab('debug')}
-          >
-            🔧 Debug
           </button>
         </div>
 
@@ -477,106 +438,6 @@ function OptionsApp() {
             </div>
           )}
 
-          {/* Preferences Tab */}
-          {activeTab === 'preferences' && (
-            <div className="section">
-              <h2>Preferences</h2>
-              <p className="section-description">
-                Customize extension behavior.
-              </p>
-
-              <div className="card">
-                <h3>Tracking Behavior</h3>
-                <div className="form-group">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={autoStart}
-                      onChange={(e) => setAutoStart(e.target.checked)}
-                    />
-                    <span>Auto-start tracking when joining mapped meetings</span>
-                  </label>
-                  <p className="help-text">
-                    Automatically start tracking when you join a Google Meet call that's mapped to a class.
-                  </p>
-                </div>
-
-                <div className="form-group">
-                  <label>Student Name Matching Threshold</label>
-                  <p className="help-text">
-                    How similar names must be to match (0.5 = loose, 1.0 = exact)
-                  </p>
-                  <div className="slider-group">
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="1.0"
-                      step="0.05"
-                      value={matchThreshold}
-                      onChange={(e) => setMatchThreshold(parseFloat(e.target.value))}
-                      className="slider"
-                    />
-                    <span className="slider-value">{matchThreshold.toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="card">
-                <h3>Quality of Life Features</h3>
-                
-                <div className="form-group">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={autoOpenPopup}
-                      onChange={(e) => setAutoOpenPopup(e.target.checked)}
-                    />
-                    <span>Auto-open popup for known class meetings</span>
-                  </label>
-                  <p className="help-text">
-                    Automatically opens the extension popup when you join a meeting that's mapped to a class.
-                  </p>
-                </div>
-
-                <div className="form-group">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={showJoinPrompt}
-                      onChange={(e) => setShowJoinPrompt(e.target.checked)}
-                    />
-                    <span>Show prompt to join meeting when tracking starts</span>
-                  </label>
-                  <p className="help-text">
-                    Displays a visual prompt if you start tracking while still in the waiting room.
-                  </p>
-                </div>
-
-                <div className="form-group">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={showTrackingReminder}
-                      onChange={(e) => setShowTrackingReminder(e.target.checked)}
-                    />
-                    <span>Show tracking reminder after 60 seconds</span>
-                  </label>
-                  <p className="help-text">
-                    Reminds you to start tracking if you've been in the meeting for 60 seconds without starting. Also enables retroactive participant capture when starting late.
-                  </p>
-                </div>
-              </div>
-
-              <button className="button button-primary" onClick={handleSavePreferences}>
-                Save Preferences
-              </button>
-            </div>
-          )}
-
-          {/* Debug Tab */}
-          {activeTab === 'debug' && (
-            <DebugDashboard />
-          )}
         </div>
       </div>
     </div>

@@ -10,7 +10,6 @@ import {
   getClasses,
   getStudentsByClass,
   submitBulkAttendance,
-  submitBulkParticipation,
   createStudentsBulk,
   startSession as apiStartSession,
   endSession as apiEndSession,
@@ -97,6 +96,15 @@ async function handleMessage(message, sender) {
         participant: data
       }).catch(() => {}); // Ignore if no listeners
       return leaveResult;
+
+    case MESSAGE_TYPES.MIC_TOGGLE:
+    case MESSAGE_TYPES.CHAT_ACTIVITY:
+    case MESSAGE_TYPES.REACTION:
+    case MESSAGE_TYPES.HAND_RAISE:
+      return await sessionManager.handleParticipationEvent({
+        type,
+        ...data
+      });
       
     case MESSAGE_TYPES.PLATFORM_SWITCH:
       return await handlePlatformSwitch(data);
@@ -169,6 +177,11 @@ async function handleMessage(message, sender) {
       return { cleared: true };
 
     default:
+      logger.warn(' Unknown message type received:', {
+        type,
+        senderTabId: sender?.tab?.id || null,
+        senderUrl: sender?.url || null
+      });
       throw new Error(`Unknown message type: ${type}`);
   }
 }
@@ -231,17 +244,13 @@ async function handleMeetingDetected(data, sender) {
             currentMeetingDetection.mapped_class_name = formattedClassName;
             currentMeetingDetection.auto_mapped = true;
             
-            // Auto-open popup if setting is enabled and meeting is auto-mapped
-            const storage = await chrome.storage.local.get([STORAGE_KEYS.AUTO_OPEN_POPUP]);
-            const autoOpenPopup = storage[STORAGE_KEYS.AUTO_OPEN_POPUP] || false;
-            if (autoOpenPopup) {
-              logger.log(' Auto-opening popup for known class meeting');
-              try {
-                await chrome.action.openPopup();
-              } catch (error) {
-                // openPopup() might fail if called too soon or in some contexts
-                logger.log(' Could not auto-open popup:', error.message);
-              }
+            // Always auto-open popup for known class meetings.
+            logger.log(' Auto-opening popup for known class meeting');
+            try {
+              await chrome.action.openPopup();
+            } catch (error) {
+              // openPopup() might fail if called too soon or in some contexts
+              logger.log(' Could not auto-open popup:', error.message);
             }
             
             break;
@@ -384,10 +393,12 @@ async function handleStartSession(data) {
   try {
     // Fetch class name if not provided
     let className = data.class_name;
-    if (!className) {
+    let classSection = data.class_section;
+    if (!className || !classSection) {
       const classes = await getClasses(); // Already returns array
       const matchedClass = classes.find(c => c.id === class_id);
       className = matchedClass?.name || 'Unknown Class';
+      classSection = matchedClass?.section || 'AUTO';
     }
 
     // Create session via session manager (calls backend API)
@@ -412,7 +423,9 @@ async function handleStartSession(data) {
         await addClassLink(class_id, {
           link: formattedLink,
           platform: platform || PLATFORMS.GOOGLE_MEET,
-          is_active: true
+          is_active: true,
+          section_code: classSection,
+          meeting_id: meeting_id
         });
         logger.log(' Meeting link saved to class');
       } catch (linkError) {
@@ -483,10 +496,8 @@ async function handleEndSession(data) {
       // Add to sync queue for retry (will be processed before session ends)
       try {
         const attendancePayload = await buildAttendancePayload(sessionId);
-        const participationPayload = await buildParticipationPayload(sessionId);
 
         await syncQueueManager.enqueue('attendance', sessionId, attendancePayload);
-        await syncQueueManager.enqueue('participation', sessionId, participationPayload);
 
         logger.log(' Session data queued for retry');
       } catch (queueError) {
@@ -635,18 +646,11 @@ async function submitSessionData(sessionId) {
 
   // Build payloads
   const attendancePayload = await buildAttendancePayload(sessionId);
-  const participationPayload = await buildParticipationPayload(sessionId);
 
   // Submit attendance
   if (attendancePayload.attendance.length > 0) {
     await submitBulkAttendance(sessionId, attendancePayload.attendance);
     logger.log(' Attendance submitted:', attendancePayload.attendance.length);
-  }
-
-  // Submit participation
-  if (participationPayload.logs.length > 0) {
-    await submitBulkParticipation(sessionId, participationPayload.logs);
-    logger.log(' Participation submitted:', participationPayload.logs.length);
   }
 }
 
@@ -666,30 +670,6 @@ async function buildAttendancePayload(sessionId) {
   return { attendance };
 }
 
-async function buildParticipationPayload(sessionId) {
-  const participants = await getParticipantsBySession(sessionId);
-  const events = await getEventsBySession(sessionId);
-
-  const logs = [];
-
-  for (const event of events) {
-    const participant = participants.find(p => p.id === event.participant_id);
-    
-    if (!participant || !participant.matched_student_id) {
-      continue; // Skip unmatched
-    }
-
-    logs.push({
-      student_id: participant.matched_student_id,
-      interaction_type: event.event_type,
-      timestamp: event.timestamp,
-      metadata: event.event_data
-    });
-  }
-
-  return { logs };
-}
-
 // ============================================================================
 // Badge Management
 // ============================================================================
@@ -703,14 +683,12 @@ chrome.runtime.onInstalled.addListener((details) => {
 
   if (details.reason === 'install') {
     // Set default settings
-    setSetting('auto_start', false);
-    setSetting('match_threshold', 0.7);
     setSetting('meeting_mappings', {});
     
-    // QoL features (default: OFF for non-intrusive behavior)
-    setSetting('auto_open_popup', false); // Auto-open popup for known class meetings
+    // QoL features are always enabled.
+    setSetting('auto_open_popup', true); // Auto-open popup for known class meetings
     setSetting('show_join_prompt', false); // Show visual prompt for Join Now button
-    setSetting('show_tracking_reminder', true); // Show reminder if not tracking after 60s (default ON - helpful)
+    setSetting('show_tracking_reminder', true); // Show reminder if not tracking after 60s
 
     // Open options page
     chrome.runtime.openOptionsPage();

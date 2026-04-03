@@ -132,14 +132,26 @@ export async function getClassById(classId) {
 /**
  * Add a meeting link to a class (for auto-mapping)
  * @param {string} classId 
- * @param {Object} linkData - { link, platform?, is_active? }
+ * @param {Object} linkData - { link, platform?, is_active?, section_code?, meeting_id? }
  * @returns {Promise<Object>}
  */
 export async function addClassLink(classId, linkData) {
   logger.log('Adding class link:', {
     classId,
-    link: linkData.link
+    link: linkData.link,
+    sectionCode: linkData.section_code,
+    meetingId: linkData.meeting_id
   });
+
+  // Format label as: section - meeting_id (platform)
+  // Falls back to generic label if section code not available
+  let label = 'Auto-mapped from extension';
+  if (linkData.section_code && linkData.meeting_id) {
+    const platformDisplay = (linkData.platform || 'meet').toLowerCase();
+    label = `${linkData.section_code} - ${linkData.meeting_id} (${platformDisplay})`;
+  } else if (linkData.section_code) {
+    label = linkData.section_code;
+  }
 
   // Don't clear token on 401 for this non-critical operation
   return await apiRequest(`/classes/${classId}/links`, {
@@ -147,7 +159,7 @@ export async function addClassLink(classId, linkData) {
     body: JSON.stringify({
       link_url: linkData.link,
       link_type: linkData.platform === PLATFORMS.GOOGLE_MEET ? 'meet' : (linkData.platform || 'meet'),
-      label: 'Auto-mapped from extension',
+      label: label,
       is_primary: linkData.is_active ?? true
     }),
     clearTokenOn401: false

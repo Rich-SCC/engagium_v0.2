@@ -67,8 +67,9 @@ function promptUserAfterRefresh(state, onMeetingEnded) {
       }
     </style>
     <div style="margin-bottom: 16px;">
-      <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 500; color: #202124;">
-        🎓 Engagium Session Active
+      <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 500; color: #202124; display: flex; align-items: center; gap: 8px;">
+        <img src="${chrome.runtime.getURL('assets/icons/icon32.png')}" alt="Engagium" style="width: 18px; height: 18px; display: block;">
+        <span>Engagium Session Active</span>
       </h3>
       <p style="margin: 0; font-size: 13px; color: #5f6368; line-height: 1.4;">
         You refreshed the page while tracking attendance. Do you want to end the current session?

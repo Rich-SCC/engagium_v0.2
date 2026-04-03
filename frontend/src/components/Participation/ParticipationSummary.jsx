@@ -2,8 +2,8 @@ import React from 'react';
 import {
   ChatBubbleLeftIcon,
   FaceSmileIcon,
+  HandRaisedIcon,
   MicrophoneIcon,
-  VideoCameraIcon,
   UserGroupIcon,
   ChartBarIcon
 } from '@heroicons/react/24/outline';
@@ -32,10 +32,38 @@ const ParticipationSummary = ({ summary, interactionSummary }) => {
 
   // Create interaction type breakdown - only actual participation events
   const interactionTypes = [
-    { type: 'chat', label: 'Chat Messages', icon: ChatBubbleLeftIcon, color: 'blue' },
-    { type: 'reaction', label: 'Reactions', icon: FaceSmileIcon, color: 'yellow' },
-    { type: 'mic_toggle', label: 'Mic Toggles', icon: MicrophoneIcon, color: 'green' },
-    { type: 'camera_toggle', label: 'Camera Toggles', icon: VideoCameraIcon, color: 'purple' }
+    {
+      type: 'chat',
+      label: 'Chat Messages',
+      icon: ChatBubbleLeftIcon,
+      badgeClass: 'bg-blue-100',
+      iconClass: 'text-blue-600',
+      barClass: 'bg-blue-600'
+    },
+    {
+      type: 'reaction',
+      label: 'Reactions',
+      icon: FaceSmileIcon,
+      badgeClass: 'bg-yellow-100',
+      iconClass: 'text-yellow-600',
+      barClass: 'bg-yellow-600'
+    },
+    {
+      type: 'mic_toggle',
+      label: 'Mic Toggles',
+      icon: MicrophoneIcon,
+      badgeClass: 'bg-indigo-100',
+      iconClass: 'text-indigo-600',
+      barClass: 'bg-indigo-600'
+    },
+    {
+      type: 'hand_raise',
+      label: 'Hand Raises',
+      icon: HandRaisedIcon,
+      badgeClass: 'bg-sky-100',
+      iconClass: 'text-sky-600',
+      barClass: 'bg-sky-600'
+    }
   ];
 
   const getInteractionCount = (type) => {
@@ -136,7 +164,7 @@ const ParticipationSummary = ({ summary, interactionSummary }) => {
           Participation events tracked during the session (excludes join/leave events)
         </p>
         <div className="space-y-4">
-          {interactionTypes.map(({ type, label, icon: Icon, color }) => {
+          {interactionTypes.map(({ type, label, icon: Icon, badgeClass, iconClass, barClass }) => {
             const count = getInteractionCount(type);
             const percentage = totalInteractions > 0 
               ? ((count / totalInteractions) * 100).toFixed(1) 
@@ -146,8 +174,8 @@ const ParticipationSummary = ({ summary, interactionSummary }) => {
               <div key={type}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
-                    <div className={`p-2 bg-${color}-100 rounded-lg`}>
-                      <Icon className={`w-5 h-5 text-${color}-600`} />
+                    <div className={`p-2 rounded-lg ${badgeClass}`}>
+                      <Icon className={`w-5 h-5 ${iconClass}`} />
                     </div>
                     <span className="text-sm font-medium text-gray-700">{label}</span>
                   </div>
@@ -158,7 +186,7 @@ const ParticipationSummary = ({ summary, interactionSummary }) => {
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2 mb-1">
                   <div
-                    className={`bg-${color}-600 h-2 rounded-full transition-all`}
+                    className={`h-2 rounded-full transition-all ${barClass}`}
                     style={{ width: `${percentage}%` }}
                   />
                 </div>

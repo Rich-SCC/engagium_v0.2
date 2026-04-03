@@ -1,9 +1,11 @@
 import axios from 'axios';
 import { getToken, getRefreshToken, setToken, removeTokens } from '@/utils/auth';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
 // Create axios instance
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -79,7 +81,7 @@ api.interceptors.response.use(
 
       try {
         // Attempt to refresh the access token
-        const response = await axios.post('/api/auth/refresh-token', {
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh-token`, {
           refreshToken
         });
 

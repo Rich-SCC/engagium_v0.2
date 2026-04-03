@@ -52,6 +52,39 @@ engagium_v0.2/
 
 ## Quick Start
 
+### Run Everything with Docker Compose (Recommended for Iteration)
+
+This starts PostgreSQL, backend API, and frontend in one command with hot-reload friendly volumes.
+
+1. **Create compose env file**
+```bash
+cp .env.compose.example .env
+```
+
+2. **Start the full stack**
+```bash
+docker compose up --build
+```
+
+3. **Access services**
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:3001
+- PostgreSQL: localhost:5432
+
+4. **Stop services**
+```bash
+docker compose down
+```
+
+5. **Reset database volume (if needed)**
+```bash
+docker compose down -v
+```
+
+Notes:
+- Database schema auto-initializes from `database/schema.sql` on first DB startup.
+- Frontend uses `VITE_API_URL` from Compose, so no hardcoded localhost API calls are required.
+
 ### Prerequisites
 - Node.js 18+
 - PostgreSQL 15+

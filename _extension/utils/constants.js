@@ -11,6 +11,10 @@ export const MESSAGE_TYPES = {
   MEETING_LEFT: 'MEETING_LEFT',
   PARTICIPANT_JOINED: 'PARTICIPANT_JOINED',
   PARTICIPANT_LEFT: 'PARTICIPANT_LEFT',
+  CHAT_ACTIVITY: 'CHAT_ACTIVITY',
+  REACTION: 'REACTION',
+  HAND_RAISE: 'HAND_RAISE',
+  MIC_TOGGLE: 'MIC_TOGGLE',
   PLATFORM_SWITCH: 'PLATFORM_SWITCH',
   
   // From popup to background
@@ -46,8 +50,13 @@ export const ATTENDANCE_STATUS = {
 };
 
 export const INTERACTION_TYPES = {
-  // Removed participation event types - see __documentation/Extension/PLANNED_FEATURES.md
-  // Future: CHAT, REACTION, HAND_RAISE, MIC_ON, CAMERA_ON
+  CHAT: 'chat',
+  REACTION: 'reaction',
+  HAND_RAISE: 'hand_raise',
+  MIC_TOGGLE: 'mic_toggle',
+  CAMERA_TOGGLE: 'camera_toggle',
+  MANUAL_ENTRY: 'manual_entry',
+  PLATFORM_SWITCH: 'platform_switch',
   QUESTION: 'question',
   ANSWER: 'answer'
 };
@@ -56,8 +65,6 @@ export const STORAGE_KEYS = {
   AUTH_TOKEN: 'auth_token',
   USER_INFO: 'user_info',
   MEETING_MAPPINGS: 'meeting_mappings',
-  AUTO_START: 'auto_start',
-  MATCH_THRESHOLD: 'match_threshold',
   LAST_SYNC: 'last_sync',
   AUTO_OPEN_POPUP: 'auto_open_popup',
   SHOW_JOIN_PROMPT: 'show_join_prompt',
@@ -97,8 +104,6 @@ export const SYNC_RETRY = {
 };
 
 export const DEFAULTS = {
-  AUTO_START: false,
-  MATCH_THRESHOLD: 0.7,
   MAX_PARTICIPANTS: 500,
   DATA_RETENTION_DAYS: 7
 };

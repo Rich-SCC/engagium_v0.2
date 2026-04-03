@@ -15,6 +15,7 @@ const extensionTokenRoutes = require('./src/routes/extensionTokens');
 
 // Import socket handlers
 const socketHandler = require('./src/socket/socketHandler');
+const { ensureParticipationLogsSchema } = require('./src/config/database');
 
 const app = express();
 const server = http.createServer(app);
@@ -80,8 +81,18 @@ app.use('*', (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 
-server.listen(PORT, () => {
-  console.log(`🚀 Engagium Backend Server running on port ${PORT}`);
-  console.log(`📊 Health check available at http://localhost:${PORT}/health`);
-  console.log(`🔌 Socket.io server ready for connections`);
-});
+async function startServer() {
+  try {
+    await ensureParticipationLogsSchema();
+  } catch (error) {
+    console.error('❌ Failed to apply participation log schema migration:', error);
+  }
+
+  server.listen(PORT, () => {
+    console.log(`🚀 Engagium Backend Server running on port ${PORT}`);
+    console.log(`📊 Health check available at http://localhost:${PORT}/health`);
+    console.log(`🔌 Socket.io server ready for connections`);
+  });
+}
+
+startServer();

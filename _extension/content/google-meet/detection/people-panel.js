@@ -11,27 +11,27 @@
  * - Raised hands section
  * - Reliable for all view modes
  * 
- * SUPPORTS BOTH UI VERSIONS (December 2025):
- * Google is A/B testing two different UIs - handled by DOM manager
+ * Supports panel behavior variants via DOM manager capability detection.
  * 
  * Based on GOOGLE_MEET_DOM_REFERENCE.md (November 2025)
  * Uses ARIA-based accessibility selectors
  */
 
 import { EVENT_TYPES, SELECTORS } from '../core/config.js';
-import { queueEvent, sendImmediate } from '../core/event-emitter.js';
+import { sendImmediate } from '../core/event-emitter.js';
 import { debounce } from '../core/utils.js';
 import { now } from '../../../utils/date-utils.js';
+import { MESSAGE_TYPES } from '../../../utils/constants.js';
 import { 
   isPeoplePanelOpen as checkPanelOpen,
   findPeopleButton,
-  detectUIVersion,
   findParticipantsList as findList
 } from '../dom/dom-manager.js';
 import {
   openPeoplePanel as openPanel,
   closePeoplePanel as closePanel
 } from '../dom/panel-manager.js';
+import { emitMicToggleSimple } from './mic-toggle-detector.js';
 
 // Cache for known participants (to detect changes)
 let knownParticipants = new Map();
@@ -278,11 +278,7 @@ export function startObserving() {
     if (changes.statusChanged.length > 0) {
       for (const change of changes.statusChanged) {
         if (change.muteChanged) {
-          queueEvent(EVENT_TYPES.MIC_STATUS_CHANGED, {
-            name: change.participant.name,
-            isMuted: change.participant.isMuted,
-            timestamp: now()
-          });
+          emitMicToggleSimple(change.participant.name, change.participant.isMuted, change.wasMuted);
         }
       }
       updateParticipantSnapshot();
@@ -397,5 +393,5 @@ export const _internal = {
   detectChanges
 };
 
-// Re-export detectUIVersion and findPeopleButton from DOM manager
+// Re-export compatibility utilities from DOM manager
 export { detectUIVersion, findPeopleButton } from '../dom/dom-manager.js';

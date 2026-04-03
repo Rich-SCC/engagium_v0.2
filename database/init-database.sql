@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS attendance_intervals (
 CREATE TABLE IF NOT EXISTS participation_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    student_id UUID REFERENCES students(id) ON DELETE SET NULL,
     interaction_type interaction_type NOT NULL,
     interaction_value VARCHAR(255),
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

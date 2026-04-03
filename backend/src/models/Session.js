@@ -201,8 +201,15 @@ class Session {
         COUNT(CASE WHEN interaction_type = 'reaction' THEN 1 END) as reactions,
         COUNT(CASE WHEN interaction_type = 'mic_toggle' THEN 1 END) as mic_toggles,
         COUNT(CASE WHEN interaction_type = 'camera_toggle' THEN 1 END) as camera_toggles
-      FROM participation_logs
-      WHERE session_id = $1
+      FROM participation_logs pl
+      WHERE pl.session_id = $1
+        AND NOT (
+          pl.interaction_type = 'mic_toggle'
+          AND (
+            COALESCE(pl.additional_data->>'speakingAction', '') = 'start'
+            OR COALESCE(pl.additional_data->>'isMuted', '') = 'false'
+          )
+        )
     `;
 
     const result = await db.query(query, [sessionId]);

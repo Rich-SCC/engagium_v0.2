@@ -14,7 +14,7 @@ const ParticipationFilters = ({
     { value: 'chat', label: 'Chat' },
     { value: 'reaction', label: 'Reaction' },
     { value: 'mic_toggle', label: 'Mic Toggle' },
-    { value: 'camera_toggle', label: 'Camera Toggle' },
+    { value: 'hand_raise', label: 'Hand Raise' },
     { value: 'manual_entry', label: 'Manual Entry' }
   ];
 
