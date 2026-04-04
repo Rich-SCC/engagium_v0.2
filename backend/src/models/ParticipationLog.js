@@ -45,12 +45,16 @@ class ParticipationLog {
     let query = `
       SELECT
         pl.*,
+        COALESCE(pl.student_id, ar.student_id) as student_id,
         s.full_name,
-        s.student_id,
+        s.student_id as student_number,
         COALESCE(s.full_name, pl.additional_data->>'participant_name') as student_name,
         COALESCE(pl.additional_data->>'participant_name', s.full_name) as participant_name
       FROM participation_logs pl
-      LEFT JOIN students s ON pl.student_id = s.id
+      LEFT JOIN attendance_records ar
+        ON ar.session_id = pl.session_id
+       AND LOWER(ar.participant_name) = LOWER(COALESCE(pl.additional_data->>'participant_name', ''))
+      LEFT JOIN students s ON s.id = COALESCE(pl.student_id, ar.student_id)
       WHERE pl.session_id = $1
         AND ${ParticipationLog.getMicStartFilterSql('pl')}
     `;
@@ -93,12 +97,16 @@ class ParticipationLog {
     let dataQuery = `
       SELECT
         pl.*,
+        COALESCE(pl.student_id, ar.student_id) as student_id,
         s.full_name,
-        s.student_id,
+        s.student_id as student_number,
         COALESCE(s.full_name, pl.additional_data->>'participant_name') as student_name,
         COALESCE(pl.additional_data->>'participant_name', s.full_name) as participant_name
       FROM participation_logs pl
-      LEFT JOIN students s ON pl.student_id = s.id
+      LEFT JOIN attendance_records ar
+        ON ar.session_id = pl.session_id
+       AND LOWER(ar.participant_name) = LOWER(COALESCE(pl.additional_data->>'participant_name', ''))
+      LEFT JOIN students s ON s.id = COALESCE(pl.student_id, ar.student_id)
       WHERE pl.session_id = $1
         AND ${ParticipationLog.getMicStartFilterSql('pl')}
     `;
@@ -170,7 +178,7 @@ class ParticipationLog {
       SELECT
         s.id as student_id,
         s.full_name,
-        s.student_id,
+        s.student_id as student_number,
         COUNT(pl.id) as total_interactions,
         COUNT(CASE WHEN pl.interaction_type = 'manual_entry' THEN 1 END) as manual_entries,
         COUNT(CASE WHEN pl.interaction_type = 'chat' THEN 1 END) as chat_messages,
@@ -199,11 +207,15 @@ class ParticipationLog {
     const query = `
       SELECT 
         pl.*, 
+        COALESCE(pl.student_id, ar.student_id) as student_id,
         COALESCE(s.full_name, pl.additional_data->>'participant_name') as full_name,
-        s.student_id,
+        s.student_id as student_number,
         COALESCE(s.full_name, pl.additional_data->>'participant_name') as student_name
       FROM participation_logs pl
-      LEFT JOIN students s ON pl.student_id = s.id
+      LEFT JOIN attendance_records ar
+        ON ar.session_id = pl.session_id
+       AND LOWER(ar.participant_name) = LOWER(COALESCE(pl.additional_data->>'participant_name', ''))
+      LEFT JOIN students s ON s.id = COALESCE(pl.student_id, ar.student_id)
       WHERE pl.session_id = $1
         AND ${ParticipationLog.getMicStartFilterSql('pl')}
         AND pl.timestamp >= NOW() - INTERVAL '1 minute' * $2
@@ -230,6 +242,22 @@ class ParticipationLog {
 
     const result = await db.query(query, [sessionId, sourceEventId]);
     return result.rows[0] || null;
+  }
+
+  static async linkParticipantLogsToStudent(sessionId, participantName, studentId) {
+    if (!sessionId || !participantName || !studentId) {
+      return 0;
+    }
+
+    const query = `
+      UPDATE participation_logs
+      SET student_id = $1
+      WHERE session_id = $2
+        AND LOWER(COALESCE(additional_data->>'participant_name', '')) = LOWER($3)
+    `;
+
+    const result = await db.query(query, [studentId, sessionId, participantName]);
+    return result.rowCount || 0;
   }
 
   static async findMostRecentMicUnmute(sessionId, participantName, beforeTimestamp) {

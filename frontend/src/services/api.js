@@ -254,6 +254,8 @@ export const sessionsAPI = {
     api.post(`/sessions/${id}/attendance/bulk`, { attendance }),
   getAttendance: (id) => api.get(`/sessions/${id}/attendance`),
   getAttendanceWithIntervals: (id) => api.get(`/sessions/${id}/attendance/full`),
+  getBulkAttendanceWithIntervals: (sessionIds) =>
+    api.post('/sessions/attendance/full/bulk', { sessionIds }),
   getAttendanceStats: (id) => api.get(`/sessions/${id}/attendance/stats`),
   linkParticipantToStudent: (id, data) => api.post(`/sessions/${id}/attendance/link`, data),
 };
@@ -273,6 +275,8 @@ export const participationAPI = {
     api.post(`/participation/sessions/${sessionId}/logs`, logData),
   addBulkLogs: (sessionId, logs) =>
     api.post(`/participation/sessions/${sessionId}/logs/bulk`, { logs }),
+  getBulkLogs: (sessionIds) =>
+    api.post('/participation/sessions/logs/bulk', { sessionIds }),
   getSummary: (sessionId) =>
     api.get(`/participation/sessions/${sessionId}/summary`),
   getRecentActivity: (sessionId, minutes = 5) =>

@@ -6,8 +6,117 @@ const AttendanceRecord = require('../models/AttendanceRecord');
 const AttendanceInterval = require('../models/AttendanceInterval');
 const { normalizeMeetingLink } = require('../utils/urlUtils');
 
+const db = require('../config/database');
 // Tracks active speaking windows keyed by "sessionId:participantName".
 const activeMicWindows = new Map();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const normalizeUuidList = (values) => [...new Set(
+  values
+    .map((value) => String(value || '').trim())
+    .filter((value) => UUID_REGEX.test(value))
+)];
+
+const getBulkSessionAttendanceWithIntervals = async (req, res) => {
+  try {
+    const { sessionIds } = req.body;
+
+    if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'sessionIds must be a non-empty array'
+      });
+    }
+
+    const normalizedSessionIds = normalizeUuidList(sessionIds);
+
+    if (normalizedSessionIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'sessionIds must contain valid UUIDs'
+      });
+    }
+
+    const accessQuery = `
+      SELECT s.id
+      FROM sessions s
+      JOIN classes c ON c.id = s.class_id
+      WHERE s.id = ANY($1)
+        AND c.instructor_id = $2
+    `;
+    const accessResult = await db.query(accessQuery, [normalizedSessionIds, req.user.id]);
+    const allowedSessionIds = accessResult.rows.map((row) => String(row.id));
+
+    if (allowedSessionIds.length !== normalizedSessionIds.length) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied for one or more sessions'
+      });
+    }
+
+    const attendanceQuery = `
+      SELECT
+        ar.*,
+        s.full_name as student_name,
+        s.student_id as student_number
+      FROM attendance_records ar
+      LEFT JOIN students s ON ar.student_id = s.id
+      WHERE ar.session_id = ANY($1)
+      ORDER BY ar.session_id ASC, ar.participant_name ASC
+    `;
+
+    const intervalsQuery = `
+      SELECT *
+      FROM attendance_intervals
+      WHERE session_id = ANY($1)
+      ORDER BY session_id ASC, participant_name ASC, joined_at ASC
+    `;
+
+    const [attendanceResult, intervalsResult] = await Promise.all([
+      db.query(attendanceQuery, [allowedSessionIds]),
+      db.query(intervalsQuery, [allowedSessionIds])
+    ]);
+
+    const groupedIntervals = intervalsResult.rows.reduce((accumulator, interval) => {
+      const sessionId = String(interval.session_id);
+      const key = `${sessionId}::${interval.participant_name}`;
+      if (!accumulator[key]) {
+        accumulator[key] = [];
+      }
+      accumulator[key].push(interval);
+      return accumulator;
+    }, {});
+
+    const groupedAttendance = allowedSessionIds.reduce((accumulator, sessionId) => {
+      accumulator[sessionId] = [];
+      return accumulator;
+    }, {});
+
+    attendanceResult.rows.forEach((record) => {
+      const sessionId = String(record.session_id);
+      const key = `${sessionId}::${record.participant_name}`;
+      if (!groupedAttendance[sessionId]) {
+        groupedAttendance[sessionId] = [];
+      }
+
+      groupedAttendance[sessionId].push({
+        ...record,
+        intervals: groupedIntervals[key] || []
+      });
+    });
+
+    res.json({
+      success: true,
+      data: groupedAttendance
+    });
+  } catch (error) {
+    console.error('Get bulk session attendance with intervals error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get attendance data'
+    });
+  }
+};
 
 const buildMicWindowKey = (sessionId, participantName) => {
   if (!sessionId || !participantName) return null;
@@ -1427,6 +1536,14 @@ const linkParticipantToStudent = async (req, res) => {
     console.log('[API] Linking intervals to student');
     await AttendanceInterval.linkToStudent(sessionId, participant_name, targetStudentId);
 
+    // Backfill participation logs for this participant so analytics can map activity to the student.
+    console.log('[API] Linking participation logs to student');
+    const linkedLogsCount = await ParticipationLog.linkParticipantLogsToStudent(
+      sessionId,
+      participant_name,
+      targetStudentId
+    );
+
     // Get the student info if not already fetched
     if (!studentRecord) {
       studentRecord = await Student.findById(targetStudentId);
@@ -1443,7 +1560,8 @@ const linkParticipantToStudent = async (req, res) => {
       data: {
         attendance_record: attendanceRecord,
         student: studentRecord,
-        created_new: createdNew
+        created_new: createdNew,
+        linked_logs_count: linkedLogsCount
       },
       message
     });
@@ -1482,5 +1600,6 @@ module.exports = {
   recordParticipantJoin,
   recordParticipantLeave,
   getSessionAttendanceWithIntervals,
+  getBulkSessionAttendanceWithIntervals,
   linkParticipantToStudent
 };

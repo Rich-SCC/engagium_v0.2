@@ -23,6 +23,7 @@ const {
   recordParticipantJoin,
   recordParticipantLeave,
   getSessionAttendanceWithIntervals,
+  getBulkSessionAttendanceWithIntervals,
   linkParticipantToStudent
 } = require('../controllers/sessionController');
 const {
@@ -59,6 +60,7 @@ router.use(instructorAuth);
 
 // Session collection routes
 router.get('/', getSessions);
+router.post('/attendance/full/bulk', getBulkSessionAttendanceWithIntervals);
 
 // Individual session routes
 router.get('/:id/full', getSessionWithAttendance);

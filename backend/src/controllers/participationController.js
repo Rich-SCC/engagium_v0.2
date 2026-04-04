@@ -1,6 +1,15 @@
 const ParticipationLog = require('../models/ParticipationLog');
 const Session = require('../models/Session');
 const Student = require('../models/Student');
+const db = require('../config/database');
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const normalizeUuidList = (values) => [...new Set(
+  values
+    .map((value) => String(value || '').trim())
+    .filter((value) => UUID_REGEX.test(value))
+)];
 
 // Get all participation logs for a session
 const getParticipationLogs = async (req, res) => {
@@ -57,6 +66,89 @@ const getParticipationLogs = async (req, res) => {
   }
 };
 
+// Get participation logs for multiple sessions in one request (analytics optimization)
+const getBulkParticipationLogs = async (req, res) => {
+  try {
+    const { sessionIds } = req.body;
+
+    if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'sessionIds must be a non-empty array'
+      });
+    }
+
+    const normalizedSessionIds = normalizeUuidList(sessionIds);
+
+    if (normalizedSessionIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'sessionIds must contain valid UUIDs'
+      });
+    }
+
+    const accessQuery = `
+      SELECT s.id
+      FROM sessions s
+      JOIN classes c ON c.id = s.class_id
+      WHERE s.id = ANY($1)
+        AND c.instructor_id = $2
+    `;
+    const accessResult = await db.query(accessQuery, [normalizedSessionIds, req.user.id]);
+    const allowedSessionIds = accessResult.rows.map((row) => String(row.id));
+
+    if (allowedSessionIds.length !== normalizedSessionIds.length) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied for one or more sessions'
+      });
+    }
+
+    const logsQuery = `
+      SELECT
+        pl.*,
+        COALESCE(pl.student_id, ar.student_id) as student_id,
+        s.full_name,
+        s.student_id as student_number,
+        COALESCE(s.full_name, pl.additional_data->>'participant_name') as student_name,
+        COALESCE(pl.additional_data->>'participant_name', s.full_name) as participant_name
+      FROM participation_logs pl
+      LEFT JOIN attendance_records ar
+        ON ar.session_id = pl.session_id
+       AND LOWER(ar.participant_name) = LOWER(COALESCE(pl.additional_data->>'participant_name', ''))
+      LEFT JOIN students s ON s.id = COALESCE(pl.student_id, ar.student_id)
+      WHERE pl.session_id = ANY($1)
+        AND ${ParticipationLog.getMicStartFilterSql('pl')}
+      ORDER BY pl.session_id ASC, pl.timestamp DESC
+    `;
+
+    const logsResult = await db.query(logsQuery, [allowedSessionIds]);
+
+    const grouped = allowedSessionIds.reduce((accumulator, sessionId) => {
+      accumulator[sessionId] = [];
+      return accumulator;
+    }, {});
+
+    logsResult.rows.forEach((row) => {
+      const sessionId = String(row.session_id);
+      if (!grouped[sessionId]) {
+        grouped[sessionId] = [];
+      }
+      grouped[sessionId].push(row);
+    });
+
+    res.json({
+      success: true,
+      data: grouped
+    });
+  } catch (error) {
+    console.error('Get bulk participation logs error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
 // Add manual participation entry
 const addParticipationLog = async (req, res) => {
   try {
@@ -392,6 +484,7 @@ const addBulkParticipationLogs = async (req, res) => {
 
 module.exports = {
   getParticipationLogs,
+  getBulkParticipationLogs,
   addParticipationLog,
   getSessionSummary,
   getRecentActivity,

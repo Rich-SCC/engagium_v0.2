@@ -41,9 +41,27 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
+const extractRateLimitIdentity = (req) => {
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    // Key by token string prefix to avoid grouping all users behind one proxy IP.
+    return `jwt:${authHeader.slice(7, 39)}`;
+  }
+
+  const extensionToken = req.headers['x-extension-token'];
+  if (typeof extensionToken === 'string' && extensionToken.length > 0) {
+    return `ext:${extensionToken.slice(0, 32)}`;
+  }
+
+  return req.ip;
+};
+
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS || '', 10) || (15 * 60 * 1000),
+  max: Number.parseInt(process.env.RATE_LIMIT_MAX || '', 10) || 400,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: extractRateLimitIdentity,
 });
 app.use('/api/', limiter);
 

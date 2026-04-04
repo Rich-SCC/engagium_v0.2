@@ -75,7 +75,7 @@ WITH inserted_classes AS (
     sc.description,
     jsonb_build_array(
       jsonb_build_object(
-        'days', jsonb_build_array('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'),
+        'days', jsonb_build_array('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'),
         'startTime', sc.start_time,
         'endTime', sc.end_time
       )
@@ -387,37 +387,17 @@ WITH active_attendees AS (
   FROM tmp_attendance
   WHERE status <> 'absent'
 ),
-manual_rows AS (
-  SELECT
-    aa.session_id,
-    aa.student_id,
-    'manual_entry'::interaction_type AS interaction_type,
-    CASE WHEN aa.status = 'late' THEN 'Late arrival check-in' ELSE 'Present check-in' END AS interaction_value,
-    aa.first_joined_at + INTERVAL '2 minute' AS timestamp,
-    jsonb_build_object(
-      'participant_name', aa.participant_name,
-      'source', 'seed',
-      'status', aa.status,
-      'source_event_id', 'manual-' || aa.session_id::TEXT || '-' || aa.student_id::TEXT
-    ) AS additional_data
-  FROM active_attendees aa
-),
 chat_rows AS (
   SELECT
     aa.session_id,
     aa.student_id,
     'chat'::interaction_type AS interaction_type,
-    CASE (g.seq % 5)
-      WHEN 0 THEN 'Can you clarify that part?'
-      WHEN 1 THEN 'Got it, thanks!'
-      WHEN 2 THEN 'I have a question on the example.'
-      WHEN 3 THEN 'Answer: option B based on the formula.'
-      ELSE 'Sharing my notes in chat.'
-    END AS interaction_value,
+    'activity' AS interaction_value,
     aa.first_joined_at + ((3 + g.seq * (2 + (aa.seed_value % 4))) * INTERVAL '1 minute') AS timestamp,
     jsonb_build_object(
       'participant_name', aa.participant_name,
-      'source', 'seed',
+      'source', 'chat_text_toast',
+      'hasContent', false,
       'source_event_id', 'chat-' || aa.session_id::TEXT || '-' || aa.student_id::TEXT || '-' || g.seq::TEXT
     ) AS additional_data
   FROM active_attendees aa
@@ -428,16 +408,32 @@ reaction_rows AS (
     aa.session_id,
     aa.student_id,
     'reaction'::interaction_type AS interaction_type,
-    CASE (g.seq % 4)
-      WHEN 0 THEN 'thumbs_up'
-      WHEN 1 THEN 'clap'
-      WHEN 2 THEN 'heart'
-      ELSE 'laugh'
+    CASE (g.seq % 9)
+      WHEN 0 THEN '💖'
+      WHEN 1 THEN '👍'
+      WHEN 2 THEN '🎉'
+      WHEN 3 THEN '👏'
+      WHEN 4 THEN '😂'
+      WHEN 5 THEN '😮'
+      WHEN 6 THEN '😢'
+      WHEN 7 THEN '🤔'
+      ELSE '👎'
     END AS interaction_value,
     aa.first_joined_at + ((6 + g.seq * (3 + (aa.seed_value % 3))) * INTERVAL '1 minute') AS timestamp,
     jsonb_build_object(
       'participant_name', aa.participant_name,
-      'source', 'seed',
+      'source', 'reaction_toast',
+      'reaction', CASE (g.seq % 9)
+        WHEN 0 THEN '💖'
+        WHEN 1 THEN '👍'
+        WHEN 2 THEN '🎉'
+        WHEN 3 THEN '👏'
+        WHEN 4 THEN '😂'
+        WHEN 5 THEN '😮'
+        WHEN 6 THEN '😢'
+        WHEN 7 THEN '🤔'
+        ELSE '👎'
+      END,
       'source_event_id', 'reaction-' || aa.session_id::TEXT || '-' || aa.student_id::TEXT || '-' || g.seq::TEXT
     ) AS additional_data
   FROM active_attendees aa
@@ -448,61 +444,76 @@ hand_rows AS (
     aa.session_id,
     aa.student_id,
     'hand_raise'::interaction_type AS interaction_type,
-    'Question raised' AS interaction_value,
+    NULL::TEXT AS interaction_value,
     aa.first_joined_at + ((9 + g.seq * (4 + (aa.seed_value % 2))) * INTERVAL '1 minute') AS timestamp,
     jsonb_build_object(
       'participant_name', aa.participant_name,
-      'source', 'seed',
+      'source', 'people_panel',
+      'handState', 'raised',
+      'queuePosition', 1 + ((aa.seed_value + g.seq) % 6),
       'source_event_id', 'hand-' || aa.session_id::TEXT || '-' || aa.student_id::TEXT || '-' || g.seq::TEXT
     ) AS additional_data
   FROM active_attendees aa
   CROSS JOIN LATERAL generate_series(1, ((aa.seed_value / 5) % 3)) AS g(seq)
 ),
-camera_rows AS (
+mic_windows AS (
   SELECT
     aa.session_id,
     aa.student_id,
-    'camera_toggle'::interaction_type AS interaction_type,
-    CASE WHEN (aa.seed_value % 2) = 0 THEN 'camera_off' ELSE 'camera_on' END AS interaction_value,
-    aa.first_joined_at + ((12 + (aa.seed_value % 9)) * INTERVAL '1 minute') AS timestamp,
-    jsonb_build_object(
-      'participant_name', aa.participant_name,
-      'source', 'seed',
-      'source_event_id', 'camera-' || aa.session_id::TEXT || '-' || aa.student_id::TEXT
-    ) AS additional_data
-  FROM active_attendees aa
-  WHERE (aa.seed_value % 2) = 0
-),
-mic_rows AS (
-  SELECT
-    aa.session_id,
-    aa.student_id,
-    'mic_toggle'::interaction_type AS interaction_type,
-    'muted' AS interaction_value,
-    aa.first_joined_at + ((14 + g.seq * (5 + (aa.seed_value % 3))) * INTERVAL '1 minute') AS timestamp,
-    jsonb_build_object(
-      'participant_name', aa.participant_name,
-      'source', 'seed',
-      'speakingAction', 'stop',
-      'isMuted', 'true',
-      'speakingDurationSeconds', 20 + ((aa.seed_value + g.seq * 17) % 180),
-      'source_event_id', 'mic-' || aa.session_id::TEXT || '-' || aa.student_id::TEXT || '-' || g.seq::TEXT
-    ) AS additional_data
+    aa.participant_name,
+    g.seq,
+    aa.first_joined_at + ((12 + g.seq * (5 + (aa.seed_value % 3))) * INTERVAL '1 minute') AS started_at,
+    20 + ((aa.seed_value + g.seq * 17) % 180) AS speaking_duration_seconds
   FROM active_attendees aa
   CROSS JOIN LATERAL generate_series(1, 1 + (aa.seed_value % 2)) AS g(seq)
 ),
+mic_rows_start AS (
+  SELECT
+    mw.session_id,
+    mw.student_id,
+    'mic_toggle'::interaction_type AS interaction_type,
+    'unmuted' AS interaction_value,
+    mw.started_at AS timestamp,
+    jsonb_build_object(
+      'participant_name', mw.participant_name,
+      'source', 'people_panel',
+      'isMuted', false,
+      'micState', 'on',
+      'speakingAction', 'start',
+      'source_event_id', 'mic-' || mw.session_id::TEXT || '-' || mw.student_id::TEXT || '-' || mw.seq::TEXT || '-start'
+    ) AS additional_data
+  FROM mic_windows mw
+),
+mic_rows_stop AS (
+  SELECT
+    mw.session_id,
+    mw.student_id,
+    'mic_toggle'::interaction_type AS interaction_type,
+    'muted' AS interaction_value,
+    mw.started_at + (mw.speaking_duration_seconds * INTERVAL '1 second') AS timestamp,
+    jsonb_build_object(
+      'participant_name', mw.participant_name,
+      'source', 'people_panel',
+      'isMuted', true,
+      'micState', 'off',
+      'speakingAction', 'stop',
+      'speakingStartedAt', mw.started_at,
+      'speakingEndedAt', mw.started_at + (mw.speaking_duration_seconds * INTERVAL '1 second'),
+      'speakingDurationSeconds', mw.speaking_duration_seconds,
+      'source_event_id', 'mic-' || mw.session_id::TEXT || '-' || mw.student_id::TEXT || '-' || mw.seq::TEXT || '-stop'
+    ) AS additional_data
+  FROM mic_windows mw
+),
 all_logs AS (
-  SELECT * FROM manual_rows
-  UNION ALL
   SELECT * FROM chat_rows
   UNION ALL
   SELECT * FROM reaction_rows
   UNION ALL
   SELECT * FROM hand_rows
   UNION ALL
-  SELECT * FROM camera_rows
+  SELECT * FROM mic_rows_start
   UNION ALL
-  SELECT * FROM mic_rows
+  SELECT * FROM mic_rows_stop
 )
 INSERT INTO participation_logs (
   session_id,
@@ -542,5 +553,5 @@ LEFT JOIN sessions s ON s.class_id = c.id
 LEFT JOIN students st ON st.class_id = c.id
 LEFT JOIN attendance_records ar ON ar.session_id = s.id
 LEFT JOIN participation_logs pl ON pl.session_id = s.id
-WHERE u.email = 'demo.instructor@engagium.local'
+WHERE u.email = 'engagium.scc@gmail.com'
 GROUP BY u.email;

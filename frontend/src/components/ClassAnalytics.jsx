@@ -28,12 +28,10 @@ import {
   AcademicCapIcon,
   BoltIcon,
   CalendarDaysIcon,
-  ChatBubbleLeftIcon,
   ClockIcon,
   ExclamationTriangleIcon,
   HandRaisedIcon,
   HeartIcon,
-  MicrophoneIcon,
   SparklesIcon,
   UserGroupIcon,
 } from '@heroicons/react/24/outline';
@@ -60,48 +58,16 @@ const TIMELINE_COLORS = {
   micToggle: '#7c3aed',
 };
 
-const fetchAllParticipationLogs = async (sessionId) => {
-  const limit = 500;
-  const firstResponse = await participationAPI.getLogs(sessionId, { page: 1, limit });
-  const firstPage = firstResponse?.data || {};
-  const logs = [...(firstPage.data || [])];
-  const totalPages = firstPage.pagination?.totalPages || 1;
-
-  if (totalPages > 1) {
-    const pageNumbers = Array.from({ length: totalPages - 1 }, (_, index) => index + 2);
-    const remainingPages = await Promise.all(
-      pageNumbers.map((page) => participationAPI.getLogs(sessionId, { page, limit }))
-    );
-
-    remainingPages.forEach((response) => {
-      const page = response?.data || {};
-      logs.push(...(page.data || []));
-    });
-  }
-
-  return logs;
+const getSessionBucket = (bucketMap, sessionId) => {
+  if (!bucketMap || !sessionId) return [];
+  return bucketMap[sessionId] || bucketMap[String(sessionId)] || [];
 };
 
-const fetchSessionParticipation = async (session) => {
-  const logs = await fetchAllParticipationLogs(session.id);
-
-  return {
-    sessionId: session.id,
-    session,
-    ...aggregateSessionLogs(logs),
-  };
-};
-
-const fetchSessionAttendance = async (session) => {
-  const response = await sessionsAPI.getAttendanceWithIntervals(session.id);
-  const payload = response?.data || response;
-  const attendance = payload?.data?.attendance || payload?.attendance || [];
-
-  return {
-    sessionId: session.id,
-    attendance,
-  };
-};
+const buildSessionParticipationSnapshot = (session, logs = []) => ({
+  sessionId: session.id,
+  session,
+  ...aggregateSessionLogs(logs),
+});
 
 const formatTimeLabel = (timeValue) => {
   if (!timeValue || typeof timeValue !== 'string') return '-';
@@ -187,6 +153,8 @@ const percentileLabel = (value) => {
   return 'Needs support';
 };
 
+const normalizeName = (value) => String(value || '').trim().toLowerCase();
+
 const ClassAnalytics = ({ classId, onSelectStudent }) => {
   const [startDate, setStartDate] = useState(() => {
     const date = new Date();
@@ -211,6 +179,8 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
         endDate: endDate.toISOString(),
       }),
     enabled: !!classId,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const analytics = analyticsData?.data;
@@ -220,17 +190,29 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
 
   const sessionIds = useMemo(() => sessionTrends.map((session) => session.id).filter(Boolean), [sessionTrends]);
 
-  const { data: participationSnapshots = [], isLoading: participationLoading } = useQuery({
+  const { data: bulkParticipationData, isLoading: participationLoading } = useQuery({
     queryKey: ['classParticipationAnalytics', classId, startDate.toISOString(), endDate.toISOString(), sessionIds.join('|')],
-    queryFn: async () => Promise.all(sessionTrends.map(fetchSessionParticipation)),
+    queryFn: () => participationAPI.getBulkLogs(sessionIds),
     enabled: !!classId && sessionTrends.length > 0,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
-  const { data: attendanceSnapshots = [], isLoading: attendanceLoading } = useQuery({
+  const { data: bulkAttendanceData, isLoading: attendanceLoading } = useQuery({
     queryKey: ['classAttendanceAnalytics', classId, startDate.toISOString(), endDate.toISOString(), sessionIds.join('|')],
-    queryFn: async () => Promise.all(sessionTrends.map(fetchSessionAttendance)),
+    queryFn: () => sessionsAPI.getBulkAttendanceWithIntervals(sessionIds),
     enabled: !!classId && sessionTrends.length > 0,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
+
+  const logsBySessionId = bulkParticipationData?.data || {};
+  const attendanceBySessionPayload = bulkAttendanceData?.data || {};
+
+  const participationSnapshots = useMemo(
+    () => sessionTrends.map((session) => buildSessionParticipationSnapshot(session, getSessionBucket(logsBySessionId, session.id))),
+    [sessionTrends, logsBySessionId]
+  );
 
   const participationSummary = useMemo(() => mergeParticipationSnapshots(participationSnapshots), [participationSnapshots]);
 
@@ -240,14 +222,39 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
   );
 
   const studentParticipationById = useMemo(
-    () => new Map(participationSummary.students.map((student) => [student.student_id, student])),
+    () => new Map(
+      participationSummary.students
+        .filter((student) => student?.student_id)
+        .map((student) => [String(student.student_id), student])
+    ),
     [participationSummary.students]
   );
 
-  const attendanceBySessionId = useMemo(
-    () => new Map(attendanceSnapshots.map((snapshot) => [snapshot.sessionId, snapshot.attendance || []])),
-    [attendanceSnapshots]
+  const studentParticipationByNumber = useMemo(
+    () => new Map(
+      participationSummary.students
+        .filter((student) => student?.student_number)
+        .map((student) => [String(student.student_number), student])
+    ),
+    [participationSummary.students]
   );
+
+  const studentParticipationByName = useMemo(
+    () => new Map(
+      participationSummary.students
+        .filter((student) => normalizeName(student?.full_name || student?.student_name || student?.participant_name))
+        .map((student) => [normalizeName(student.full_name || student.student_name || student.participant_name), student])
+    ),
+    [participationSummary.students]
+  );
+
+  const attendanceBySessionId = useMemo(() => {
+    const map = new Map();
+    sessionIds.forEach((sessionId) => {
+      map.set(sessionId, getSessionBucket(attendanceBySessionPayload, sessionId));
+    });
+    return map;
+  }, [attendanceBySessionPayload, sessionIds]);
 
   const enrichedStudents = useMemo(() => {
     const classAverages = {
@@ -258,7 +265,10 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
     };
 
     const merged = studentPerformance.map((student) => {
-      const participation = studentParticipationById.get(student.id) || {
+      const participation = studentParticipationById.get(String(student.id))
+        || studentParticipationByNumber.get(String(student.student_number || ''))
+        || studentParticipationByName.get(normalizeName(student.full_name))
+        || {
         total_interactions: 0,
         chat_messages: 0,
         reactions: 0,
@@ -308,7 +318,7 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
         },
       }),
     }));
-  }, [studentPerformance, studentParticipationById]);
+  }, [studentPerformance, studentParticipationById, studentParticipationByNumber, studentParticipationByName]);
 
   const classAverages = useMemo(
     () => ({
@@ -438,11 +448,10 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
     [enrichedSessions]
   );
 
-  const { data: selectedSessionLogs = [] } = useQuery({
-    queryKey: ['selectedSessionLogs', classId, selectedSessionId],
-    queryFn: async () => fetchAllParticipationLogs(selectedSessionId),
-    enabled: !!classId && !!selectedSessionId,
-  });
+  const selectedSessionLogs = useMemo(
+    () => getSessionBucket(logsBySessionId, selectedSessionId),
+    [logsBySessionId, selectedSessionId]
+  );
 
   const selectedAttendanceRows = useMemo(
     () => attendanceBySessionId.get(selectedSessionId) || [],
@@ -856,19 +865,22 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
   if (!hasData) {
     return (
       <div className="space-y-6">
-        <DateRangePicker
-          startDate={startDate}
-          endDate={endDate}
-          onStartDateChange={setStartDate}
-          onEndDateChange={setEndDate}
-          onQuickSelect={handleQuickSelect}
-        />
+        <div className="flex justify-end">
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onStartDateChange={setStartDate}
+            onEndDateChange={setEndDate}
+            onQuickSelect={handleQuickSelect}
+            variant="compact"
+          />
+        </div>
 
         <div className="flex flex-col items-center justify-center py-12 px-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
           <AcademicCapIcon className="w-16 h-16 text-gray-400 mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No Data Yet</h3>
           <p className="text-gray-500 text-center max-w-md mb-4">
-            No sessions have been completed in this date range. Start or complete some sessions to see analytics here.
+            No session fragments were completed in this date range. Start or complete some fragments to see analytics here.
           </p>
           <p className="text-sm text-gray-400">
             Selected range: {startDate.toLocaleDateString()} - {endDate.toLocaleDateString()}
@@ -880,114 +892,36 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
 
   return (
     <div className="space-y-8">
-      <DateRangePicker
-        startDate={startDate}
-        endDate={endDate}
-        onStartDateChange={setStartDate}
-        onEndDateChange={setEndDate}
-        onQuickSelect={handleQuickSelect}
-      />
-
-      <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 via-slate-800 to-blue-900 p-6 text-white shadow-lg">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-blue-200">Normalization-First Analytics</p>
-            <h2 className="text-2xl font-bold mt-1">Engagement and Consistency Storyline</h2>
-            <p className="text-sm text-slate-200 mt-2">
-              Core credit window = scheduled minutes - break gaps. Early arrivals are bonus, dead-time is excluded.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full lg:w-auto">
-            <div className="bg-white/10 rounded-lg p-3">
-              <p className="text-xs text-slate-200">Sessions</p>
-              <p className="text-xl font-semibold">{classAverages.totalSessions}</p>
-            </div>
-            <div className="bg-white/10 rounded-lg p-3">
-              <p className="text-xs text-slate-200">Participation</p>
-              <p className="text-xl font-semibold">{participationRate}%</p>
-            </div>
-            <div className="bg-white/10 rounded-lg p-3">
-              <p className="text-xs text-slate-200">Interactions</p>
-              <p className="text-xl font-semibold">{totalInteractions}</p>
-            </div>
-            <div className="bg-white/10 rounded-lg p-3">
-              <p className="text-xs text-slate-200">Avg Engagement</p>
-              <p className="text-xl font-semibold">{classEngagement}</p>
-            </div>
-          </div>
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Analytics Summary</p>
+          <p className="mt-1 text-sm text-slate-600">Core credit window = session minutes - break gaps. Early arrivals are bonus, dead-time is excluded.</p>
         </div>
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          <span className="text-slate-600">Fragments: <strong className="text-slate-900">{classAverages.totalSessions}</strong></span>
+          <span className="text-slate-600">Participation: <strong className="text-slate-900">{participationRate}%</strong></span>
+          <span className="text-slate-600">Interactions: <strong className="text-slate-900">{totalInteractions}</strong></span>
+          <span className="text-slate-600">Engagement: <strong className="text-slate-900">{classEngagement}</strong></span>
+          <span className="text-slate-600">Speaking: <strong className="text-slate-900">{formatMinutes(totalSpeakingProxyMinutes)}</strong></span>
+        </div>
+        <DateRangePicker
+          startDate={startDate}
+          endDate={endDate}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onQuickSelect={handleQuickSelect}
+          variant="compact"
+        />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
-        <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-md p-5 border border-blue-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-blue-700 text-sm font-medium mb-1">Total Sessions</p>
-              <p className="text-2xl font-bold text-gray-900">{classAverages.totalSessions}</p>
-            </div>
-            <AcademicCapIcon className="w-8 h-8 text-blue-600" />
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-xl shadow-md p-5 border border-emerald-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-emerald-700 text-sm font-medium mb-1">Avg Attendance</p>
-              <p className="text-2xl font-bold text-gray-900">{classAverages.avgAttendanceRate}%</p>
-            </div>
-            <UserGroupIcon className="w-8 h-8 text-emerald-600" />
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-violet-50 to-violet-100 rounded-xl shadow-md p-5 border border-violet-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-violet-700 text-sm font-medium mb-1">Avg Duration</p>
-              <p className="text-2xl font-bold text-gray-900">{formatMinutes(classAverages.avgDuration)}</p>
-            </div>
-            <ClockIcon className="w-8 h-8 text-violet-600" />
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl shadow-md p-5 border border-orange-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-orange-700 text-sm font-medium mb-1">Participation Rate</p>
-              <p className="text-2xl font-bold text-gray-900">{participationRate}%</p>
-            </div>
-            <SparklesIcon className="w-8 h-8 text-orange-600" />
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-sky-50 to-sky-100 rounded-xl shadow-md p-5 border border-sky-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sky-700 text-sm font-medium mb-1">Total Interactions</p>
-              <p className="text-2xl font-bold text-gray-900">{totalInteractions}</p>
-            </div>
-            <ChatBubbleLeftIcon className="w-8 h-8 text-sky-600" />
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl shadow-md p-5 border border-indigo-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-indigo-700 text-sm font-medium mb-1">Speaking Proxy</p>
-              <p className="text-2xl font-bold text-gray-900">{formatMinutes(totalSpeakingProxyMinutes)}</p>
-            </div>
-            <MicrophoneIcon className="w-8 h-8 text-indigo-600" />
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-5">
+      <section className="space-y-5 rounded-2xl border border-gray-200 bg-gray-50/40 p-5">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
-            <h3 className="text-xl font-semibold text-gray-900">1. Per-Session Analytics: Class Pulse</h3>
+            <h3 className="text-xl font-semibold text-gray-900">Per-Fragment Analytics</h3>
             <p className="text-sm text-gray-600">Inspect synchronized activity, presence stability, and normalized core credit.</p>
           </div>
           <div className="flex items-center gap-2">
-            <label htmlFor="session-select" className="text-sm font-medium text-gray-700">Pulse Session</label>
+            <label htmlFor="session-select" className="text-sm font-medium text-gray-700">Pulse Fragment</label>
             <select
               id="session-select"
               value={selectedSessionId || ''}
@@ -1008,7 +942,7 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
             <p className="text-xs uppercase tracking-wide text-gray-500">Pulse Engagement Score</p>
             <p className="text-3xl font-bold text-gray-900 mt-1">{toNumber(selectedSession?.pulse_engagement_score)}</p>
             <p className="text-sm text-gray-500 mt-2">
-              E = (Mic x {WEIGHTS.mic} + Reactions x {WEIGHTS.reaction} + Chat x {WEIGHTS.chat}) / Session Minutes
+              E = (Mic x {WEIGHTS.mic} + Reactions x {WEIGHTS.reaction} + Chat x {WEIGHTS.chat}) / Fragment Minutes
             </p>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-lg bg-slate-50 p-3">
@@ -1058,7 +992,7 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
           </div>
           <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
             {presenceRows.length === 0 && (
-              <p className="text-sm text-gray-500">No attendance interval data for the selected session.</p>
+              <p className="text-sm text-gray-500">No attendance interval data for the selected fragment.</p>
             )}
             {presenceRows.map((row) => (
               <div key={row.id} className="space-y-1">
@@ -1096,10 +1030,10 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
             ))}
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="space-y-5">
-        <h3 className="text-xl font-semibold text-gray-900">2. Per-Student Analytics: Individual Profile</h3>
+      <section className="space-y-5 rounded-2xl border border-gray-200 bg-gray-50/40 p-5">
+        <h3 className="text-xl font-semibold text-gray-900">Per-Student Analytics</h3>
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
           <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <div className="flex items-center justify-between mb-3">
@@ -1162,14 +1096,14 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
             </div>
             <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900 flex items-start gap-2">
               <ExclamationTriangleIcon className="w-5 h-5 mt-0.5" />
-              <p>Fragment resilience checks whether a student returned after a 20+ minute schedule gap.</p>
+              <p>Fragment resilience checks whether a student returned after a 20+ minute session gap.</p>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="space-y-5">
-        <h3 className="text-xl font-semibold text-gray-900">3. Longitudinal Analytics: Growth and Burnout</h3>
+      <section className="space-y-5 rounded-2xl border border-gray-200 bg-gray-50/40 p-5">
+        <h3 className="text-xl font-semibold text-gray-900">Trends</h3>
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <h4 className="text-lg font-semibold text-gray-900 mb-3">Attendance Decay Line</h4>
@@ -1191,7 +1125,7 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
             <ResponsiveContainer width="100%" height={280}>
               <ScatterChart>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" dataKey="sessions" name="Sessions Observed" stroke="#6b7280" />
+                <XAxis type="number" dataKey="sessions" name="Fragments Observed" stroke="#6b7280" />
                 <YAxis type="number" dataKey="avgLateMinutes" name="Avg Late Minutes" stroke="#6b7280" />
                 <Tooltip
                   cursor={{ strokeDasharray: '3 3' }}
@@ -1222,7 +1156,7 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
             </BarChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </section>
 
       <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4">
@@ -1281,7 +1215,7 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-lg font-semibold text-gray-900">Core Credit Window Reporting</h3>
-              <p className="text-sm text-gray-500">Scheduled windows, breaks, and overtime separated for fair normalization.</p>
+              <p className="text-sm text-gray-500">Session windows, breaks, and overtime separated for fair normalization.</p>
             </div>
             <CalendarDaysIcon className="w-6 h-6 text-indigo-600" />
           </div>
@@ -1289,7 +1223,7 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Schedule Day</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session Day</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Planned Window</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actual Window</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Core Credit</th>
@@ -1335,7 +1269,7 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
 
       <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-semibold text-gray-900">Session Drilldown</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Fragment Drilldown</h3>
           <HandRaisedIcon className="w-5 h-5 text-sky-600" />
         </div>
         <ResponsiveContainer width="100%" height={280}>

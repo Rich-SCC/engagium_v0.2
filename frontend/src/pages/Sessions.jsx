@@ -195,21 +195,21 @@ const Sessions = () => {
       const classInfo = classInfoById.get(classIdKey);
       if (!classInfo) {
         debug.skippedMissingClass += 1;
-        rememberSkipped(session?.id, 'Class record not found for this session', session, null);
+        rememberSkipped(session?.id, 'Class record not found for this fragment', session, null);
         return;
       }
 
       const schedules = normalizeSchedules(classInfo.schedule);
       if (schedules.length === 0) {
         debug.skippedNoSchedule += 1;
-        rememberSkipped(session?.id, 'Class has no valid schedule window configured', session, classInfo);
+        rememberSkipped(session?.id, 'Class has no valid session window configured', session, classInfo);
         return;
       }
 
       const startedAt = session?.started_at ? new Date(session.started_at) : null;
       if (!(startedAt instanceof Date) || Number.isNaN(startedAt.getTime())) {
         debug.skippedInvalidStartedAt += 1;
-        rememberSkipped(session?.id, 'Session started_at is missing or invalid', session, classInfo);
+        rememberSkipped(session?.id, 'Fragment started_at is missing or invalid', session, classInfo);
         return;
       }
 
@@ -219,7 +219,7 @@ const Sessions = () => {
       const dateKey = toLocalDateKey(startedAt);
       if (!dateKey) {
         debug.skippedInvalidStartedAt += 1;
-        rememberSkipped(session?.id, 'Session date key could not be derived', session, classInfo);
+        rememberSkipped(session?.id, 'Fragment date key could not be derived', session, classInfo);
         return;
       }
 
@@ -227,7 +227,7 @@ const Sessions = () => {
       const candidates = schedules.filter((schedule) => schedule.days.length === 0 || schedule.days.includes(dayName));
       if (candidates.length === 0) {
         debug.skippedNoDayMatch += 1;
-        rememberSkipped(session?.id, 'No class schedule matches this session day', session, classInfo);
+        rememberSkipped(session?.id, 'No class session window matches this fragment day', session, classInfo);
         return;
       }
 
@@ -253,7 +253,7 @@ const Sessions = () => {
 
       if (!bestSchedule || bestOverlapMs <= 0) {
         debug.skippedLowOverlap += 1;
-        rememberSkipped(session?.id, 'Session does not intersect any schedule window', session, classInfo);
+        rememberSkipped(session?.id, 'Fragment does not intersect any session window', session, classInfo);
         return;
       }
 
@@ -487,7 +487,7 @@ const Sessions = () => {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Sessions</h1>
           <p className="mt-2 text-sm text-gray-600">
-            Sessions are automatically created when you start tracking via the browser extension
+            A session is the scheduled class window. Session fragments are raw tracking runs captured by the browser extension.
           </p>
         </div>
         <div className="flex gap-3">
@@ -536,9 +536,9 @@ const Sessions = () => {
           <div className="flex items-center justify-between">
             {listMode === 'bundled' ? (
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-gray-600">{bundledRows.length} bundles</span>
+                <span className="text-gray-600">{bundledRows.length} sessions</span>
                 <span className="text-gray-300">|</span>
-                <span className="text-gray-600">{orphanRows.length} orphans</span>
+                <span className="text-gray-600">{orphanRows.length} ungrouped fragments</span>
                 <button
                   type="button"
                   onClick={expandAllBundles}
@@ -565,7 +565,7 @@ const Sessions = () => {
                     : 'bg-white text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                Raw Sessions
+                Session Fragments
               </button>
               <button
                 onClick={() => setListMode('bundled')}
@@ -575,7 +575,7 @@ const Sessions = () => {
                     : 'bg-white text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                Bundled by Schedule
+                Sessions
               </button>
             </div>
           </div>
@@ -587,18 +587,18 @@ const Sessions = () => {
           ) : listMode === 'raw' && sessions.length === 0 ? (
             <div className="bg-white rounded-lg shadow p-12 text-center">
               <div className="text-6xl mb-4">📅</div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">No sessions yet</h3>
-              <p className="text-gray-500">Sessions are automatically created when you start tracking attendance via the browser extension</p>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No fragments yet</h3>
+              <p className="text-gray-500">Session fragments are automatically created when you start tracking attendance via the browser extension</p>
             </div>
           ) : listMode === 'bundled' && bundlesLoading ? (
             <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
-              Loading bundled schedule view...
+              Loading session view...
             </div>
           ) : listMode === 'bundled' && bundledRows.length === 0 && orphanRows.length === 0 ? (
             <div className="bg-white rounded-lg shadow p-12 text-center">
               <div className="text-6xl mb-4">🧩</div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">No bundles yet</h3>
-              <p className="text-gray-500">No schedule bundles were found in the available sessions for this account.</p>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No sessions yet</h3>
+              <p className="text-gray-500">No schedule-grouped sessions were found in the available session fragments for this account.</p>
             </div>
           ) : listMode === 'bundled' ? (
             <div className="space-y-4">
@@ -674,7 +674,7 @@ const Sessions = () => {
                       <tr className="bg-gray-50/50">
                         <td></td>
                         <td colSpan={10} className="px-6 py-4">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-2">Fragments in this bundle</div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-2">Session fragments</div>
                           <div className="overflow-x-auto border border-gray-200 rounded-md bg-white">
                             <table className="min-w-full divide-y divide-gray-200">
                               <thead className="bg-gray-50">
@@ -718,16 +718,16 @@ const Sessions = () => {
 
               <div className="bg-white rounded-lg shadow overflow-x-auto">
                 <div className="px-6 py-4 border-b border-gray-200">
-                  <h3 className="text-sm font-semibold text-gray-900">Orphan Sessions</h3>
-                  <p className="text-sm text-gray-600 mt-1">Sessions that did not fit any schedule bundle.</p>
+                  <h3 className="text-sm font-semibold text-gray-900">Ungrouped Session Fragments</h3>
+                  <p className="text-sm text-gray-600 mt-1">Fragments that did not fit any session window.</p>
                 </div>
                 {orphanRows.length === 0 ? (
-                  <div className="px-6 py-6 text-sm text-gray-500">No orphan sessions.</div>
+                  <div className="px-6 py-6 text-sm text-gray-500">No ungrouped fragments.</div>
                 ) : (
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Session</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Fragment</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Class</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Reason</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Action</th>
@@ -744,7 +744,7 @@ const Sessions = () => {
                               to={`/app/sessions/${orphan.session?.id}`}
                               className="text-blue-600 hover:text-blue-900"
                             >
-                              View Session
+                              View Fragment
                             </Link>
                           </td>
                         </tr>
@@ -760,7 +760,7 @@ const Sessions = () => {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                      Session Time
+                      Fragment Time
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                       Class

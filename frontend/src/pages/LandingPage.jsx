@@ -86,13 +86,13 @@ const LandingPage = () => {
             </h2>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-16">
+          <div className="grid md:grid-cols-2 gap-16 items-stretch">
             {/* Left Column: Feature Image */}
-            <div className="bg-gradient-to-br from-accent-100 to-accent-200 rounded-3xl h-full min-h-96 flex items-center justify-center shadow-2xl border border-accent-200">
+            <div className="bg-gradient-to-br from-accent-100 to-accent-200 rounded-3xl min-h-[20rem] md:min-h-[30rem] flex items-center justify-center shadow-2xl border border-accent-200 p-6 md:p-8">
               <img 
                 src={featureimg} 
                 alt="Engagium Features" 
-                className="max-h-24 w-auto"
+                className="w-full max-w-2xl h-auto object-contain md:scale-110"
               />
             </div>
 

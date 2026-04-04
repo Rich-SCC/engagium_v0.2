@@ -1030,6 +1030,7 @@ const getClassAnalytics = async (req, res) => {
     const studentPerformanceQuery = `
       SELECT 
         st.id,
+        st.student_id as student_number,
         st.full_name,
         COUNT(DISTINCT ar.session_id) as sessions_attended,
         COUNT(DISTINCT s.id) as total_sessions,

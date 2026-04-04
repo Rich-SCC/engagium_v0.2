@@ -30,7 +30,7 @@ const Analytics = () => {
             </button>
             <h1 className="mt-3 text-3xl font-bold text-gray-900">{formatClassDisplay(selectedClass)}</h1>
             <p className="mt-2 text-sm text-gray-500">
-              Attendance grouped by schedule bundles so the page stays focused on presence and consistency.
+              Attendance grouped into sessions (from schedule windows), with each session composed of one or more session fragments.
             </p>
           </div>
         </div>
@@ -45,7 +45,7 @@ const Analytics = () => {
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Analytics</h1>
         <p className="mt-2 text-sm text-gray-500">
-          Start with attendance. Choose a class to see average presence and consistency by schedule bundle.
+          Choose a class to view attendance by sessions and session fragments.
         </p>
       </div>
 
@@ -92,7 +92,7 @@ const Analytics = () => {
                     </span>
                   )}
                 </div>
-                <p className="mt-4 text-sm text-gray-500">Open bundle-level attendance analytics</p>
+                <p className="mt-4 text-sm text-gray-500">Open session-level attendance analytics</p>
               </button>
             ))}
           </div>
