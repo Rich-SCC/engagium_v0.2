@@ -837,8 +837,10 @@ const getStudentAnalytics = async (req, res) => {
       SELECT 
         s.id,
         s.title,
-        s.session_date,
-        s.session_time,
+        DATE(s.started_at) as session_date,
+        CAST(s.started_at AS TIME) as session_time,
+        s.started_at,
+        s.ended_at,
         s.status,
         ar.status as attendance_status,
         ar.total_duration_minutes,
@@ -864,10 +866,10 @@ const getStudentAnalytics = async (req, res) => {
       FROM sessions s
       LEFT JOIN attendance_records ar ON s.id = ar.session_id AND ar.student_id = $1
       WHERE s.class_id = $2
-        AND s.session_date >= $3
-        AND s.session_date <= $4
+        AND DATE(s.started_at) >= $3
+        AND DATE(s.started_at) <= $4
         AND s.status IN ('active', 'ended')
-      ORDER BY s.session_date DESC, s.session_time DESC
+      ORDER BY DATE(s.started_at) DESC, CAST(s.started_at AS TIME) DESC
     `;
 
     const sessionHistoryResult = await pool.query(sessionHistoryQuery, [studentId, student.class_id, start, end]);
@@ -888,17 +890,17 @@ const getStudentAnalytics = async (req, res) => {
     // Get attendance timeline (daily summary)
     const timelineQuery = `
       SELECT 
-        s.session_date as date,
+        DATE(s.started_at) as date,
         COUNT(DISTINCT s.id) as total_sessions,
         COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as attended,
         COALESCE(SUM(ar.total_duration_minutes), 0) as total_duration
       FROM sessions s
       LEFT JOIN attendance_records ar ON s.id = ar.session_id AND ar.student_id = $1
       WHERE s.class_id = $2
-        AND s.session_date >= $3
-        AND s.session_date <= $4
+        AND DATE(s.started_at) >= $3
+        AND DATE(s.started_at) <= $4
         AND s.status IN ('active', 'ended')
-      GROUP BY s.session_date
+      GROUP BY DATE(s.started_at)
       ORDER BY date ASC
     `;
 

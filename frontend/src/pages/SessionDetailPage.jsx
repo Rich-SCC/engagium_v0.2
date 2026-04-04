@@ -139,15 +139,46 @@ const SessionDetailPage = () => {
     }
   };
 
+  const getSessionDateValue = (sessionData) => {
+    if (sessionData?.started_at) {
+      const startedAt = new Date(sessionData.started_at);
+      if (!Number.isNaN(startedAt.getTime())) return startedAt;
+    }
+
+    if (sessionData?.session_date) {
+      const scheduledDate = new Date(sessionData.session_date);
+      if (!Number.isNaN(scheduledDate.getTime())) return scheduledDate;
+    }
+
+    return null;
+  };
+
+  const getSessionTimeLabel = (sessionData) => {
+    if (sessionData?.started_at) {
+      const startedAt = new Date(sessionData.started_at);
+      if (!Number.isNaN(startedAt.getTime())) {
+        if (sessionData?.ended_at) {
+          const endedAt = new Date(sessionData.ended_at);
+          if (!Number.isNaN(endedAt.getTime())) {
+            return `${startedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })} - ${endedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+          }
+        }
+
+        return startedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      }
+    }
+
+    if (sessionData?.session_time) {
+      return sessionData.session_time.substring(0, 5);
+    }
+
+    return '';
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return 'Not scheduled';
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  };
-
-  const formatTime = (timeString) => {
-    if (!timeString) return '';
-    return timeString.substring(0, 5);
   };
 
   if (isLoading) {
@@ -234,16 +265,16 @@ const SessionDetailPage = () => {
             <CalendarIcon className="w-6 h-6 text-gray-400 mt-1" />
             <div>
               <div className="text-sm text-gray-600">Date</div>
-              <div className="font-semibold text-gray-900">{formatDate(session.session_date)}</div>
+              <div className="font-semibold text-gray-900">{formatDate(getSessionDateValue(session))}</div>
             </div>
           </div>
 
-          {session.session_time && (
+          {getSessionTimeLabel(session) && (
             <div className="flex items-start gap-3">
               <ClockIcon className="w-6 h-6 text-gray-400 mt-1" />
               <div>
                 <div className="text-sm text-gray-600">Time</div>
-                <div className="font-semibold text-gray-900">{formatTime(session.session_time)}</div>
+                <div className="font-semibold text-gray-900">{getSessionTimeLabel(session)}</div>
               </div>
             </div>
           )}
@@ -281,22 +312,6 @@ const SessionDetailPage = () => {
           )}
         </div>
 
-        {(session.topic || session.description) && (
-          <div className="mt-6 pt-6 border-t">
-            {session.topic && (
-              <div className="mb-3">
-                <div className="text-sm text-gray-600 mb-1">Topic</div>
-                <div className="text-gray-900">{session.topic}</div>
-              </div>
-            )}
-            {session.description && (
-              <div>
-                <div className="text-sm text-gray-600 mb-1">Description</div>
-                <div className="text-gray-900">{session.description}</div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Tabs */}

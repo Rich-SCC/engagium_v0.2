@@ -2,22 +2,19 @@ const db = require('../config/database');
 
 class Session {
   static async create(sessionData) {
-    const { class_id, title, meeting_link, started_at, additional_data } = sessionData;
+    const { class_id, title, meeting_link, started_at } = sessionData;
 
     const query = `
-      INSERT INTO sessions (class_id, title, meeting_link, started_at, status, additional_data)
-      VALUES ($1, $2, $3, $4, 'active', $5)
+      INSERT INTO sessions (class_id, title, meeting_link, started_at, status)
+      VALUES ($1, $2, $3, $4, 'active')
       RETURNING *
     `;
-
-    const additionalDataJson = additional_data ? JSON.stringify(additional_data) : null;
 
     const result = await db.query(query, [
       class_id, 
       title, 
       meeting_link,
-      started_at || null,
-      additionalDataJson
+      started_at || null
     ]);
     return result.rows[0];
   }
@@ -92,23 +89,19 @@ class Session {
   }
 
   static async update(id, sessionData) {
-    const { title, meeting_link, additional_data } = sessionData;
+    const { title, meeting_link } = sessionData;
 
     const query = `
       UPDATE sessions
       SET title = COALESCE($1, title),
-          meeting_link = COALESCE($2, meeting_link),
-          additional_data = COALESCE($3, additional_data)
-      WHERE id = $4
+          meeting_link = COALESCE($2, meeting_link)
+      WHERE id = $3
       RETURNING *
     `;
-
-    const additionalDataJson = additional_data ? JSON.stringify(additional_data) : null;
 
     const result = await db.query(query, [
       title,
       meeting_link,
-      additionalDataJson,
       id
     ]);
     return result.rows[0];
@@ -290,8 +283,6 @@ class Session {
       SELECT 
         s.id,
         s.title,
-        s.topic,
-        s.description,
         s.started_at,
         s.ended_at,
         s.status,

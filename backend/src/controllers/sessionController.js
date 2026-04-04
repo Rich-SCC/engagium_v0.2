@@ -134,7 +134,7 @@ const createSession = async (req, res) => {
 const updateSession = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, meeting_link, additional_data } = req.body;
+    const { title, meeting_link } = req.body;
 
     // First get the session to check access
     const existingSession = await Session.findById(id);
@@ -163,10 +163,10 @@ const updateSession = async (req, res) => {
     }
 
     // Validation - at least one field must be provided
-    if (!title && !meeting_link && !additional_data) {
+    if (!title && !meeting_link) {
       return res.status(400).json({
         success: false,
-        error: 'At least one field (title, meeting_link, or additional_data) must be provided'
+        error: 'At least one field (title or meeting_link) must be provided'
       });
     }
 
@@ -175,8 +175,7 @@ const updateSession = async (req, res) => {
 
     const updatedSession = await Session.update(id, {
       title,
-      meeting_link: normalizedLink,
-      additional_data
+      meeting_link: normalizedLink
     });
 
     res.json({
@@ -669,8 +668,7 @@ const startSessionFromMeeting = async (req, res) => {
       class_id,
       title: sessionTitle,
       meeting_link: normalizedLink,
-      started_at,
-      additional_data: null
+      started_at
     });
 
     // Emit socket event for real-time dashboard

@@ -86,11 +86,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at TIMESTAMP WITH TIME ZONE,
     ended_at TIMESTAMP WITH TIME ZONE,
     status session_status DEFAULT 'scheduled' NOT NULL,
-    session_date DATE,
-    session_time TIME,
-    topic VARCHAR(255),
-    description TEXT,
-    additional_data JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

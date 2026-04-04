@@ -2,6 +2,360 @@ const Class = require('../models/Class');
 const SessionLink = require('../models/SessionLink');
 const ExemptedAccount = require('../models/ExemptedAccount');
 
+const DEFAULT_SCHEDULE_DURATION_MINUTES = 90;
+const DEFAULT_EARLY_BUFFER_MINUTES = 30;
+const DEFAULT_OVERTIME_BUFFER_MINUTES = 90;
+const DEFAULT_MIN_OVERLAP_MINUTES = 5;
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+const parseTimeToMinutes = (value) => {
+  if (!value || typeof value !== 'string') return null;
+  const [hourText, minuteText] = value.trim().split(':');
+  const hour = Number.parseInt(hourText, 10);
+  const minute = Number.parseInt(minuteText, 10);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return (hour * 60) + minute;
+};
+
+const parseMeridiemTimeToMinutes = (value) => {
+  if (!value || typeof value !== 'string') return null;
+  const match = value.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])$/);
+  if (!match) return null;
+
+  const hourRaw = Number.parseInt(match[1], 10);
+  const minute = Number.parseInt(match[2] || '0', 10);
+  const modifier = match[3].toUpperCase();
+
+  if (!Number.isInteger(hourRaw) || hourRaw < 1 || hourRaw > 12) return null;
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+
+  let hour = hourRaw % 12;
+  if (modifier === 'PM') {
+    hour += 12;
+  }
+
+  return (hour * 60) + minute;
+};
+
+const parseLegacyTimeRange = (value) => {
+  if (!value || typeof value !== 'string') return { startMinutes: null, endMinutes: null };
+  const parts = value.split('-').map((part) => part.trim()).filter(Boolean);
+  if (parts.length !== 2) return { startMinutes: null, endMinutes: null };
+
+  const startMinutes = parseMeridiemTimeToMinutes(parts[0]);
+  const endMinutes = parseMeridiemTimeToMinutes(parts[1]);
+  return { startMinutes, endMinutes };
+};
+
+const dateKeyToUtcDate = (dateKey) => {
+  if (!dateKey || typeof dateKey !== 'string') return null;
+  const [year, month, day] = dateKey.split('-').map((part) => Number.parseInt(part, 10));
+  if (!year || !month || !day) return null;
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+};
+
+const buildUtcDateTime = (dateKey, minutes) => {
+  const date = dateKeyToUtcDate(dateKey);
+  if (!date || !Number.isFinite(minutes)) return null;
+  return new Date(date.getTime() + (minutes * 60 * 1000));
+};
+
+const toDateKey = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    return value.slice(0, 10);
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  return null;
+};
+
+const diffMinutes = (end, start) => {
+  if (!(end instanceof Date) || Number.isNaN(end.getTime())) return null;
+  if (!(start instanceof Date) || Number.isNaN(start.getTime())) return null;
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+};
+
+const formatMinutesAsTime = (minutes) => {
+  if (!Number.isFinite(minutes)) return null;
+  const safeMinutes = Math.max(0, Math.floor(minutes));
+  const hour = String(Math.floor(safeMinutes / 60)).padStart(2, '0');
+  const minute = String(safeMinutes % 60).padStart(2, '0');
+  return `${hour}:${minute}`;
+};
+
+const formatIsoTime = (value) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+};
+
+const getDayNameForDateKey = (dateKey) => {
+  const date = dateKeyToUtcDate(dateKey);
+  if (!date) return null;
+  return DAY_NAMES[date.getUTCDay()] || null;
+};
+
+const normalizeClassSchedules = (scheduleData) => {
+  if (!scheduleData) return [];
+
+  const rawSchedules = Array.isArray(scheduleData)
+    ? scheduleData
+    : [scheduleData];
+
+  return rawSchedules
+    .map((entry, index) => {
+      if (!entry || typeof entry !== 'object') return null;
+
+      const days = Array.isArray(entry.days)
+        ? entry.days
+          .filter((day) => typeof day === 'string' && day.trim())
+          .map((day) => day.trim().toLowerCase())
+        : [];
+
+      let startMinutes = parseTimeToMinutes(entry.startTime);
+      let endMinutes = parseTimeToMinutes(entry.endTime);
+
+      if (startMinutes === null || endMinutes === null) {
+        const parsedRange = parseLegacyTimeRange(entry.time);
+        if (startMinutes === null) startMinutes = parsedRange.startMinutes;
+        if (endMinutes === null) endMinutes = parsedRange.endMinutes;
+      }
+
+      if (startMinutes === null && endMinutes !== null) {
+        startMinutes = Math.max(0, endMinutes - DEFAULT_SCHEDULE_DURATION_MINUTES);
+      }
+
+      if (startMinutes !== null && endMinutes === null) {
+        endMinutes = startMinutes + DEFAULT_SCHEDULE_DURATION_MINUTES;
+      }
+
+      if (startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+        return null;
+      }
+
+      return {
+        index,
+        days,
+        startMinutes,
+        endMinutes,
+      };
+    })
+    .filter(Boolean);
+};
+
+const resolveSessionRange = (session) => {
+  const startedAt = session.started_at ? new Date(session.started_at) : null;
+  const endedAt = session.ended_at ? new Date(session.ended_at) : null;
+
+  const startedAtValid = startedAt instanceof Date && !Number.isNaN(startedAt.getTime())
+    ? startedAt
+    : null;
+  const endedAtValid = endedAt instanceof Date && !Number.isNaN(endedAt.getTime())
+    ? endedAt
+    : null;
+
+  const dateKey = startedAtValid
+    ? startedAtValid.toISOString().slice(0, 10)
+    : toDateKey(session.session_date);
+  if (!dateKey) return null;
+
+  const sessionTimeText = typeof session.session_time === 'string'
+    ? session.session_time.slice(0, 5)
+    : null;
+  const sessionStartMinutes = parseTimeToMinutes(sessionTimeText);
+
+  const avgDuration = Number.parseFloat(session.avg_duration_minutes || 0);
+  const durationMinutes = Number.isFinite(avgDuration) && avgDuration > 0
+    ? Math.max(1, Math.round(avgDuration))
+    : 0;
+
+  let start = startedAtValid;
+  if (!start && Number.isFinite(sessionStartMinutes)) {
+    start = buildUtcDateTime(dateKey, sessionStartMinutes);
+  }
+
+  if (!start) {
+    return null;
+  }
+
+  let end = endedAtValid;
+  if (!end && durationMinutes > 0) {
+    end = new Date(start.getTime() + (durationMinutes * 60 * 1000));
+  }
+
+  if (!end || end.getTime() < start.getTime()) {
+    end = start;
+  }
+
+  return {
+    dateKey,
+    start,
+    end,
+    durationMinutes: diffMinutes(end, start) || durationMinutes || 0,
+  };
+};
+
+const buildScheduleBundles = ({ schedules, sessions }) => {
+  if (!Array.isArray(schedules) || schedules.length === 0 || !Array.isArray(sessions) || sessions.length === 0) {
+    return [];
+  }
+
+  const bundles = new Map();
+
+  const getBundleKey = (dateKey, scheduleIndex) => `${dateKey}::${scheduleIndex}`;
+
+  const findOrCreateBundle = (dateKey, schedule) => {
+    const key = getBundleKey(dateKey, schedule.index);
+    if (bundles.has(key)) return bundles.get(key);
+
+    const plannedStart = buildUtcDateTime(dateKey, schedule.startMinutes);
+    const plannedEnd = buildUtcDateTime(dateKey, schedule.endMinutes);
+    const bundle = {
+      bundle_id: key,
+      date: dateKey,
+      day_name: getDayNameForDateKey(dateKey),
+      schedule_index: schedule.index,
+      planned_start_time: formatMinutesAsTime(schedule.startMinutes),
+      planned_end_time: formatMinutesAsTime(schedule.endMinutes),
+      planned_minutes: Math.max(0, schedule.endMinutes - schedule.startMinutes),
+      planned_start_at: formatIsoTime(plannedStart),
+      planned_end_at: formatIsoTime(plannedEnd),
+      session_count: 0,
+      session_ids: [],
+      sessions: [],
+      total_participants: 0,
+      present_count: 0,
+      attendance_rate: 0,
+      actual_total_minutes: 0,
+      actual_first_start_at: null,
+      actual_last_end_at: null,
+      early_start_minutes: 0,
+      overtime_minutes: 0,
+      break_minutes: 0,
+    };
+
+    bundles.set(key, bundle);
+    return bundle;
+  };
+
+  sessions.forEach((session) => {
+    const range = resolveSessionRange(session);
+    if (!range) return;
+
+    const dayName = getDayNameForDateKey(range.dateKey);
+    if (!dayName) return;
+
+    const candidates = schedules.filter((schedule) => schedule.days.length === 0 || schedule.days.includes(dayName));
+    if (candidates.length === 0) return;
+
+    const scoredCandidates = candidates.map((schedule) => {
+      const plannedStart = buildUtcDateTime(range.dateKey, schedule.startMinutes);
+      const plannedEnd = buildUtcDateTime(range.dateKey, schedule.endMinutes);
+      if (!plannedStart || !plannedEnd) {
+        return null;
+      }
+
+      const windowStart = new Date(plannedStart.getTime() - (DEFAULT_EARLY_BUFFER_MINUTES * 60 * 1000));
+      const windowEnd = new Date(plannedEnd.getTime() + (DEFAULT_OVERTIME_BUFFER_MINUTES * 60 * 1000));
+      const overlapStart = new Date(Math.max(windowStart.getTime(), range.start.getTime()));
+      const overlapEnd = new Date(Math.min(windowEnd.getTime(), range.end.getTime()));
+      const overlapMinutes = diffMinutes(overlapEnd, overlapStart) || 0;
+
+      return {
+        schedule,
+        overlapMinutes,
+      };
+    }).filter(Boolean);
+
+    if (scoredCandidates.length === 0) return;
+
+    scoredCandidates.sort((left, right) => right.overlapMinutes - left.overlapMinutes);
+    const best = scoredCandidates[0];
+    if (!best || best.overlapMinutes < DEFAULT_MIN_OVERLAP_MINUTES) {
+      return;
+    }
+
+    const bundle = findOrCreateBundle(range.dateKey, best.schedule);
+    bundle.session_count += 1;
+    bundle.session_ids.push(session.id);
+    bundle.sessions.push({
+      id: session.id,
+      title: session.title,
+      start_at: formatIsoTime(range.start),
+      end_at: formatIsoTime(range.end),
+      duration_minutes: range.durationMinutes,
+      attendance_rate: Number.parseFloat(session.attendance_rate || 0),
+      total_participants: Number.parseInt(session.total_participants || 0, 10) || 0,
+      present_count: Number.parseInt(session.present_count || 0, 10) || 0,
+    });
+  });
+
+  const finalized = Array.from(bundles.values()).map((bundle) => {
+    const sortedSessions = [...bundle.sessions].sort((left, right) => new Date(left.start_at).getTime() - new Date(right.start_at).getTime());
+    bundle.sessions = sortedSessions;
+
+    const firstStart = sortedSessions.length > 0 ? new Date(sortedSessions[0].start_at) : null;
+    const lastEnd = sortedSessions.length > 0 ? new Date(sortedSessions[sortedSessions.length - 1].end_at) : null;
+
+    bundle.actual_first_start_at = formatIsoTime(firstStart);
+    bundle.actual_last_end_at = formatIsoTime(lastEnd);
+
+    bundle.actual_total_minutes = sortedSessions.reduce(
+      (sum, item) => sum + (Number.parseInt(item.duration_minutes || 0, 10) || 0),
+      0
+    );
+    bundle.total_participants = sortedSessions.reduce(
+      (sum, item) => sum + (Number.parseInt(item.total_participants || 0, 10) || 0),
+      0
+    );
+    bundle.present_count = sortedSessions.reduce(
+      (sum, item) => sum + (Number.parseInt(item.present_count || 0, 10) || 0),
+      0
+    );
+
+    bundle.attendance_rate = bundle.total_participants > 0
+      ? Number(((bundle.present_count / bundle.total_participants) * 100).toFixed(2))
+      : 0;
+
+    const plannedStart = bundle.planned_start_at ? new Date(bundle.planned_start_at) : null;
+    const plannedEnd = bundle.planned_end_at ? new Date(bundle.planned_end_at) : null;
+    const actualStart = bundle.actual_first_start_at ? new Date(bundle.actual_first_start_at) : null;
+    const actualEnd = bundle.actual_last_end_at ? new Date(bundle.actual_last_end_at) : null;
+
+    if (plannedStart && actualStart) {
+      bundle.early_start_minutes = Math.max(0, diffMinutes(plannedStart, actualStart) || 0);
+    }
+
+    if (plannedEnd && actualEnd) {
+      bundle.overtime_minutes = Math.max(0, diffMinutes(actualEnd, plannedEnd) || 0);
+    }
+
+    let breakMinutes = 0;
+    for (let index = 1; index < sortedSessions.length; index += 1) {
+      const previousEnd = new Date(sortedSessions[index - 1].end_at);
+      const currentStart = new Date(sortedSessions[index].start_at);
+      const gap = diffMinutes(currentStart, previousEnd) || 0;
+      breakMinutes += gap;
+    }
+    bundle.break_minutes = breakMinutes;
+
+    return bundle;
+  });
+
+  finalized.sort((left, right) => {
+    if (left.date !== right.date) {
+      return left.date.localeCompare(right.date);
+    }
+    return left.schedule_index - right.schedule_index;
+  });
+
+  return finalized;
+};
+
 // Get all classes for current instructor
 const getClasses = async (req, res) => {
   try {
@@ -645,8 +999,10 @@ const getClassAnalytics = async (req, res) => {
       SELECT 
         s.id,
         s.title,
-        s.session_date,
-        s.session_time,
+        DATE(s.started_at) as session_date,
+        CAST(s.started_at AS TIME) as session_time,
+        s.started_at,
+        s.ended_at,
         s.status,
         COUNT(DISTINCT ar.id) as total_participants,
         COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as present_count,
@@ -656,11 +1012,11 @@ const getClassAnalytics = async (req, res) => {
       FROM sessions s
       LEFT JOIN attendance_records ar ON s.id = ar.session_id
       WHERE s.class_id = $1 
-        AND s.session_date >= $2
-        AND s.session_date <= $3
+        AND DATE(s.started_at) >= $2
+        AND DATE(s.started_at) <= $3
         AND s.status IN ('active', 'ended')
-      GROUP BY s.id, s.title, s.session_date, s.session_time, s.status
-      ORDER BY s.session_date ASC, s.session_time ASC
+      GROUP BY s.id, s.title, DATE(s.started_at), CAST(s.started_at AS TIME), s.started_at, s.ended_at, s.status
+      ORDER BY DATE(s.started_at) ASC, CAST(s.started_at AS TIME) ASC
     `;
 
     const sessionsResult = await pool.query(sessionsQuery, [id, start, end]);
@@ -688,8 +1044,8 @@ const getClassAnalytics = async (req, res) => {
       LEFT JOIN attendance_records ar ON ar.student_id = st.id AND ar.session_id = s.id
       WHERE st.class_id = $1
         AND s.class_id = $1
-        AND s.session_date >= $2
-        AND s.session_date <= $3
+        AND DATE(s.started_at) >= $2
+        AND DATE(s.started_at) <= $3
         AND s.status IN ('active', 'ended')
         AND st.deleted_at IS NULL
       GROUP BY st.id, st.full_name
@@ -701,9 +1057,9 @@ const getClassAnalytics = async (req, res) => {
     // Get daily attendance heatmap data
     const heatmapQuery = `
       SELECT 
-        s.session_date as date,
-        EXTRACT(DOW FROM s.session_date) as day_of_week,
-        EXTRACT(HOUR FROM s.session_time) as hour,
+        DATE(s.started_at) as date,
+        EXTRACT(DOW FROM DATE(s.started_at)) as day_of_week,
+        EXTRACT(HOUR FROM CAST(s.started_at AS TIME)) as hour,
         COUNT(DISTINCT ar.id) as total_participants,
         COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as present_count,
         COALESCE(ROUND((COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END)::numeric / 
@@ -711,14 +1067,20 @@ const getClassAnalytics = async (req, res) => {
       FROM sessions s
       LEFT JOIN attendance_records ar ON s.id = ar.session_id
       WHERE s.class_id = $1
-        AND s.session_date >= $2
-        AND s.session_date <= $3
+        AND DATE(s.started_at) >= $2
+        AND DATE(s.started_at) <= $3
         AND s.status IN ('active', 'ended')
-      GROUP BY s.session_date, EXTRACT(DOW FROM s.session_date), EXTRACT(HOUR FROM s.session_time)
-      ORDER BY s.session_date ASC
+      GROUP BY DATE(s.started_at), EXTRACT(DOW FROM DATE(s.started_at)), EXTRACT(HOUR FROM CAST(s.started_at AS TIME))
+      ORDER BY date ASC
     `;
 
     const heatmapResult = await pool.query(heatmapQuery, [id, start, end]);
+
+    const normalizedSchedules = normalizeClassSchedules(classData.schedule);
+    const scheduleBundles = buildScheduleBundles({
+      schedules: normalizedSchedules,
+      sessions: sessionsResult.rows,
+    });
 
     // Calculate overall statistics
     const overallStats = {
@@ -739,6 +1101,7 @@ const getClassAnalytics = async (req, res) => {
         dateRange: { startDate: start, endDate: end },
         overallStats,
         sessionTrends: sessionsResult.rows,
+        scheduleBundles,
         studentPerformance: studentPerformanceResult.rows,
         heatmapData: heatmapResult.rows,
       }
