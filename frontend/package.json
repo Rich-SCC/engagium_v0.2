@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@zoom/appssdk": "^0.16.37",
     "@heroicons/react": "^2.0.18",
     "@tanstack/react-query": "^4.24.0",
     "axios": "^1.14.0",

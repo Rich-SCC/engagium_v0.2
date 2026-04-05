@@ -7,6 +7,8 @@ import Layout from '@/components/Layout';
 import LandingPage from '@/pages/LandingPage';
 import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
+import ZoomIframeBridge from '@/pages/ZoomIframeBridge';
+import ZoomOAuthCallback from '@/pages/ZoomOAuthCallback';
 
 // Main pages
 import Home from '@/pages/Home';
@@ -74,6 +76,10 @@ function App() {
           </PublicRoute>
         }
       />
+
+      {/* Public Zoom iframe route (token-based, no JWT UI shell) */}
+      <Route path="/zoom/bridge" element={<ZoomIframeBridge />} />
+      <Route path="/zoom/oauth/callback" element={<ZoomOAuthCallback />} />
 
       {/* Protected routes */}
       <Route

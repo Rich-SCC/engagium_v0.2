@@ -60,7 +60,7 @@ services:
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
     environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:${NGINX_PORT:-8888}/api}
+      VITE_API_URL: ${VITE_API_URL:-/api}
       CHOKIDAR_USEPOLLING: "true"
       CHOKIDAR_INTERVAL: "300"
       WATCHPACK_POLLING: "true"

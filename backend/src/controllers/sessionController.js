@@ -1008,13 +1008,25 @@ const handleLiveEvent = async (req, res) => {
           }
 
         if (canBroadcast) {
-          io.to(`session:${sessionId}`).emit('participant:left', {
+          const leftPayload = {
             session_id: sessionId,
             participant_name: participantName,
             left_at: leftAt,
             total_duration_minutes: totalDurationMinutes,
             participantId: data.participantId,
             leftAt: leftAt,
+            timestamp: eventData.timestamp
+          };
+
+          io.to(`session:${sessionId}`).emit('participant:left', leftPayload);
+          io.to(`instructor_${req.user.id}`).emit('participant:left', leftPayload);
+
+          // Keep instructor dashboards in sync even when they only consume attendance updates.
+          io.to(`instructor_${req.user.id}`).emit('attendance:updated', {
+            session_id: sessionId,
+            student_name: participantName || 'Unknown',
+            action: 'left',
+            total_duration_minutes: totalDurationMinutes,
             timestamp: eventData.timestamp
           });
         }

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { sessionsAPI, participationAPI } from '../services/api';
+import { resolveApiBaseUrl } from '../utils/apiBaseUrl';
 
 const WebSocketContext = createContext(null);
 
@@ -358,9 +359,7 @@ export const WebSocketProvider = ({ children }) => {
     }
 
     // Connect to WebSocket server
-    const SOCKET_URL = import.meta.env.VITE_API_URL
-      ? import.meta.env.VITE_API_URL.replace('/api', '')
-      : window.location.origin;
+    const SOCKET_URL = resolveApiBaseUrl().replace('/api', '');
     
     const newSocket = io(SOCKET_URL, {
       auth: {

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import { resolveApiBaseUrl } from '@/utils/apiBaseUrl';
 
 const ForgotPasswordModal = ({ onClose, onBackToLogin }) => {
-  const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+  const API_BASE_URL = resolveApiBaseUrl();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');

@@ -30,7 +30,8 @@ class EmailService {
       throw new Error('Email service is not configured. Please set SMTP environment variables.');
     }
 
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://dev.engagium.app').replace(/\/+$/, '');
+    const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
     
     const mailOptions = {
       from: `"${process.env.EMAIL_FROM_NAME || 'Engagium'}" <${process.env.SMTP_USER}>`,

@@ -20,13 +20,31 @@ const { ensureParticipationLogsSchema } = require('./src/config/database');
 const app = express();
 const server = http.createServer(app);
 
+const parseAllowedOrigins = () => {
+  const rawOrigins = process.env.CORS_ORIGIN;
+  if (!rawOrigins) {
+    return [
+      'http://localhost:5173',
+      'http://localhost:8888',
+      'https://dev.engagium.app'
+    ];
+  }
+
+  return rawOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+};
+
+const allowedOrigins = parseAllowedOrigins();
+
 // Store app globally for socket handler access
 global.app = app;
 
 // Socket.io setup
 const io = new Server(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin: allowedOrigins,
     methods: ["GET", "POST"]
   }
 });
@@ -34,7 +52,7 @@ const io = new Server(server, {
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
