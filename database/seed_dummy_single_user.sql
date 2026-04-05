@@ -1,5 +1,5 @@
 -- Engagium demo seed data
--- Creates a single instructor with 3 classes and 7 days of analytics-friendly data.
+-- Creates a single instructor with 3 classes and 30 days of analytics-friendly data.
 -- Safe to re-run: deletes existing demo instructor and all cascading data first.
 
 BEGIN;
@@ -54,7 +54,8 @@ CREATE TEMP TABLE tmp_classes (
   class_key TEXT PRIMARY KEY,
   class_id UUID NOT NULL,
   class_name TEXT NOT NULL,
-  start_minutes INTEGER NOT NULL
+  start_minutes INTEGER NOT NULL,
+  end_minutes INTEGER NOT NULL
 );
 
 WITH inserted_classes AS (
@@ -85,12 +86,13 @@ WITH inserted_classes AS (
   CROSS JOIN tmp_seed_classes sc
   RETURNING id, name
 )
-INSERT INTO tmp_classes (class_key, class_id, class_name, start_minutes)
+INSERT INTO tmp_classes (class_key, class_id, class_name, start_minutes, end_minutes)
 SELECT
   sc.class_key,
   ic.id,
   sc.class_name,
-  (split_part(sc.start_time, ':', 1)::INTEGER * 60) + split_part(sc.start_time, ':', 2)::INTEGER
+  (split_part(sc.start_time, ':', 1)::INTEGER * 60) + split_part(sc.start_time, ':', 2)::INTEGER,
+  (split_part(sc.end_time, ':', 1)::INTEGER * 60) + split_part(sc.end_time, ':', 2)::INTEGER
 FROM inserted_classes ic
 JOIN tmp_seed_classes sc ON sc.class_name = ic.name;
 
@@ -170,11 +172,15 @@ CREATE TEMP TABLE tmp_sessions (
   duration_minutes INTEGER NOT NULL
 );
 
-WITH base_days AS (
+WITH utc_today AS (
+  SELECT (NOW() AT TIME ZONE 'UTC')::DATE AS today_utc
+),
+base_days AS (
   SELECT
     day_index,
-    (CURRENT_DATE - (6 - day_index))::DATE AS day_date
-  FROM generate_series(0, 6) AS day_index
+    (u.today_utc - (29 - day_index))::DATE AS day_date
+  FROM generate_series(0, 29) AS day_index
+  CROSS JOIN utc_today u
 ),
 session_blueprint AS (
   SELECT
@@ -183,26 +189,75 @@ session_blueprint AS (
     c.class_name,
     b.day_index,
     b.day_date,
+    RIGHT(c.class_key, 1)::INTEGER AS class_no,
     (1 + ((b.day_index + RIGHT(c.class_key, 1)::INTEGER) % 3)) AS fragment_count,
-    c.start_minutes
+    c.start_minutes,
+    c.end_minutes,
+    GREATEST(5, 5 + ((b.day_index + RIGHT(c.class_key, 1)::INTEGER) % 6)) AS early_buffer_minutes,
+    GREATEST(6, 6 + ((b.day_index * 2 + RIGHT(c.class_key, 1)::INTEGER) % 7)) AS overtime_buffer_minutes
   FROM tmp_classes c
   CROSS JOIN base_days b
 ),
+session_plan AS (
+  SELECT
+    sb.*,
+    GREATEST(0, (sb.end_minutes - sb.start_minutes) + sb.early_buffer_minutes + sb.overtime_buffer_minutes) AS available_minutes,
+    CASE
+      WHEN sb.fragment_count = 1 THEN 0
+      ELSE 5 + ((sb.day_index + sb.class_no) % 4)
+    END AS gap_minutes
+  FROM session_blueprint sb
+),
 expanded_sessions AS (
   SELECT
-    sb.class_id,
-    sb.class_key,
-    sb.class_name,
-    sb.day_index,
-    sb.day_date,
+    sp.class_id,
+    sp.class_key,
+    sp.class_name,
+    sp.day_index,
+    sp.day_date,
+    sp.fragment_count,
+    sp.class_no,
+    sp.gap_minutes,
+    GREATEST(
+      18,
+      FLOOR((sp.available_minutes - (sp.gap_minutes * (sp.fragment_count - 1)))::NUMERIC / sp.fragment_count)::INTEGER
+    ) AS step_minutes,
     g.fragment_no,
     (
-      (sb.day_date::TIMESTAMPTZ)
-      + ((sb.start_minutes + (g.fragment_no - 1) * 55 + ((sb.day_index + RIGHT(sb.class_key, 1)::INTEGER) % 11)) * INTERVAL '1 minute')
-    ) AS started_at,
-    (35 + ((sb.day_index * g.fragment_no + RIGHT(sb.class_key, 1)::INTEGER * 7) % 21)) AS duration_minutes
-  FROM session_blueprint sb
-  CROSS JOIN LATERAL generate_series(1, sb.fragment_count) AS g(fragment_no)
+      GREATEST(0, sp.start_minutes - sp.early_buffer_minutes)
+      + ((g.fragment_no - 1) * GREATEST(
+          18,
+          FLOOR((sp.available_minutes - (sp.gap_minutes * (sp.fragment_count - 1)))::NUMERIC / sp.fragment_count)::INTEGER
+        ))
+    ) AS fragment_start_minutes
+  FROM session_plan sp
+  CROSS JOIN LATERAL generate_series(1, sp.fragment_count) AS g(fragment_no)
+),
+timed_sessions AS (
+  SELECT
+    es.class_id,
+    es.class_key,
+    es.class_name,
+    es.day_index,
+    es.day_date,
+    es.fragment_no,
+    LEAST(
+      es.step_minutes - 1,
+      GREATEST(
+        18,
+        es.step_minutes - es.gap_minutes - 2 + ((es.day_index + es.fragment_no + es.class_no) % 5)
+      )
+    ) AS duration_minutes,
+    make_timestamptz(
+      EXTRACT(YEAR FROM es.day_date)::INTEGER,
+      EXTRACT(MONTH FROM es.day_date)::INTEGER,
+      EXTRACT(DAY FROM es.day_date)::INTEGER,
+      FLOOR(es.fragment_start_minutes / 60)::INTEGER,
+      MOD(es.fragment_start_minutes, 60)::INTEGER,
+      0,
+      'UTC'
+    ) AS started_at
+  FROM expanded_sessions es
 ),
 inserted_sessions AS (
   INSERT INTO sessions (
@@ -214,14 +269,14 @@ inserted_sessions AS (
     status
   )
   SELECT
-    es.class_id,
-    es.class_name || ' | Day ' || (es.day_index + 1)::TEXT || ' | Fragment ' || es.fragment_no::TEXT,
-    'https://meet.google.com/' || LOWER(es.class_key) || '-fragment-' || es.day_index::TEXT || '-' || es.fragment_no::TEXT,
-    es.started_at,
-    es.started_at + (es.duration_minutes * INTERVAL '1 minute'),
+    ts.class_id,
+    ts.class_name || ' | Day ' || (ts.day_index + 1)::TEXT || ' | Fragment ' || ts.fragment_no::TEXT,
+    'https://meet.google.com/' || LOWER(ts.class_key) || '-fragment-' || ts.day_index::TEXT || '-' || ts.fragment_no::TEXT,
+    ts.started_at,
+    ts.started_at + (ts.duration_minutes * INTERVAL '1 minute'),
     'ended'::session_status
-  FROM expanded_sessions es
-  ORDER BY es.class_key, es.day_date, es.fragment_no
+  FROM timed_sessions ts
+  ORDER BY ts.class_key, ts.day_date, ts.fragment_no
   RETURNING id, class_id, started_at, ended_at
 )
 INSERT INTO tmp_sessions (session_id, class_id, class_key, day_date, fragment_no, started_at, ended_at, duration_minutes)

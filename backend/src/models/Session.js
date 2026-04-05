@@ -28,7 +28,18 @@ class Session {
           WHEN c.subject IS NOT NULL THEN c.subject || ' - ' || c.name
           ELSE c.name
         END as class_name,
-        c.subject
+        c.subject,
+        (
+          SELECT COUNT(*)::int
+          FROM attendance_records ar
+          WHERE ar.session_id = s.id
+        ) as total_participants,
+        (
+          SELECT COUNT(*)::int
+          FROM attendance_records ar
+          WHERE ar.session_id = s.id
+            AND ar.status IN ('present', 'late')
+        ) as present_count
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       WHERE c.instructor_id = $1

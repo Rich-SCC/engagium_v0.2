@@ -121,6 +121,9 @@ const Sessions = () => {
   const [expandedBundleIds, setExpandedBundleIds] = useState([]);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  const [selectedClassId, setSelectedClassId] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const { data: sessionsData, isLoading } = useQuery({
     queryKey: ['sessions'],
@@ -350,6 +353,65 @@ const Sessions = () => {
   const bundleDebug = bundledComputation.debug;
   const orphanRows = bundledComputation.orphans || [];
 
+  const classFilterOptions = useMemo(() => {
+    const sorted = [...classes].sort((left, right) => {
+      const leftLabel = formatClassDisplay(left) || '';
+      const rightLabel = formatClassDisplay(right) || '';
+      return leftLabel.localeCompare(rightLabel);
+    });
+    return sorted.map((classInfo) => ({
+      id: String(classInfo.id),
+      label: formatClassDisplay(classInfo),
+    }));
+  }, [classes]);
+
+  const isDateWithinRange = (dateLike) => {
+    const date = new Date(dateLike);
+    if (Number.isNaN(date.getTime())) return true;
+
+    if (dateFrom) {
+      const from = new Date(`${dateFrom}T00:00:00`);
+      if (!Number.isNaN(from.getTime()) && date < from) return false;
+    }
+
+    if (dateTo) {
+      const to = new Date(`${dateTo}T23:59:59.999`);
+      if (!Number.isNaN(to.getTime()) && date > to) return false;
+    }
+
+    return true;
+  };
+
+  const filteredBundledRows = useMemo(() => {
+    return bundledRows.filter((bundle) => {
+      const classMatches = selectedClassId === 'all' || String(bundle.classInfo?.id) === selectedClassId;
+      if (!classMatches) return false;
+      return isDateWithinRange(bundle.date);
+    });
+  }, [bundledRows, selectedClassId, dateFrom, dateTo]);
+
+  const filteredOrphanRows = useMemo(() => {
+    return orphanRows.filter((orphan) => {
+      const classMatches = selectedClassId === 'all' || String(orphan.classInfo?.id) === selectedClassId;
+      if (!classMatches) return false;
+
+      if (orphan?.session?.started_at) return isDateWithinRange(orphan.session.started_at);
+      if (orphan?.session?.session_date) return isDateWithinRange(orphan.session.session_date);
+      return true;
+    });
+  }, [orphanRows, selectedClassId, dateFrom, dateTo]);
+
+  const filteredRawSessions = useMemo(() => {
+    return sessions.filter((session) => {
+      const classMatches = selectedClassId === 'all' || String(session.class_id) === selectedClassId;
+      if (!classMatches) return false;
+
+      if (session.started_at) return isDateWithinRange(session.started_at);
+      if (session.session_date) return isDateWithinRange(session.session_date);
+      return true;
+    });
+  }, [sessions, selectedClassId, dateFrom, dateTo]);
+
   useEffect(() => {
     setExpandedBundleIds((previous) => {
       const validIds = new Set(bundledRows.map((bundle) => bundle.bundle_id));
@@ -391,7 +453,7 @@ const Sessions = () => {
   };
 
   const expandAllBundles = () => {
-    setExpandedBundleIds(bundledRows.map((bundle) => bundle.bundle_id));
+    setExpandedBundleIds(filteredBundledRows.map((bundle) => bundle.bundle_id));
   };
 
   const collapseAllBundles = () => {
@@ -480,6 +542,84 @@ const Sessions = () => {
     setCurrentMonth(month);
   };
 
+  const getAttendanceTone = (rate) => {
+    const numeric = Number(rate) || 0;
+    if (numeric >= 90) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+    if (numeric >= 75) return 'bg-amber-50 text-amber-800 border border-amber-200';
+    return 'bg-rose-50 text-rose-700 border border-rose-200';
+  };
+
+  const getOvertimeTone = (minutes) => {
+    const numeric = Number(minutes) || 0;
+    if (numeric === 0) return 'text-gray-700';
+    if (numeric <= 15) return 'text-amber-700 font-medium';
+    return 'text-rose-700 font-semibold';
+  };
+
+  const renderWindowTimeline = (bundle) => {
+    const plannedStart = bundle.planned_start_at ? new Date(bundle.planned_start_at) : null;
+    const plannedEnd = bundle.planned_end_at ? new Date(bundle.planned_end_at) : null;
+    const actualStart = bundle.actual_first_start_at ? new Date(bundle.actual_first_start_at) : null;
+    const actualEnd = bundle.actual_last_end_at ? new Date(bundle.actual_last_end_at) : null;
+
+    if (!plannedStart || !plannedEnd || !actualStart || !actualEnd) {
+      return <span className="text-sm text-gray-500">-</span>;
+    }
+
+    const minTime = Math.min(plannedStart.getTime(), actualStart.getTime());
+    const maxTime = Math.max(plannedEnd.getTime(), actualEnd.getTime());
+    const totalMs = Math.max(1, maxTime - minTime);
+
+    const plannedLeft = ((plannedStart.getTime() - minTime) / totalMs) * 100;
+    const plannedWidth = ((plannedEnd.getTime() - plannedStart.getTime()) / totalMs) * 100;
+    const actualLeft = ((actualStart.getTime() - minTime) / totalMs) * 100;
+    const actualWidth = ((actualEnd.getTime() - actualStart.getTime()) / totalMs) * 100;
+
+    const lateStartMs = Math.max(0, actualStart.getTime() - plannedStart.getTime());
+    const overtimeMs = Math.max(0, actualEnd.getTime() - plannedEnd.getTime());
+    const lateStartWidth = (lateStartMs / totalMs) * 100;
+    const overtimeWidth = (overtimeMs / totalMs) * 100;
+
+    const lateStartMinutes = Math.round(lateStartMs / 60000);
+    const overtimeMinutes = Math.round(overtimeMs / 60000);
+
+    return (
+      <div className="min-w-[180px]">
+        <div className="relative h-2 rounded-full bg-gray-100 overflow-hidden">
+          <div
+            className="absolute top-0 h-2 rounded-full bg-slate-300"
+            style={{ left: `${plannedLeft}%`, width: `${plannedWidth}%` }}
+            title="Planned window"
+          />
+          <div
+            className="absolute top-0 h-2 rounded-full bg-sky-500/90"
+            style={{ left: `${actualLeft}%`, width: `${actualWidth}%` }}
+            title="Actual window"
+          />
+          {lateStartWidth > 0 ? (
+            <div
+              className="absolute top-0 h-2 bg-rose-400"
+              style={{ left: `${plannedLeft}%`, width: `${lateStartWidth}%` }}
+              title="Late start"
+            />
+          ) : null}
+          {overtimeWidth > 0 ? (
+            <div
+              className="absolute top-0 h-2 bg-amber-400"
+              style={{ left: `${Math.max(plannedLeft + plannedWidth, actualLeft)}%`, width: `${overtimeWidth}%` }}
+              title="Overtime"
+            />
+          ) : null}
+        </div>
+        <div className="mt-1 text-xs text-gray-700">
+          {lateStartMinutes > 0 ? `${lateStartMinutes}m late start` : 'On-time start'}
+          {' • '}
+          {overtimeMinutes > 0 ? `${overtimeMinutes}m overtime` : 'Ended on time'}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -536,9 +676,9 @@ const Sessions = () => {
           <div className="flex items-center justify-between">
             {listMode === 'bundled' ? (
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-gray-600">{bundledRows.length} sessions</span>
+                <span className="text-gray-700">{filteredBundledRows.length} sessions</span>
                 <span className="text-gray-300">|</span>
-                <span className="text-gray-600">{orphanRows.length} ungrouped fragments</span>
+                <span className="text-gray-700">{filteredOrphanRows.length} ungrouped fragments</span>
                 <button
                   type="button"
                   onClick={expandAllBundles}
@@ -580,11 +720,59 @@ const Sessions = () => {
             </div>
           </div>
 
+          <div className="bg-white rounded-lg shadow p-4 flex flex-wrap gap-3 items-end">
+            <div className="min-w-[220px]">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 mb-1">Class</label>
+              <select
+                value={selectedClassId}
+                onChange={(event) => setSelectedClassId(event.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All classes</option>
+                {classFilterOptions.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 mb-1">From</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(event) => setDateFrom(event.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-700 mb-1">To</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(event) => setDateTo(event.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedClassId('all');
+                setDateFrom('');
+                setDateTo('');
+              }}
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              Reset filters
+            </button>
+          </div>
+
           {isLoading ? (
             <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
               Loading sessions...
             </div>
-          ) : listMode === 'raw' && sessions.length === 0 ? (
+          ) : listMode === 'raw' && filteredRawSessions.length === 0 ? (
             <div className="bg-white rounded-lg shadow p-12 text-center">
               <div className="text-6xl mb-4">📅</div>
               <h3 className="text-xl font-semibold text-gray-900 mb-2">No fragments yet</h3>
@@ -594,7 +782,7 @@ const Sessions = () => {
             <div className="bg-white rounded-lg shadow p-12 text-center text-gray-500">
               Loading session view...
             </div>
-          ) : listMode === 'bundled' && bundledRows.length === 0 && orphanRows.length === 0 ? (
+          ) : listMode === 'bundled' && filteredBundledRows.length === 0 && filteredOrphanRows.length === 0 ? (
             <div className="bg-white rounded-lg shadow p-12 text-center">
               <div className="text-6xl mb-4">🧩</div>
               <h3 className="text-xl font-semibold text-gray-900 mb-2">No sessions yet</h3>
@@ -602,15 +790,16 @@ const Sessions = () => {
             </div>
           ) : listMode === 'bundled' ? (
             <div className="space-y-4">
-              <div className="bg-white rounded-lg shadow overflow-x-auto">
+              <div className="bg-white rounded-lg shadow overflow-auto max-h-[72vh]">
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className="bg-gray-50 sticky top-0 z-10">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider"></th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Class</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Planned Window</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Actual Window</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider"></th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Class</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Planned Window</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Actual Window</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Window Drift</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Fragments</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Early</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Overtime</th>
@@ -620,12 +809,12 @@ const Sessions = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {bundledRows.map((bundle) => {
+                  {filteredBundledRows.map((bundle, rowIndex) => {
                     const isExpanded = expandedBundleIds.includes(bundle.bundle_id);
                     return (
                     <React.Fragment key={bundle.bundle_id}>
                     <tr
-                      className="hover:bg-gray-50 cursor-pointer"
+                      className={`group cursor-pointer transition-colors ${rowIndex % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/40 hover:bg-slate-100/60'}`}
                       onClick={() => toggleBundleRow(bundle.bundle_id)}
                     >
                       <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700">
@@ -635,14 +824,14 @@ const Sessions = () => {
                           <ChevronRightIcon className="w-4 h-4" />
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                         {new Date(bundle.date).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',
                         })}
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-900">
+                      <td className="px-6 py-4 text-sm font-semibold text-gray-900">
                         {bundle.classInfo ? formatClassDisplay(bundle.classInfo) : 'N/A'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -651,19 +840,27 @@ const Sessions = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {formatDateTimeLabel(bundle.actual_first_start_at)} - {formatDateTimeLabel(bundle.actual_last_end_at)}
                       </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        {renderWindowTimeline(bundle)}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{bundle.session_count || 0}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{bundle.early_start_minutes || 0}m</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{bundle.overtime_minutes || 0}m</td>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm ${getOvertimeTone(bundle.overtime_minutes)}`}>{bundle.overtime_minutes || 0}m</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{bundle.break_minutes || 0}m</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{bundle.attendance_rate || 0}%</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getAttendanceTone(bundle.attendance_rate || 0)}`}>
+                          {bundle.attendance_rate || 0}%
+                        </span>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         {Array.isArray(bundle.session_ids) && bundle.session_ids.length > 0 ? (
                           <Link
-                            to={`/app/sessions/${bundle.session_ids[0]}`}
-                            className="text-blue-600 hover:text-blue-900"
+                            to={`/app/sessions/bundled/${encodeURIComponent(bundle.bundle_id)}?ids=${encodeURIComponent(bundle.session_ids.join(','))}`}
+                            state={{ bundle }}
+                            className="text-blue-600 hover:text-blue-900 opacity-0 group-hover:opacity-100 transition-opacity"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            View First Fragment
+                            View Session
                           </Link>
                         ) : (
                           <span className="text-gray-400">N/A</span>
@@ -671,40 +868,39 @@ const Sessions = () => {
                       </td>
                     </tr>
                     {isExpanded ? (
-                      <tr className="bg-gray-50/50">
+                      <tr className="bg-sky-50/60">
                         <td></td>
-                        <td colSpan={10} className="px-6 py-4">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-2">Session fragments</div>
-                          <div className="overflow-x-auto border border-gray-200 rounded-md bg-white">
-                            <table className="min-w-full divide-y divide-gray-200">
-                              <thead className="bg-gray-50">
-                                <tr>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Fragment Time</th>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Participants</th>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Present</th>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Status</th>
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Action</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {bundle.sessions.map((fragment) => (
-                                  <tr key={fragment.id}>
-                                    <td className="px-4 py-2 text-sm text-gray-900">{formatFragmentWindow(fragment.start_at, fragment.end_at)}</td>
-                                    <td className="px-4 py-2 text-sm text-gray-900">{fragment.total_participants || 0}</td>
-                                    <td className="px-4 py-2 text-sm text-gray-900">{fragment.present_count || 0}</td>
-                                    <td className="px-4 py-2 text-sm text-gray-900">{fragment.status || 'ended'}</td>
-                                    <td className="px-4 py-2 text-sm">
-                                      <Link
-                                        to={`/app/sessions/${fragment.id}`}
-                                        className="text-blue-600 hover:text-blue-900"
-                                      >
-                                        Open Fragment
-                                      </Link>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                        <td colSpan={11} className="px-6 py-4">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-sky-900 mb-3">Session fragments</div>
+                          <div className="rounded-md border border-sky-100 bg-white/90 divide-y divide-sky-100">
+                            {bundle.sessions.map((fragment) => (
+                              <div key={fragment.id} className="grid grid-cols-1 md:grid-cols-5 gap-3 px-4 py-3 items-center">
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Fragment Time</div>
+                                  <div className="text-sm font-medium text-gray-900">{formatFragmentWindow(fragment.start_at, fragment.end_at)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Participants</div>
+                                  <div className="text-sm text-gray-900">{fragment.total_participants || 0}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Present</div>
+                                  <div className="text-sm text-gray-900">{fragment.present_count || 0}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Status</div>
+                                  <div className="text-sm text-gray-900">{fragment.status || 'ended'}</div>
+                                </div>
+                                <div className="md:text-right">
+                                  <Link
+                                    to={`/app/sessions/${fragment.id}`}
+                                    className="text-sm text-blue-600 hover:text-blue-900 font-medium"
+                                  >
+                                    Open Fragment
+                                  </Link>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </td>
                       </tr>
@@ -721,7 +917,7 @@ const Sessions = () => {
                   <h3 className="text-sm font-semibold text-gray-900">Ungrouped Session Fragments</h3>
                   <p className="text-sm text-gray-600 mt-1">Fragments that did not fit any session window.</p>
                 </div>
-                {orphanRows.length === 0 ? (
+                {filteredOrphanRows.length === 0 ? (
                   <div className="px-6 py-6 text-sm text-gray-500">No ungrouped fragments.</div>
                 ) : (
                   <table className="min-w-full divide-y divide-gray-200">
@@ -734,7 +930,7 @@ const Sessions = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {orphanRows.map((orphan) => (
+                      {filteredOrphanRows.map((orphan) => (
                         <tr key={`orphan-${orphan.session?.id}-${orphan.reason}`} className="bg-amber-50/50 hover:bg-amber-100/40">
                           <td className="px-6 py-3 text-sm text-gray-900">{formatSessionTime(orphan.session)}</td>
                           <td className="px-6 py-3 text-sm text-gray-900">{orphan.classInfo ? formatClassDisplay(orphan.classInfo) : 'Unknown Class'}</td>
@@ -774,7 +970,7 @@ const Sessions = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {sessions.map((session) => {
+                  {filteredRawSessions.map((session) => {
                     const classInfo = classes.find(c => c.id === session.class_id);
                     const sessionTime = formatSessionTime(session);
                     return (

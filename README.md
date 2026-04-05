@@ -54,7 +54,7 @@ engagium_v0.2/
 
 ### Run Everything with Docker Compose (Recommended for Iteration)
 
-This starts PostgreSQL, backend API, and frontend in one command with hot-reload friendly volumes.
+This starts PostgreSQL, backend API, frontend, and Nginx reverse proxy in one command with hot-reload friendly volumes.
 
 1. **Create compose env file**
 ```bash
@@ -67,9 +67,13 @@ docker compose up --build
 ```
 
 3. **Access services**
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:3001
+- App via Nginx: http://localhost:8888
+- Backend API via Nginx: http://localhost:8888/api
 - PostgreSQL: localhost:5432
+
+Optional direct container ports (still exposed for debugging):
+- Frontend dev server: http://localhost:5173
+- Backend API: http://localhost:3001
 
 4. **Stop services**
 ```bash

@@ -54,6 +54,31 @@ export const aggregateSessionLogs = (logs = []) => {
   const totals = createEmptyInteractionTotals();
   const studentMap = new Map();
   const activeStudentIds = new Set();
+  const canonicalIdByName = new Map();
+
+  const normalizeIdentityName = (value) => String(value || '').trim().toLowerCase();
+
+  const resolveIdentityKey = (log) => {
+    const studentId = log?.student_id || null;
+    const displayName = log?.full_name || log?.student_name || log?.participant_name || 'Unknown participant';
+    const normalizedName = normalizeIdentityName(displayName);
+
+    if (studentId) {
+      const idKey = `student:${studentId}`;
+      if (normalizedName) {
+        canonicalIdByName.set(normalizedName, idKey);
+      }
+      return { key: idKey, studentId, displayName };
+    }
+
+    if (normalizedName && canonicalIdByName.has(normalizedName)) {
+      const mappedKey = canonicalIdByName.get(normalizedName);
+      return { key: mappedKey, studentId: mappedKey.replace('student:', ''), displayName };
+    }
+
+    const fallbackKey = normalizedName ? `name:${normalizedName}` : 'name:unknown-participant';
+    return { key: fallbackKey, studentId: null, displayName };
+  };
 
   logs.forEach((log) => {
     const interactionType = log?.interaction_type || 'unknown';
@@ -66,19 +91,17 @@ export const aggregateSessionLogs = (logs = []) => {
       totals.speakingProxySeconds += toNumber(log?.additional_data?.speakingDurationSeconds);
     }
 
-    const studentId = log?.student_id || null;
-    if (!studentId) {
-      return;
+    const identity = resolveIdentityKey(log);
+    activeStudentIds.add(identity.key);
+
+    if (!studentMap.has(identity.key)) {
+      studentMap.set(identity.key, createEmptyStudentParticipation(identity.studentId, identity.displayName));
     }
 
-    activeStudentIds.add(studentId);
-
-    if (!studentMap.has(studentId)) {
-      const displayName = log?.full_name || log?.student_name || log?.participant_name || 'Unknown participant';
-      studentMap.set(studentId, createEmptyStudentParticipation(studentId, displayName));
-    }
-
-    const student = studentMap.get(studentId);
+    const student = studentMap.get(identity.key);
+    student.full_name = student.full_name || identity.displayName;
+    student.student_name = student.student_name || identity.displayName;
+    student.participant_name = student.participant_name || identity.displayName;
     student.total_interactions += 1;
 
     if (interactionType === 'chat') {

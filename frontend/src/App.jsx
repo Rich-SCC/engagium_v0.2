@@ -16,6 +16,7 @@ import MyClasses from '@/pages/MyClasses';
 import ClassDetailsPage from '@/pages/ClassDetailsPage';
 import Sessions from '@/pages/Sessions';
 import SessionDetailPage from '@/pages/SessionDetailPage';
+import BundledSessionDetailPage from '@/pages/BundledSessionDetailPage';
 import Settings from '@/pages/Settings';
 
 // Protected route component
@@ -89,6 +90,7 @@ function App() {
         <Route path="classes" element={<MyClasses />} />
         <Route path="classes/:id" element={<ClassDetailsPage />} />
         <Route path="sessions" element={<Sessions />} />
+        <Route path="sessions/bundled/:bundleId" element={<BundledSessionDetailPage />} />
         <Route path="sessions/:id" element={<SessionDetailPage />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="settings" element={<Settings />} />
