@@ -959,7 +959,7 @@ const handleLiveEvent = async (req, res) => {
           participantName
         });
         if (canBroadcast) {
-          io.to(`session:${sessionId}`).emit('participant:joined', {
+          const joinedPayload = {
             session_id: sessionId,
             participant_name: participantName,
             student_id: null,
@@ -967,7 +967,17 @@ const handleLiveEvent = async (req, res) => {
             is_matched: false,
             participant: data.participant,
             timestamp: eventData.timestamp
+          };
+
+          io.to(`session:${sessionId}`).emit('participant:joined', {
+            ...joinedPayload
           });
+
+          // Instructor dashboards listen on instructor room, so emit join events there too.
+          io.to(`instructor_${req.user.id}`).emit('participant:joined', {
+            ...joinedPayload
+          });
+
           io.to(`instructor_${req.user.id}`).emit('attendance:updated', {
             session_id: sessionId,
             student_name: participantName || 'Unknown',
