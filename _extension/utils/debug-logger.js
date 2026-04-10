@@ -4,10 +4,27 @@
  * Broadcasts logs to options page for real-time monitoring
  */
 
-import { STORAGE_KEYS } from './constants.js';
-
 const MAX_DEBUG_LOGS = 500;
 const DEBUG_STORAGE_KEY = 'debug_logs';
+const DEBUG_FLUSH_INTERVAL_MS = 1000;
+const DEBUG_MAX_BUFFER_SIZE = 25;
+const NOISY_EVENT_RATE_LIMIT_MS = 3000;
+
+// Polling-heavy events can create write pressure; rate-limit persisted logs per key.
+const NOISY_EVENTS = new Set([
+  'MIC_TOGGLE',
+  'PARTICIPANT_JOINED',
+  'PARTICIPANT_LEFT',
+  'HAND_RAISE',
+  'REACTION',
+  'CHAT_ACTIVITY',
+  'MIC_STATUS_CHANGED'
+]);
+
+let pendingLogs = [];
+let flushTimer = null;
+let isFlushing = false;
+const lastPersistedByKey = new Map();
 
 /**
  * Log entry structure
@@ -46,6 +63,10 @@ export async function debugLog(source, type, event, data = null) {
     data || ''
   );
 
+  if (!shouldPersistEntry(entry)) {
+    return;
+  }
+
   // Storage and broadcast in try-catch to prevent failures
   try {
     // Check if chrome.storage is available
@@ -54,31 +75,98 @@ export async function debugLog(source, type, event, data = null) {
       return;
     }
 
-    // Get existing logs
+    pendingLogs.push(entry);
+
+    const shouldFlushNow =
+      type === 'ERROR' ||
+      type === 'WARN' ||
+      pendingLogs.length >= DEBUG_MAX_BUFFER_SIZE;
+
+    if (shouldFlushNow) {
+      await flushPendingLogs();
+    } else if (!flushTimer) {
+      flushTimer = setTimeout(() => {
+        flushPendingLogs().catch((error) => {
+          console.warn('[DebugLogger] Timed flush failed:', error.message);
+        });
+      }, DEBUG_FLUSH_INTERVAL_MS);
+    }
+  } catch (error) {
+    // Log error but don't fail the caller
+    console.warn('[DebugLogger] Failed to save log:', error.message);
+  }
+}
+
+function shouldPersistEntry(entry) {
+  // Always keep failures and warnings for diagnostics.
+  if (entry.type === 'ERROR' || entry.type === 'WARN') {
+    return true;
+  }
+
+  if (!NOISY_EVENTS.has(entry.event)) {
+    return true;
+  }
+
+  const key = `${entry.source}:${entry.type}:${entry.event}`;
+  const last = lastPersistedByKey.get(key) || 0;
+  const current = Date.now();
+
+  if (current - last < NOISY_EVENT_RATE_LIMIT_MS) {
+    return false;
+  }
+
+  lastPersistedByKey.set(key, current);
+  return true;
+}
+
+async function flushPendingLogs() {
+  if (isFlushing || pendingLogs.length === 0) {
+    return;
+  }
+
+  isFlushing = true;
+
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+
+  const batch = [...pendingLogs].reverse();
+  pendingLogs = [];
+
+  try {
     const result = await chrome.storage.local.get(DEBUG_STORAGE_KEY);
     const logs = result[DEBUG_STORAGE_KEY] || [];
-    
-    // Add new entry at the beginning
-    logs.unshift(entry);
-    
-    // Trim to max size
-    const trimmedLogs = logs.slice(0, MAX_DEBUG_LOGS);
-    
-    // Save back
-    await chrome.storage.local.set({ [DEBUG_STORAGE_KEY]: trimmedLogs });
-    
-    // Broadcast to any listening tabs (options page)
-    if (chrome.runtime && chrome.runtime.sendMessage) {
+
+    // batch is newest-first after reverse(); prepend to existing list.
+    const mergedLogs = [...batch, ...logs].slice(0, MAX_DEBUG_LOGS);
+    await chrome.storage.local.set({ [DEBUG_STORAGE_KEY]: mergedLogs });
+
+    // Broadcast only the latest entry to avoid message spam in high-volume periods.
+    const latestEntry = batch[0];
+    if (latestEntry && chrome.runtime && chrome.runtime.sendMessage) {
       chrome.runtime.sendMessage({
         type: 'DEBUG_LOG_ADDED',
-        entry
+        entry: latestEntry
       }).catch(() => {
         // Ignore errors when no listeners
       });
     }
   } catch (error) {
-    // Log error but don't fail the caller
-    console.warn('[DebugLogger] Failed to save log:', error.message);
+    // Re-queue dropped batch on failure.
+    pendingLogs = [...batch.reverse(), ...pendingLogs];
+    throw error;
+  } finally {
+    isFlushing = false;
+
+    // If new entries arrived while flushing, schedule next flush.
+    if (pendingLogs.length > 0 && !flushTimer) {
+      flushTimer = setTimeout(() => {
+        flushPendingLogs().catch((error) => {
+          console.warn('[DebugLogger] Follow-up flush failed:', error.message);
+        });
+      }, DEBUG_FLUSH_INTERVAL_MS);
+    }
   }
 }
 

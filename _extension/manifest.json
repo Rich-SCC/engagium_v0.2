@@ -57,7 +57,7 @@
 
   "host_permissions": [
     "https://engagium.app/*",
-    "http://localhost:3001/*"
+    "https://dev.engagium.app/*"
   ],
 
   "options_page": "options/index.html"

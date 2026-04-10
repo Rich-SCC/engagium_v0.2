@@ -2,22 +2,19 @@ const db = require('../config/database');
 
 class Session {
   static async create(sessionData) {
-    const { class_id, title, meeting_link, started_at, additional_data } = sessionData;
+    const { class_id, title, meeting_link, started_at } = sessionData;
 
     const query = `
-      INSERT INTO sessions (class_id, title, meeting_link, started_at, status, additional_data)
-      VALUES ($1, $2, $3, $4, 'active', $5)
+      INSERT INTO sessions (class_id, title, meeting_link, started_at, status)
+      VALUES ($1, $2, $3, $4, 'active')
       RETURNING *
     `;
-
-    const additionalDataJson = additional_data ? JSON.stringify(additional_data) : null;
 
     const result = await db.query(query, [
       class_id, 
       title, 
       meeting_link,
-      started_at || null,
-      additionalDataJson
+      started_at || null
     ]);
     return result.rows[0];
   }
@@ -31,7 +28,18 @@ class Session {
           WHEN c.subject IS NOT NULL THEN c.subject || ' - ' || c.name
           ELSE c.name
         END as class_name,
-        c.subject
+        c.subject,
+        (
+          SELECT COUNT(*)::int
+          FROM attendance_records ar
+          WHERE ar.session_id = s.id
+        ) as total_participants,
+        (
+          SELECT COUNT(*)::int
+          FROM attendance_records ar
+          WHERE ar.session_id = s.id
+            AND ar.status IN ('present', 'late')
+        ) as present_count
       FROM sessions s
       JOIN classes c ON s.class_id = c.id
       WHERE c.instructor_id = $1
@@ -92,23 +100,19 @@ class Session {
   }
 
   static async update(id, sessionData) {
-    const { title, meeting_link, additional_data } = sessionData;
+    const { title, meeting_link } = sessionData;
 
     const query = `
       UPDATE sessions
       SET title = COALESCE($1, title),
-          meeting_link = COALESCE($2, meeting_link),
-          additional_data = COALESCE($3, additional_data)
-      WHERE id = $4
+          meeting_link = COALESCE($2, meeting_link)
+      WHERE id = $3
       RETURNING *
     `;
-
-    const additionalDataJson = additional_data ? JSON.stringify(additional_data) : null;
 
     const result = await db.query(query, [
       title,
       meeting_link,
-      additionalDataJson,
       id
     ]);
     return result.rows[0];
@@ -201,8 +205,15 @@ class Session {
         COUNT(CASE WHEN interaction_type = 'reaction' THEN 1 END) as reactions,
         COUNT(CASE WHEN interaction_type = 'mic_toggle' THEN 1 END) as mic_toggles,
         COUNT(CASE WHEN interaction_type = 'camera_toggle' THEN 1 END) as camera_toggles
-      FROM participation_logs
-      WHERE session_id = $1
+      FROM participation_logs pl
+      WHERE pl.session_id = $1
+        AND NOT (
+          pl.interaction_type = 'mic_toggle'
+          AND (
+            COALESCE(pl.additional_data->>'speakingAction', '') = 'start'
+            OR COALESCE(pl.additional_data->>'isMuted', '') = 'false'
+          )
+        )
     `;
 
     const result = await db.query(query, [sessionId]);
@@ -283,8 +294,6 @@ class Session {
       SELECT 
         s.id,
         s.title,
-        s.topic,
-        s.description,
         s.started_at,
         s.ended_at,
         s.status,

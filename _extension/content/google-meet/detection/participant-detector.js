@@ -19,17 +19,33 @@
 
 import { CONFIG, cleanParticipantName, isValidParticipantName } from '../core/config.js';
 import { generateParticipantId, log, warn, sleep, isInvalidParticipant } from '../core/utils.js';
-import { sendImmediate } from '../core/event-emitter.js';
+import { queueEvent, sendImmediate } from '../core/event-emitter.js';
 import { MESSAGE_TYPES, PLATFORMS } from '../../../utils/constants.js';
 import { now } from '../../../utils/date-utils.js';
 import { withPanelOpen } from '../dom/panel-manager.js';
-import { findParticipantsList, findSidePanel, detectUIVersion } from '../dom/dom-manager.js';
+import { findParticipantsList, detectPeoplePanelBehavior, findSidePanel } from '../dom/dom-manager.js';
+import {
+  waitForPrimingReadiness,
+  primeChatPanelAccessOnce,
+  isChatToastText,
+  extractChatActivityFromToastNode,
+  normalizeToastTextForDedupe,
+  isValidToastName,
+  isLikelyUIElement,
+  extractNameFromToast,
+  extractNameFromChatToast
+} from './chat-detector.js';
+import { maybeEmitMicToggle } from './mic-toggle-detector.js';
+import { startRaisedHandMonitoring, stopRaisedHandMonitoring } from './raised-hand-detector.js';
+import { startReactionMonitoring, stopReactionMonitoring } from './reaction-detector.js';
 import { showRetroactiveCaptureNotification } from '../ui/meeting-notifications.js';
 
 let peoplePanelObserver = null;
 let toastObserver = null;
 let panelWatcher = null;
+let passiveScanInterval = null;
 let recentToasts = new Map(); // Track recent toasts to prevent duplicates
+let reactionDebounceByParticipant = new Map(); // participant name (lowercase) -> timestamp
 let pendingScans = []; // Queue for batching scan requests
 let scanTimeout = null;
 
@@ -47,8 +63,8 @@ async function executeDetectionWorkflow(state, scanFunction, reason) {
     // Small delay to ensure DOM is ready
     await sleep(50);
     
-    // Execute the scan function (which sends events)
-    scanFunction(state);
+    // Execute scan steps; supports async workflows for startup prep actions.
+    await Promise.resolve(scanFunction(state));
     
     return true;
   }, reason);
@@ -77,8 +93,18 @@ function queueScan(state, scanFunction, reason) {
     pendingScans = [];
     
     log(`Executing ${scans.length} batched scans`);
-    
-    // Execute all scans together with panel open once
+
+    // In persistent-data mode, once the panel has been opened at least once,
+    // participant list data remains readable even when visually closed.
+    if (canScanWithoutOpeningPanel()) {
+      for (const { state, scanFunction, reason } of scans) {
+        log(`  - ${reason} (passive)`);
+        scanFunction(state);
+      }
+      return;
+    }
+
+    // Toggle-data fallback: execute with panel open.
     await withPanelOpen(async () => {
       await sleep(50); // DOM stability
       
@@ -92,42 +118,103 @@ function queueScan(state, scanFunction, reason) {
 }
 
 /**
+ * Determine whether scans can run without opening the people panel.
+ * @returns {boolean}
+ */
+function canScanWithoutOpeningPanel() {
+  // If participants list remains in DOM, we can read it passively without forcing panel open.
+  return !!findParticipantsList();
+}
+
+/**
+ * Start passive participant/mic scans.
+ * @param {Object} state - State object
+ */
+function startPassiveScanLoop(state) {
+  if (passiveScanInterval) {
+    clearInterval(passiveScanInterval);
+  }
+
+  passiveScanInterval = setInterval(() => {
+    if (!state.isTracking) {
+      return;
+    }
+
+    const passiveReadable = canScanWithoutOpeningPanel();
+
+    // Always run periodic participant/mic scan.
+    // If passive-readable, this does not toggle panel.
+    // If not passive-readable, queueScan falls back to panel-managed workflow.
+    queueScan(
+      state,
+      rescanAndDetectNew,
+      passiveReadable
+        ? 'passive scan - new participants and mic changes'
+        : 'periodic scan - new participants and mic changes'
+    );
+
+    // Leave detection is safer when panel data is passively readable.
+    if (passiveReadable) {
+      queueScan(state, detectLeftParticipants, 'passive scan - detect leaves');
+    }
+  }, 5000);
+}
+
+/**
  * Starts monitoring participants using People Panel + Toast notifications
  * @param {Object} state - State object
  */
 export function startParticipantMonitoring(state) {
   log('Starting participant monitoring (optimized with centralized DOM)...');
   
-  // Detect UI version
-  const uiVersion = detectUIVersion();
-  log(`Detected UI version: ${uiVersion}`);
+  // Detect normalized panel behavior mode
+  const panelBehavior = detectPeoplePanelBehavior();
+  log(`Detected panel behavior mode: ${panelBehavior}`);
   
   // Initial scan using centralized workflow
-  executeDetectionWorkflow(state, (state) => {
+  // The UI should already be ready from the caller's waitForMeetingUI check
+  executeDetectionWorkflow(state, async (state) => {
     scanCurrentParticipants(state);
-    
+
     // Show retroactive capture notification if participants were found
     const participantCount = state.participants.size;
     if (participantCount > 0) {
       log(`Retroactively captured ${participantCount} participants already in meeting`);
       showRetroactiveCaptureNotification(participantCount);
     }
-  }, 'initial scan').then(() => {
+  }, 'initial scan').then(async () => {
+    // Give Meet a moment to settle after the People panel lifecycle before touching Chat.
+    await sleep(250);
+
+    const readyForPrime = await waitForPrimingReadiness();
+    if (!readyForPrime) {
+      warn('Skipping chat priming - Meet UI not fully ready yet');
+    } else {
+      await primeChatPanelAccessOnce();
+    }
+
     // Set up People Panel observer (primary source)
     if (!setupPeoplePanelObserver(state)) {
       // Panel not found yet, watch for it
       setupPanelWatcher(state);
     }
-  });
-  
-  // Set up toast observer for join/leave events ONLY for old UI
-  // New UI: Data remains accessible after first panel open, toasts cause unnecessary operations
-  if (uiVersion === 'old') {
+
+    // Start periodic scanning for mic/participant changes.
+    startPassiveScanLoop(state);
+
+    // Toasts are required for chat activity and reaction events in all panel modes.
+    // Join/leave handlers inside the observer still use mode-aware scan behavior.
     setupToastObserver(state);
-    log('Toast observer enabled for old UI');
-  } else {
-    log('Toast observer disabled for new UI (data remains accessible)');
-  }
+    log('Toast observer enabled (join/leave + chat + reaction triggers)');
+
+    // Raised hands are sourced from the People panel section (no toast dependency).
+    startRaisedHandMonitoring(state);
+    log('Raised hand detector enabled (people panel state trigger)');
+
+    // Floating reactions fallback for Meet variants without reaction toast text.
+    startReactionMonitoring(state);
+    log('Reaction detector enabled (floating emoji fallback)');
+  });
 }
 
 /**
@@ -153,7 +240,14 @@ export function stopParticipantMonitoring(state) {
     clearTimeout(scanTimeout);
     scanTimeout = null;
   }
+  if (passiveScanInterval) {
+    clearInterval(passiveScanInterval);
+    passiveScanInterval = null;
+  }
   pendingScans = [];
+  reactionDebounceByParticipant.clear();
+  stopRaisedHandMonitoring();
+  stopReactionMonitoring();
   
   log('Participant monitoring stopped');
 }
@@ -168,11 +262,24 @@ function setupToastObserver(state) {
     if (!state.isTracking) return;
     
     for (const mutation of mutations) {
-      if (mutation.type !== 'childList') continue;
-      
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType !== Node.ELEMENT_NODE) continue;
-        
+      const candidateNodes = [];
+
+      if (mutation.type === 'childList') {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            candidateNodes.push(node);
+          }
+        }
+      }
+
+      if (mutation.type === 'characterData') {
+        const elementNode = mutation.target?.parentElement;
+        if (elementNode) {
+          candidateNodes.push(elementNode);
+        }
+      }
+
+      for (const node of candidateNodes) {
         const text = node.textContent?.trim() || '';
         const textLower = text.toLowerCase();
         
@@ -233,85 +340,95 @@ function setupToastObserver(state) {
             }, `leave toast: ${name}`);
           }
         }
+
+        // Track chat activity from toast only (privacy-preserving, no message content)
+        const chatToastData = extractChatActivityFromToastNode(node);
+        if (chatToastData || isChatToastText(textLower)) {
+          const sender = chatToastData?.name || extractNameFromChatToast(text);
+
+          if (!sender && textLower.includes('chat')) {
+            log('Chat-like toast detected but sender parse failed', {
+              rawText: text.slice(0, 200)
+            });
+          }
+
+          if (sender && !isInvalidParticipant(sender, CONFIG) && isValidToastName(sender)) {
+            const dedupeSignature = chatToastData?.dedupeKey || `${sender}:${normalizeToastTextForDedupe(text)}`;
+            const recentKey = `chat:${dedupeSignature}`;
+            const lastSeen = recentToasts.get(recentKey);
+
+            if (lastSeen && Date.now() - lastSeen < 2000) {
+              continue;
+            }
+
+            recentToasts.set(recentKey, Date.now());
+            setTimeout(() => recentToasts.delete(recentKey), 5000);
+
+            const detectedAt = now();
+            log('Chat detected (toast trigger)', {
+              platform: PLATFORMS.GOOGLE_MEET,
+              meetingId: state.meetingId,
+              name: sender,
+              source: chatToastData?.source || 'chat_text_toast',
+              timestamp: detectedAt
+            });
+
+            sendImmediate(MESSAGE_TYPES.CHAT_ACTIVITY, {
+              platform: PLATFORMS.GOOGLE_MEET,
+              meetingId: state.meetingId,
+              name: sender,
+              source: chatToastData?.source || 'chat_text_toast',
+              timestamp: detectedAt
+            });
+          }
+        }
+
+        // Track reactions from toasts with 5s per-participant debounce
+        if (textLower.includes(CONFIG.PATTERNS.reactedWith)) {
+          const reaction = extractReactionFromToast(text);
+          const name = extractNameFromToast(text, CONFIG.PATTERNS.reactedWith);
+          if (name && reaction && !isInvalidParticipant(name, CONFIG) && isValidToastName(name)) {
+            const normalized = name.toLowerCase().trim();
+            const lastSeen = reactionDebounceByParticipant.get(normalized) || 0;
+
+            if (Date.now() - lastSeen >= 5000) {
+              reactionDebounceByParticipant.set(normalized, Date.now());
+
+              sendImmediate(MESSAGE_TYPES.REACTION, {
+                platform: PLATFORMS.GOOGLE_MEET,
+                meetingId: state.meetingId,
+                name,
+                reaction,
+                source: 'reaction_toast',
+                timestamp: now()
+              });
+            }
+          }
+        }
       }
     }
   });
   
   toastObserver.observe(document.body, {
     childList: true,
-    subtree: true
+    subtree: true,
+    characterData: true
   });
   
   log('Toast observer active for join/leave notifications');
 }
 
 /**
- * Check if text looks like a UI element rather than a toast notification
- * @param {string} text - Text to check
- * @returns {boolean} True if likely a UI element
- */
-function isLikelyUIElement(text) {
-  if (!text || text.length < 3) return true;
-  
-  const textLower = text.toLowerCase().trim();
-  
-  // Common UI patterns to ignore
-  const uiPatterns = [
-    /^people\d*$/i,           // "People", "People3", etc. (button text)
-    /^\d+$/,                   // Just numbers
-    /^[a-z]+\d+$/i,           // Single word + number (like "people3")
-    /^(chat|activities|details)$/i,  // Tab names
-    /^(mute|unmute|camera|settings)$/i, // Control labels
-    /aria-label/i,             // ARIA attributes
-    /^tooltip/i,               // Tooltip indicators
-  ];
-  
-  return uiPatterns.some(pattern => pattern.test(textLower));
-}
-
-/**
- * Validate that a name extracted from toast is a real participant name
- * @param {string} name - Name to validate
- * @returns {boolean} True if valid toast name
- */
-function isValidToastName(name) {
-  if (!name || name.length < 2) return false;
-  
-  const nameLower = name.toLowerCase().trim();
-  
-  // Must not be a UI element
-  if (isLikelyUIElement(name)) return false;
-  
-  // Must not be just a number or single character
-  if (/^\d+$/.test(name) || name.length === 1) return false;
-  
-  // Common false positives to exclude
-  const falsePositives = [
-    'people', 'chat', 'activities', 'details',
-    'mute', 'unmute', 'camera', 'mic', 'video'
-  ];
-  
-  if (falsePositives.includes(nameLower)) return false;
-  
-  // Valid name should have at least one letter
-  if (!/[a-z]/i.test(name)) return false;
-  
-  return true;
-}
-
-/**
- * Extracts participant name from toast text
+ * Extract reaction value from a reaction toast
  * @param {string} text - Toast text content
- * @param {string} action - Action keyword (joined/left)
- * @returns {string|null} Participant name
+ * @returns {string|null} Reaction string or null
  */
-function extractNameFromToast(text, action) {
-  // Toast format: "[Name] joined" or "[Name] left"
-  const parts = text.split(new RegExp(`\\s*${action}`, 'i'));
-  if (parts.length > 0) {
-    return parts[0].trim();
-  }
-  return null;
+function extractReactionFromToast(text) {
+  const parts = text.split(new RegExp(`\\s*${CONFIG.PATTERNS.reactedWith}\\s*`, 'i'));
+  if (parts.length < 2) return null;
+
+  const reaction = parts[1].trim();
+  return reaction || null;
 }
 
 /**
@@ -435,7 +552,8 @@ function scanCurrentParticipants(state) {
           }
         });
       } else {
-        // Just update mic status for participants who never left
+        maybeEmitMicToggle(state, participant, existing);
+        // Update cached mic status for participants who never left
         existing.isMuted = participant.isMuted;
       }
     }
@@ -501,7 +619,8 @@ function rescanAndDetectNew(state) {
           }
         });
       } else {
-        // Just update mic status for participants who never left
+        maybeEmitMicToggle(state, participant, existing);
+        // Update cached mic status for participants who never left
         existing.isMuted = participant.isMuted;
       }
     }

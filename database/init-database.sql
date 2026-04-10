@@ -126,11 +126,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at TIMESTAMP WITH TIME ZONE,
     ended_at TIMESTAMP WITH TIME ZONE,
     status session_status DEFAULT 'scheduled' NOT NULL,
-    session_date DATE,
-    session_time TIME,
-    topic VARCHAR(255),
-    description TEXT,
-    additional_data JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -164,7 +159,7 @@ CREATE TABLE IF NOT EXISTS attendance_intervals (
 CREATE TABLE IF NOT EXISTS participation_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    student_id UUID REFERENCES students(id) ON DELETE SET NULL,
     interaction_type interaction_type NOT NULL,
     interaction_value VARCHAR(255),
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

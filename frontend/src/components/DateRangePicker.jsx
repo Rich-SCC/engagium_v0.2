@@ -1,7 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { CalendarIcon } from '@heroicons/react/24/outline';
 
-const DateRangePicker = ({ startDate, endDate, onStartDateChange, onEndDateChange, onQuickSelect }) => {
+const DateRangePicker = ({
+  startDate,
+  endDate,
+  onStartDateChange,
+  onEndDateChange,
+  onQuickSelect,
+  variant = 'full',
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+
   const quickFilters = [
     { label: 'Last 7 Days', days: 7 },
     { label: 'Last 30 Days', days: 30 },
@@ -22,6 +31,9 @@ const DateRangePicker = ({ startDate, endDate, onStartDateChange, onEndDateChang
     }
 
     onQuickSelect(start, end);
+    if (variant === 'compact') {
+      setIsOpen(false);
+    }
   };
 
   const formatDateForInput = (date) => {
@@ -29,6 +41,74 @@ const DateRangePicker = ({ startDate, endDate, onStartDateChange, onEndDateChang
     const d = new Date(date);
     return d.toISOString().split('T')[0];
   };
+
+  const rangeLabel = `${startDate?.toLocaleDateString()} - ${endDate?.toLocaleDateString()}`;
+
+  if (variant === 'compact') {
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setIsOpen((previous) => !previous)}
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+        >
+          <CalendarIcon className="h-4 w-4" />
+          Timespan
+          <span className="text-gray-500">{rangeLabel}</span>
+        </button>
+
+        {isOpen ? (
+          <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Quick Range</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {quickFilters.map((filter) => (
+                <button
+                  key={filter.label}
+                  onClick={() => handleQuickFilter(filter.days)}
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <div>
+                <label htmlFor="compact-start-date" className="mb-1 block text-xs font-medium text-gray-600">From</label>
+                <input
+                  id="compact-start-date"
+                  type="date"
+                  value={formatDateForInput(startDate)}
+                  onChange={(e) => onStartDateChange(new Date(e.target.value))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                />
+              </div>
+              <div>
+                <label htmlFor="compact-end-date" className="mb-1 block text-xs font-medium text-gray-600">To</label>
+                <input
+                  id="compact-end-date"
+                  type="date"
+                  value={formatDateForInput(endDate)}
+                  onChange={(e) => onEndDateChange(new Date(e.target.value))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">

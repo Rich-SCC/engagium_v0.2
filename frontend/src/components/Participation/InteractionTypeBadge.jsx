@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ChatBubbleLeftIcon,
   FaceSmileIcon,
+  HandRaisedIcon,
   MicrophoneIcon,
   VideoCameraIcon,
   PencilSquareIcon,
@@ -44,13 +45,21 @@ const InteractionTypeBadge = ({ type, size = 'md' }) => {
           textColor: 'text-yellow-800',
           borderColor: 'border-yellow-200'
         };
+      case 'hand_raise':
+        return {
+          label: 'Hand Raise',
+          icon: HandRaisedIcon,
+          bgColor: 'bg-sky-100',
+          textColor: 'text-sky-800',
+          borderColor: 'border-sky-200'
+        };
       case 'mic_toggle':
         return {
           label: 'Mic Toggle',
           icon: MicrophoneIcon,
-          bgColor: 'bg-green-100',
-          textColor: 'text-green-800',
-          borderColor: 'border-green-200'
+          bgColor: 'bg-indigo-100',
+          textColor: 'text-indigo-600',
+          borderColor: 'border-indigo-200'
         };
       case 'camera_toggle':
         return {

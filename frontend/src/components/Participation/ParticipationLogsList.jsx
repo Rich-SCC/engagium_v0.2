@@ -14,12 +14,94 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
   const [expandedRows, setExpandedRows] = useState(new Set());
   const itemsPerPage = 50;
 
+  const getAdditionalData = (log) => {
+    if (log?._additionalData) return log._additionalData;
+    if (!log?.additional_data) return null;
+    if (typeof log.additional_data === 'string') {
+      try {
+        return JSON.parse(log.additional_data);
+      } catch {
+        return null;
+      }
+    }
+    return log.additional_data;
+  };
+
+  const toTimestamp = (value) => {
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  };
+
+  const pairedLogs = useMemo(() => {
+    const sortedByTime = [...logs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const pendingMicStarts = new Map();
+    const rows = [];
+
+    sortedByTime.forEach((log) => {
+      if (log.interaction_type !== 'mic_toggle') {
+        rows.push({ ...log, _additionalData: getAdditionalData(log) });
+        return;
+      }
+
+      const additionalData = getAdditionalData(log) || {};
+      const participantName = String(
+        additionalData.participant_name || log.student_name || log.full_name || ''
+      ).trim().toLowerCase();
+      const sessionId = log.session_id || '';
+      const micKey = `${sessionId}:${participantName}`;
+      const isMuted = typeof additionalData.isMuted === 'boolean' ? additionalData.isMuted : null;
+
+      if (isMuted === false) {
+        pendingMicStarts.set(micKey, { log, additionalData });
+        return;
+      }
+
+      if (isMuted === true && pendingMicStarts.has(micKey)) {
+        const startEntry = pendingMicStarts.get(micKey);
+        const unmutedAt = startEntry.log.timestamp;
+        const mutedAt = log.timestamp;
+        const startMs = toTimestamp(unmutedAt);
+        const endMs = toTimestamp(mutedAt);
+
+        const derivedDurationSeconds =
+          Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+            ? Math.round((endMs - startMs) / 1000)
+            : null;
+
+        rows.push({
+          ...log,
+          _isMicPair: true,
+          _additionalData: {
+            ...additionalData,
+            speakingStartedAt: additionalData.speakingStartedAt || unmutedAt,
+            speakingEndedAt: additionalData.speakingEndedAt || mutedAt,
+            speakingDurationSeconds:
+              Number(additionalData.speakingDurationSeconds) || derivedDurationSeconds,
+            paired_unmuted_at: unmutedAt,
+            paired_muted_at: mutedAt
+          }
+        });
+
+        pendingMicStarts.delete(micKey);
+        return;
+      }
+
+      rows.push({ ...log, _additionalData: additionalData });
+    });
+
+    pendingMicStarts.forEach(({ log, additionalData }) => {
+      rows.push({ ...log, _additionalData: additionalData });
+    });
+
+    return rows.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  }, [logs]);
+
   // Sort and paginate logs
   const sortedAndPaginatedLogs = useMemo(() => {
-    if (!logs.length) return [];
+    if (!pairedLogs.length) return [];
 
     // Sort
-    const sorted = [...logs].sort((a, b) => {
+    const sorted = [...pairedLogs].sort((a, b) => {
       let aVal = a[sortField];
       let bVal = b[sortField];
 
@@ -44,9 +126,9 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     return sorted.slice(startIndex, endIndex);
-  }, [logs, sortField, sortDirection, currentPage]);
+  }, [pairedLogs, sortField, sortDirection, currentPage]);
 
-  const totalPages = Math.ceil(logs.length / itemsPerPage);
+  const totalPages = Math.ceil(pairedLogs.length / itemsPerPage);
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -79,6 +161,43 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
     });
   };
 
+  const formatSpeakingDuration = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) return null;
+    if (seconds < 60) return `${seconds}s`;
+
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (secs === 0) return `${mins}m`;
+    return `${mins}m ${secs}s`;
+  };
+
+  const renderInteractionValue = (log) => {
+    if (log.interaction_type === 'hand_raise') {
+      return 'raised hand';
+    }
+
+    if (log.interaction_type !== 'mic_toggle') {
+      return log.interaction_value || '-';
+    }
+
+    const additionalData = getAdditionalData(log) || {};
+    const isMuted = typeof additionalData.isMuted === 'boolean' ? additionalData.isMuted : null;
+    const durationFromMetadata = Number(additionalData.speakingDurationSeconds);
+    const durationLabel =
+      additionalData.speakingDurationLabel ||
+      formatSpeakingDuration(durationFromMetadata);
+
+    if ((isMuted === true || log._isMicPair) && durationLabel) {
+      return `spoke for ${durationLabel}`;
+    }
+
+    if (isMuted === false) {
+      return 'unmuted mic';
+    }
+
+    return log.interaction_value || '-';
+  };
+
   const SortIcon = ({ field }) => {
     if (sortField !== field) {
       return <div className="w-4 h-4" />;
@@ -101,7 +220,7 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
     );
   }
 
-  if (logs.length === 0) {
+  if (pairedLogs.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow p-12 text-center">
         <ClockIcon className="w-16 h-16 mx-auto text-gray-300 mb-4" />
@@ -174,10 +293,8 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
             <tbody className="bg-white divide-y divide-gray-200">
               {sortedAndPaginatedLogs.map((log) => {
                 const isExpanded = expandedRows.has(log.id);
-                const hasAdditionalData = log.additional_data && 
-                  Object.keys(typeof log.additional_data === 'string' 
-                    ? JSON.parse(log.additional_data) 
-                    : log.additional_data).length > 0;
+                const additionalData = getAdditionalData(log);
+                const hasAdditionalData = additionalData && Object.keys(additionalData).length > 0;
 
                 return (
                   <React.Fragment key={log.id}>
@@ -197,7 +314,7 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-900 max-w-xs truncate">
-                          {log.interaction_value || '-'}
+                          {renderInteractionValue(log)}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -223,12 +340,20 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
                       <tr className="bg-gray-50">
                         <td colSpan="5" className="px-6 py-4">
                           <div className="bg-white border border-gray-200 rounded-lg p-4">
+                            {log.interaction_type === 'mic_toggle' && additionalData.paired_unmuted_at && additionalData.paired_muted_at && (
+                              <div className="mb-3">
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">Mic Pair Timeline</h4>
+                                <div className="text-xs text-gray-700 space-y-1">
+                                  <p><span className="font-medium">Unmuted at:</span> {formatTimestamp(additionalData.paired_unmuted_at)}</p>
+                                  <p><span className="font-medium">Muted at:</span> {formatTimestamp(additionalData.paired_muted_at)}</p>
+                                </div>
+                              </div>
+                            )}
+
                             <h4 className="text-sm font-semibold text-gray-700 mb-2">Additional Data:</h4>
                             <pre className="text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap">
                               {JSON.stringify(
-                                typeof log.additional_data === 'string' 
-                                  ? JSON.parse(log.additional_data) 
-                                  : log.additional_data, 
+                                additionalData,
                                 null, 
                                 2
                               )}
@@ -250,7 +375,7 @@ const ParticipationLogsList = ({ logs = [], isLoading = false }) => {
         <div className="bg-white rounded-lg shadow px-6 py-4 flex items-center justify-between">
           <div className="text-sm text-gray-700">
             Showing {((currentPage - 1) * itemsPerPage) + 1} to{' '}
-            {Math.min(currentPage * itemsPerPage, logs.length)} of {logs.length} logs
+            {Math.min(currentPage * itemsPerPage, pairedLogs.length)} of {pairedLogs.length} logs
           </div>
           <div className="flex items-center gap-2">
             <button

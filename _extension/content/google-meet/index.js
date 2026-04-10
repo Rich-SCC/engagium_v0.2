@@ -150,10 +150,6 @@ function isInWaitingRoom() {
 
 // Setup tracking reminder (shows after 60 seconds if not tracking)
 async function setupTrackingReminder() {
-  const storage = await chrome.storage.local.get([STORAGE_KEYS.SHOW_TRACKING_REMINDER]);
-  const showReminder = storage[STORAGE_KEYS.SHOW_TRACKING_REMINDER] !== undefined ? storage[STORAGE_KEYS.SHOW_TRACKING_REMINDER] : true;
-  if (!showReminder) return;
-  
   // Clear any existing reminder
   if (trackingReminderTimeout) {
     clearTimeout(trackingReminderTimeout);

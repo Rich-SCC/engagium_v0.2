@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { resolveApiBaseUrl } from '@/utils/apiBaseUrl';
 
 const ForgotPasswordModal = ({ onClose, onBackToLogin }) => {
+  const API_BASE_URL = resolveApiBaseUrl();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -26,7 +28,7 @@ const ForgotPasswordModal = ({ onClose, onBackToLogin }) => {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/auth/forgot-password', {
+      const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

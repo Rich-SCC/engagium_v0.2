@@ -8,6 +8,28 @@ import {
   SignalIcon
 } from '@heroicons/react/24/outline';
 
+const getCurrentParticipantCount = (events) => {
+  const activeParticipants = new Set();
+
+  [...events]
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+    .forEach((event) => {
+      const participantName = event.participant_name || event.student_name;
+
+      if (!participantName) {
+        return;
+      }
+
+      if (event.type === 'attendance' || event.type === 'participant_joined') {
+        activeParticipants.add(participantName);
+      } else if (event.type === 'participant_left') {
+        activeParticipants.delete(participantName);
+      }
+    });
+
+  return activeParticipants.size;
+};
+
 const ActiveSessionCard = () => {
   const { activeSessions, isConnected, isLoadingActiveSessions, recentEvents } = useWebSocket();
   const [durations, setDurations] = useState({});
@@ -18,19 +40,9 @@ const ActiveSessionCard = () => {
     const counts = {};
     
     activeSessions.forEach(session => {
-      // Count unique participants by tracking joins and leaves
       const sessionEvents = recentEvents.filter(e => e.session_id === session.session_id);
-      const joinedParticipants = new Set();
-      
-      sessionEvents.forEach(event => {
-        if (event.type === 'participant_joined') {
-          joinedParticipants.add(event.participant_name);
-        } else if (event.type === 'participant_left') {
-          joinedParticipants.delete(event.participant_name);
-        }
-      });
-      
-      counts[session.session_id] = joinedParticipants.size;
+
+      counts[session.session_id] = getCurrentParticipantCount(sessionEvents);
     });
     
     setParticipantCounts(counts);

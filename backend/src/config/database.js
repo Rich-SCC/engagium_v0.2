@@ -23,5 +23,24 @@ pool.on('error', (err) => {
 
 module.exports = {
   query: (text, params) => pool.query(text, params),
-  pool
+  pool,
+  ensureParticipationLogsSchema
 };
+
+async function ensureParticipationLogsSchema() {
+  await pool.query(`
+    ALTER TABLE IF EXISTS participation_logs
+      ALTER COLUMN student_id DROP NOT NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE IF EXISTS participation_logs
+      DROP CONSTRAINT IF EXISTS participation_logs_student_id_fkey
+  `);
+
+  await pool.query(`
+    ALTER TABLE IF EXISTS participation_logs
+      ADD CONSTRAINT participation_logs_student_id_fkey
+      FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL
+  `);
+}

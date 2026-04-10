@@ -3,6 +3,7 @@ const { instructorAuth } = require('../middleware/auth');
 const { flexibleAuth } = require('../middleware/flexibleAuth');
 const {
   getParticipationLogs,
+  getBulkParticipationLogs,
   addParticipationLog,
   getSessionSummary,
   getRecentActivity,
@@ -17,6 +18,7 @@ router.post('/sessions/:sessionId/logs/bulk', flexibleAuth, addBulkParticipation
 
 // Web app only routes
 router.use(instructorAuth);
+router.post('/sessions/logs/bulk', getBulkParticipationLogs);
 
 // Session-specific participation routes
 router.get('/sessions/:sessionId/logs', getParticipationLogs);

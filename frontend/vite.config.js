@@ -12,6 +12,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    allowedHosts: ['dev.engagium.app', 'localhost', '127.0.0.1'],
+    watch: {
+      // Docker Desktop bind mounts on Windows can miss FS events; polling avoids stale modules.
+      usePolling: true,
+      interval: 300,
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:3001',

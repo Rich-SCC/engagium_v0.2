@@ -15,9 +15,28 @@ const extensionTokenRoutes = require('./src/routes/extensionTokens');
 
 // Import socket handlers
 const socketHandler = require('./src/socket/socketHandler');
+const { ensureParticipationLogsSchema } = require('./src/config/database');
 
 const app = express();
 const server = http.createServer(app);
+
+const parseAllowedOrigins = () => {
+  const rawOrigins = process.env.CORS_ORIGIN;
+  if (!rawOrigins) {
+    return [
+      'http://localhost:5173',
+      'http://localhost:8888',
+      'https://dev.engagium.app'
+    ];
+  }
+
+  return rawOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+};
+
+const allowedOrigins = parseAllowedOrigins();
 
 // Store app globally for socket handler access
 global.app = app;
@@ -25,7 +44,7 @@ global.app = app;
 // Socket.io setup
 const io = new Server(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin: allowedOrigins,
     methods: ["GET", "POST"]
   }
 });
@@ -33,16 +52,34 @@ const io = new Server(server, {
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
+const extractRateLimitIdentity = (req) => {
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    // Key by token string prefix to avoid grouping all users behind one proxy IP.
+    return `jwt:${authHeader.slice(7, 39)}`;
+  }
+
+  const extensionToken = req.headers['x-extension-token'];
+  if (typeof extensionToken === 'string' && extensionToken.length > 0) {
+    return `ext:${extensionToken.slice(0, 32)}`;
+  }
+
+  return req.ip;
+};
+
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS || '', 10) || (15 * 60 * 1000),
+  max: Number.parseInt(process.env.RATE_LIMIT_MAX || '', 10) || 400,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: extractRateLimitIdentity,
 });
 app.use('/api/', limiter);
 
@@ -80,8 +117,18 @@ app.use('*', (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 
-server.listen(PORT, () => {
-  console.log(`🚀 Engagium Backend Server running on port ${PORT}`);
-  console.log(`📊 Health check available at http://localhost:${PORT}/health`);
-  console.log(`🔌 Socket.io server ready for connections`);
-});
+async function startServer() {
+  try {
+    await ensureParticipationLogsSchema();
+  } catch (error) {
+    console.error('❌ Failed to apply participation log schema migration:', error);
+  }
+
+  server.listen(PORT, () => {
+    console.log(`🚀 Engagium Backend Server running on port ${PORT}`);
+    console.log(`📊 Health check available at http://localhost:${PORT}/health`);
+    console.log(`🔌 Socket.io server ready for connections`);
+  });
+}
+
+startServer();

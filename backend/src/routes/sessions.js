@@ -23,6 +23,7 @@ const {
   recordParticipantJoin,
   recordParticipantLeave,
   getSessionAttendanceWithIntervals,
+  getBulkSessionAttendanceWithIntervals,
   linkParticipantToStudent
 } = require('../controllers/sessionController');
 const {
@@ -35,7 +36,7 @@ const router = express.Router();
 router.get('/stats', instructorAuth, getSessionStats);
 router.get('/date-range', instructorAuth, getSessionsByDateRange);
 router.get('/calendar', instructorAuth, getCalendarData);
-router.get('/active', instructorAuth, getActiveSessions);
+router.get('/active', flexibleAuth, getActiveSessions);
 
 // Routes that work with both web app (JWT) and extension (extension token)
 router.post('/start-from-meeting', flexibleAuth, startSessionFromMeeting);
@@ -59,6 +60,7 @@ router.use(instructorAuth);
 
 // Session collection routes
 router.get('/', getSessions);
+router.post('/attendance/full/bulk', getBulkSessionAttendanceWithIntervals);
 
 // Individual session routes
 router.get('/:id/full', getSessionWithAttendance);

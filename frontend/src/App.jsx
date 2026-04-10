@@ -7,6 +7,8 @@ import Layout from '@/components/Layout';
 import LandingPage from '@/pages/LandingPage';
 import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
+import ZoomIframeBridge from '@/pages/ZoomIframeBridge';
+import ZoomOAuthCallback from '@/pages/ZoomOAuthCallback';
 
 // Main pages
 import Home from '@/pages/Home';
@@ -16,6 +18,7 @@ import MyClasses from '@/pages/MyClasses';
 import ClassDetailsPage from '@/pages/ClassDetailsPage';
 import Sessions from '@/pages/Sessions';
 import SessionDetailPage from '@/pages/SessionDetailPage';
+import BundledSessionDetailPage from '@/pages/BundledSessionDetailPage';
 import Settings from '@/pages/Settings';
 
 // Protected route component
@@ -74,6 +77,10 @@ function App() {
         }
       />
 
+      {/* Public Zoom iframe route (token-based, no JWT UI shell) */}
+      <Route path="/zoom/bridge" element={<ZoomIframeBridge />} />
+      <Route path="/zoom/oauth/callback" element={<ZoomOAuthCallback />} />
+
       {/* Protected routes */}
       <Route
         path="/app"
@@ -89,6 +96,7 @@ function App() {
         <Route path="classes" element={<MyClasses />} />
         <Route path="classes/:id" element={<ClassDetailsPage />} />
         <Route path="sessions" element={<Sessions />} />
+        <Route path="sessions/bundled/:bundleId" element={<BundledSessionDetailPage />} />
         <Route path="sessions/:id" element={<SessionDetailPage />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="settings" element={<Settings />} />

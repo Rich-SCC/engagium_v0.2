@@ -1,9 +1,12 @@
 import axios from 'axios';
 import { getToken, getRefreshToken, setToken, removeTokens } from '@/utils/auth';
+import { resolveApiBaseUrl } from '@/utils/apiBaseUrl';
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 // Create axios instance
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -79,7 +82,7 @@ api.interceptors.response.use(
 
       try {
         // Attempt to refresh the access token
-        const response = await axios.post('/api/auth/refresh-token', {
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh-token`, {
           refreshToken
         });
 
@@ -252,6 +255,8 @@ export const sessionsAPI = {
     api.post(`/sessions/${id}/attendance/bulk`, { attendance }),
   getAttendance: (id) => api.get(`/sessions/${id}/attendance`),
   getAttendanceWithIntervals: (id) => api.get(`/sessions/${id}/attendance/full`),
+  getBulkAttendanceWithIntervals: (sessionIds) =>
+    api.post('/sessions/attendance/full/bulk', { sessionIds }),
   getAttendanceStats: (id) => api.get(`/sessions/${id}/attendance/stats`),
   linkParticipantToStudent: (id, data) => api.post(`/sessions/${id}/attendance/link`, data),
 };
@@ -271,6 +276,8 @@ export const participationAPI = {
     api.post(`/participation/sessions/${sessionId}/logs`, logData),
   addBulkLogs: (sessionId, logs) =>
     api.post(`/participation/sessions/${sessionId}/logs/bulk`, { logs }),
+  getBulkLogs: (sessionIds) =>
+    api.post('/participation/sessions/logs/bulk', { sessionIds }),
   getSummary: (sessionId) =>
     api.get(`/participation/sessions/${sessionId}/summary`),
   getRecentActivity: (sessionId, minutes = 5) =>

@@ -195,6 +195,8 @@ Re-enable when participation tracking returns.
 
 **Out of Scope:** All other participation events (listed above)
 
+For the next analytics phase, see [ANALYTICS_PAGE_SPEC.md](ANALYTICS_PAGE_SPEC.md).
+
 This focused approach ensures:
 - ✅ Simpler codebase
 - ✅ Easier maintenance
