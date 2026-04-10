@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { sessionsAPI, participationAPI } from '../services/api';
 import { resolveApiBaseUrl } from '../utils/apiBaseUrl';
 
-const WebSocketContext = createContext(null);
+export const WebSocketContext = createContext(null);
 
 export const useWebSocket = () => {
   const context = useContext(WebSocketContext);
@@ -108,7 +108,6 @@ const REACTION_TO_EMOJI = {
   wow: '😮',
   heart: '❤️',
   clap: '👏',
-  thumbsup: '👍',
   thumbsup: '👍',
   thumbsdown: '👎',
   tada: '🎉',
@@ -701,5 +700,3 @@ export const WebSocketProvider = ({ children }) => {
     </WebSocketContext.Provider>
   );
 };
-
-export default WebSocketContext;
