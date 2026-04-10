@@ -36,7 +36,7 @@ const router = express.Router();
 router.get('/stats', instructorAuth, getSessionStats);
 router.get('/date-range', instructorAuth, getSessionsByDateRange);
 router.get('/calendar', instructorAuth, getCalendarData);
-router.get('/active', instructorAuth, getActiveSessions);
+router.get('/active', flexibleAuth, getActiveSessions);
 
 // Routes that work with both web app (JWT) and extension (extension token)
 router.post('/start-from-meeting', flexibleAuth, startSessionFromMeeting);

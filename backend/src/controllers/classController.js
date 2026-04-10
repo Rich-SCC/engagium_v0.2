@@ -1005,8 +1005,8 @@ const getClassAnalytics = async (req, res) => {
         s.ended_at,
         s.status,
         COUNT(DISTINCT ar.id) as total_participants,
-        COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as present_count,
-        COALESCE(ROUND((COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END)::numeric / 
+        COUNT(DISTINCT CASE WHEN ar.status IN ('present', 'late') THEN ar.id END) as present_count,
+        COALESCE(ROUND((COUNT(DISTINCT CASE WHEN ar.status IN ('present', 'late') THEN ar.id END)::numeric / 
                  NULLIF(COUNT(DISTINCT ar.id), 0) * 100), 2), 0) as attendance_rate,
         COALESCE(AVG(ar.total_duration_minutes), 0) as avg_duration_minutes
       FROM sessions s
@@ -1032,24 +1032,67 @@ const getClassAnalytics = async (req, res) => {
         st.id,
         st.student_id as student_number,
         st.full_name,
-        COUNT(DISTINCT ar.session_id) as sessions_attended,
+        COUNT(DISTINCT CASE WHEN ar.status IN ('present', 'late') THEN ar.session_id END) as sessions_attended,
         COUNT(DISTINCT s.id) as total_sessions,
-        COALESCE(ROUND((COUNT(DISTINCT ar.session_id)::numeric / 
+        COALESCE(ROUND((COUNT(DISTINCT CASE WHEN ar.status IN ('present', 'late') THEN ar.session_id END)::numeric / 
                  NULLIF(COUNT(DISTINCT s.id), 0) * 100), 2), 0) as attendance_rate,
         COALESCE(AVG(ar.total_duration_minutes), 0) as avg_duration_minutes,
         COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN ar.id END) as present_count,
         COUNT(DISTINCT CASE WHEN ar.status = 'late' THEN ar.id END) as late_count,
-        COUNT(DISTINCT CASE WHEN ar.status = 'absent' THEN ar.id END) as absent_count
+        COUNT(DISTINCT CASE WHEN ar.status = 'absent' THEN ar.id END) as absent_count,
+        COALESCE(pa.total_interactions, 0) as total_interactions,
+        COALESCE(pa.chat_count, 0) as chat_count,
+        COALESCE(pa.reaction_count, 0) as reaction_count,
+        COALESCE(pa.hand_raise_count, 0) as hand_raise_count,
+        COALESCE(pa.mic_toggle_count, 0) as mic_toggle_count,
+        COALESCE(pa.speaking_proxy_minutes, 0) as speaking_proxy_minutes,
+        COALESCE(pa.participation_sessions, 0) as participation_sessions,
+        COALESCE(ROUND((COALESCE(pa.participation_sessions, 0)::numeric /
+          NULLIF(COUNT(DISTINCT CASE WHEN ar.status IN ('present', 'late') THEN ar.session_id END), 0) * 100), 2), 0) as participation_rate
       FROM students st
       CROSS JOIN sessions s
       LEFT JOIN attendance_records ar ON ar.student_id = st.id AND ar.session_id = s.id
+      LEFT JOIN (
+        SELECT
+          pl.student_id,
+          COUNT(*) as total_interactions,
+          COUNT(*) FILTER (WHERE pl.interaction_type = 'chat') as chat_count,
+          COUNT(*) FILTER (WHERE pl.interaction_type = 'reaction') as reaction_count,
+          COUNT(*) FILTER (WHERE pl.interaction_type = 'hand_raise') as hand_raise_count,
+          COUNT(*) FILTER (WHERE pl.interaction_type = 'mic_toggle') as mic_toggle_count,
+          COALESCE(SUM(
+            CASE
+              WHEN pl.interaction_type = 'mic_toggle' THEN COALESCE((pl.additional_data->>'speakingDurationSeconds')::numeric, 0)
+              ELSE 0
+            END
+          ) / 60.0, 0) as speaking_proxy_minutes,
+          COUNT(DISTINCT pl.session_id) as participation_sessions
+        FROM participation_logs pl
+        INNER JOIN sessions ps ON ps.id = pl.session_id
+        WHERE ps.class_id = $1
+          AND DATE(ps.started_at) >= $2
+          AND DATE(ps.started_at) <= $3
+          AND ps.status IN ('active', 'ended')
+          AND pl.student_id IS NOT NULL
+        GROUP BY pl.student_id
+      ) pa ON pa.student_id = st.id
       WHERE st.class_id = $1
         AND s.class_id = $1
         AND DATE(s.started_at) >= $2
         AND DATE(s.started_at) <= $3
         AND s.status IN ('active', 'ended')
         AND st.deleted_at IS NULL
-      GROUP BY st.id, st.full_name
+      GROUP BY
+        st.id,
+        st.full_name,
+        st.student_id,
+        pa.total_interactions,
+        pa.chat_count,
+        pa.reaction_count,
+        pa.hand_raise_count,
+        pa.mic_toggle_count,
+        pa.speaking_proxy_minutes,
+        pa.participation_sessions
       ORDER BY attendance_rate DESC, sessions_attended DESC
     `;
 
@@ -1083,6 +1126,51 @@ const getClassAnalytics = async (req, res) => {
       sessions: sessionsResult.rows,
     });
 
+    const studentRows = studentPerformanceResult.rows.map((row) => ({
+      ...row,
+      attendance_rate: parseFloat(row.attendance_rate || 0),
+      chat_count: parseFloat(row.chat_count || 0),
+      reaction_count: parseFloat(row.reaction_count || 0),
+      hand_raise_count: parseFloat(row.hand_raise_count || 0),
+      speaking_proxy_minutes: parseFloat(row.speaking_proxy_minutes || 0),
+    }));
+
+    const classMax = studentRows.reduce((accumulator, row) => ({
+      speaking: Math.max(accumulator.speaking, row.speaking_proxy_minutes),
+      chat: Math.max(accumulator.chat, row.chat_count),
+      handRaise: Math.max(accumulator.handRaise, row.hand_raise_count),
+      reaction: Math.max(accumulator.reaction, row.reaction_count),
+    }), { speaking: 0, chat: 0, handRaise: 0, reaction: 0 });
+
+    const studentPerformance = studentRows.map((row) => {
+      const speakingPart = classMax.speaking > 0 ? (row.speaking_proxy_minutes / classMax.speaking) * 100 : 0;
+      const chatPart = classMax.chat > 0 ? (row.chat_count / classMax.chat) * 100 : 0;
+      const handRaisePart = classMax.handRaise > 0 ? (row.hand_raise_count / classMax.handRaise) * 100 : 0;
+      const reactionPart = classMax.reaction > 0 ? (row.reaction_count / classMax.reaction) * 100 : 0;
+      const participationScore = (
+        (speakingPart * 0.4) +
+        (chatPart * 0.25) +
+        (handRaisePart * 0.2) +
+        (reactionPart * 0.15)
+      );
+
+      const engagementScore = (row.attendance_rate * 0.6) + (participationScore * 0.4);
+
+      return {
+        ...row,
+        participation_score: Number(participationScore.toFixed(2)),
+        engagement_score: Number(engagementScore.toFixed(2)),
+      };
+    }).sort((left, right) => right.engagement_score - left.engagement_score);
+
+    const totalInteractions = studentPerformance.reduce((sum, row) => sum + parseFloat(row.total_interactions || 0), 0);
+    const averageEngagementScore = studentPerformance.length > 0
+      ? (studentPerformance.reduce((sum, row) => sum + parseFloat(row.engagement_score || 0), 0) / studentPerformance.length)
+      : 0;
+    const averageParticipationScore = studentPerformance.length > 0
+      ? (studentPerformance.reduce((sum, row) => sum + parseFloat(row.participation_score || 0), 0) / studentPerformance.length)
+      : 0;
+
     // Calculate overall statistics
     const overallStats = {
       totalSessions: sessionsResult.rows.length,
@@ -1092,7 +1180,12 @@ const getClassAnalytics = async (req, res) => {
       avgDuration: sessionsResult.rows.length > 0
         ? (sessionsResult.rows.reduce((sum, s) => sum + parseFloat(s.avg_duration_minutes || 0), 0) / sessionsResult.rows.length).toFixed(2)
         : 0,
-      totalStudents: studentPerformanceResult.rows.length,
+      totalStudents: studentPerformance.length,
+      avgParticipationSignals: sessionsResult.rows.length > 0
+        ? (totalInteractions / sessionsResult.rows.length).toFixed(2)
+        : 0,
+      avgParticipationScore: averageParticipationScore.toFixed(2),
+      avgEngagementScore: averageEngagementScore.toFixed(2),
     };
 
     res.json({
@@ -1103,7 +1196,7 @@ const getClassAnalytics = async (req, res) => {
         overallStats,
         sessionTrends: sessionsResult.rows,
         scheduleBundles,
-        studentPerformance: studentPerformanceResult.rows,
+        studentPerformance,
         heatmapData: heatmapResult.rows,
       }
     });

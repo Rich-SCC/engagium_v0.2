@@ -19,7 +19,7 @@ export function isDevEnvironment() {
  */
 export function getApiBaseUrl() {
   return isDevEnvironment() 
-    ? 'http://localhost:3001' 
+    ? 'https://dev.engagium.app'
     : 'https://engagium.app';
 }
 

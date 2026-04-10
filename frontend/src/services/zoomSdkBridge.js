@@ -9,16 +9,12 @@ const ZOOM_CONFIG_CAPABILITIES = [
   'getMeetingParticipants',
   'getUserContext',
   'onParticipantChange',
-  'onReaction',
-  'onEmojiReaction',
-  'onMyReaction',
-  'onMyMediaChange',
-  'onFeedbackReaction',
-  'onRemoveFeedbackReaction',
-  'onIncomingParticipantAudioChange',
   'onMeeting',
   'onRunningContextChange',
   'onMyUserContextChange',
+  'onReaction',
+  'onFeedbackReaction',
+  'onMyMediaChange',
 ];
 
 const ZOOM_CONFIG_CAPABILITIES_FALLBACK = [
@@ -28,11 +24,22 @@ const ZOOM_CONFIG_CAPABILITIES_FALLBACK = [
   'onMeeting',
   'onRunningContextChange',
   'onMyUserContextChange',
+  'onReaction',
+  'onFeedbackReaction',
+  'onMyMediaChange',
 ];
 
 const ZOOM_CONFIG_CAPABILITIES_MINIMAL = [
   'getRunningContext',
   'onMeeting',
+];
+
+const ZOOM_CRITICAL_LISTENER_CAPABILITIES = [
+  'onParticipantChange',
+  'onMeeting',
+  'onReaction',
+  'onFeedbackReaction',
+  'onMyMediaChange',
 ];
 const ZOOM_LISTENER_REGISTRATION_TIMEOUT_MS = 4000;
 
@@ -42,24 +49,204 @@ const ZOOM_SDK_SCRIPT_URLS = [
   'https://appssdk.zoom.us/sdk.js',
 ];
 
-const createSourceEventId = (prefix) =>
-  `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-
 const getIsoNow = () => new Date().toISOString();
+
+const normalizeSignalText = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+
+const sanitizeReactionString = (value) => {
+  if (value === undefined || value === null) return '';
+  const text = String(value).trim();
+  return text;
+};
+
+const getReactionEventPayload = (payload = {}) => {
+  if (payload && typeof payload === 'object' && payload.eventData && typeof payload.eventData === 'object') {
+    return payload.eventData;
+  }
+
+  return payload || {};
+};
+
+const extractReactionDetails = (payload = {}) => {
+  const eventData = getReactionEventPayload(payload);
+  const reactionObject = eventData?.reaction && typeof eventData.reaction === 'object'
+    ? eventData.reaction
+    : null;
+
+  const emoji = sanitizeReactionString(
+    reactionObject?.emoji ||
+    eventData?.unicode ||
+    eventData?.emoji ||
+    eventData?.reactionUnicode ||
+    eventData?.reactionEmoji ||
+    payload?.unicode ||
+    payload?.emoji ||
+    payload?.reactionUnicode ||
+    payload?.reactionEmoji
+  );
+
+  const unicode = sanitizeReactionString(
+    reactionObject?.unicode ||
+    eventData?.reactionUnicode ||
+    eventData?.unicode ||
+    payload?.reactionUnicode ||
+    payload?.unicode
+  );
+
+  const name = sanitizeReactionString(
+    reactionObject?.name ||
+    eventData?.reactionName ||
+    payload?.reactionName ||
+    payload?.name
+  );
+
+  const fallbackSignal = extractReactionValue(eventData) || extractReactionValue(payload);
+  const value = emoji || unicode || fallbackSignal;
+
+  return {
+    value,
+    emoji,
+    unicode,
+    name,
+    rawEvent: payload || {},
+    eventData,
+  };
+};
+
+const normalizeSignalValue = (value) => {
+  if (value === undefined || value === null) return '';
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const normalized = normalizeSignalValue(entry);
+      if (normalized) return normalized;
+    }
+    return '';
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    const normalized = String(value).trim();
+    return normalized;
+  }
+
+  if (typeof value === 'object') {
+    if (typeof value?.isHandRaised === 'boolean') {
+      return value.isHandRaised ? 'raise_hand' : 'lower_hand';
+    }
+
+    if (typeof value?.handRaised === 'boolean') {
+      return value.handRaised ? 'raise_hand' : 'lower_hand';
+    }
+
+    if (typeof value?.raiseHand === 'boolean') {
+      return value.raiseHand ? 'raise_hand' : 'lower_hand';
+    }
+
+    if (typeof value?.lowerHand === 'boolean') {
+      return value.lowerHand ? 'lower_hand' : 'raise_hand';
+    }
+
+    if (typeof value?.hand?.raised === 'boolean') {
+      return value.hand.raised ? 'raise_hand' : 'lower_hand';
+    }
+
+    const objectCandidates = [
+      value?.feedback,
+      value?.reaction,
+      value?.data,
+      value?.payload,
+      value?.body,
+      value?.params,
+      value?.name,
+      value?.type,
+      value?.action,
+      value?.status,
+      value?.event,
+      value?.eventType,
+      value?.id,
+      value?.code,
+      value?.emoji,
+      value?.value,
+      value?.key,
+      value?.label,
+    ];
+
+    for (const candidate of objectCandidates) {
+      const normalized = normalizeSignalValue(candidate);
+      if (normalized) return normalized;
+    }
+  }
+
+  return '';
+};
+
+const extractReactionValue = (payload = {}) => {
+  const candidates = [
+    payload,
+    payload?.reaction,
+    payload?.feedback,
+    payload?.emoji,
+    payload?.reactionType,
+    payload?.feedbackType,
+    payload?.action,
+    payload?.status,
+    payload?.event,
+    payload?.eventType,
+    payload?.type,
+    payload?.name,
+    payload?.value,
+    payload?.data,
+    payload?.payload,
+    payload?.body,
+    payload?.params,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeSignalValue(candidate);
+    if (normalized) return normalized;
+  }
+
+  return '';
+};
+
+const extractMediaMutedState = (payload = {}) => {
+  if (typeof payload?.isMuted === 'boolean') return payload.isMuted;
+  if (typeof payload?.muted === 'boolean') return payload.muted;
+  if (typeof payload?.audioMuted === 'boolean') return payload.audioMuted;
+  if (typeof payload?.audio?.muted === 'boolean') return payload.audio.muted;
+  return null;
+};
 
 const PARTICIPANT_JOIN_STATUSES = new Set(['join', 'joined', 'add', 'added']);
 const PARTICIPANT_LEAVE_STATUSES = new Set(['leave', 'left', 'remove', 'removed', 'departed']);
 const PARTICIPANT_LEAVE_GRACE_MS = 2500;
 
-const getParticipantPayloadCandidates = (payload = {}) => [
-  payload,
-  payload?.participant,
-  payload?.user,
-  payload?.sender,
-  payload?.actor,
-  payload?.from,
-  payload?.target,
-].filter(Boolean);
+const getParticipantPayloadCandidates = (payload = {}) => {
+  const eventData = payload?.eventData && typeof payload.eventData === 'object'
+    ? payload.eventData
+    : null;
+
+  return [
+    payload,
+    eventData,
+    payload?.participant,
+    eventData?.participant,
+    payload?.user,
+    eventData?.user,
+    payload?.sender,
+    eventData?.sender,
+    payload?.actor,
+    eventData?.actor,
+    payload?.from,
+    eventData?.from,
+    payload?.target,
+    eventData?.target,
+  ].filter(Boolean);
+};
 
 const extractParticipantName = (payload = {}) => {
   const candidates = getParticipantPayloadCandidates(payload);
@@ -102,85 +289,6 @@ const extractParticipantId = (payload = {}) => {
   }
 
   return null;
-};
-
-const normalizeReactionValue = (value) => {
-  if (value === undefined || value === null) return '';
-
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-
-  if (typeof value === 'object') {
-    return (
-      value.emoji ||
-      value.unicode ||
-      value.value ||
-      value.name ||
-      value.reaction ||
-      value.type ||
-      ''
-    );
-  }
-
-  return String(value);
-};
-
-const isHandRaiseReaction = (reactionValue, event = {}) => {
-  const normalizedValue = String(reactionValue || '').trim().toLowerCase();
-  const eventType = String(event?.type || event?.reactionType || '').trim().toLowerCase();
-  const eventAction = String(event?.action || '').trim().toLowerCase();
-
-  const handTokens = [
-    'raise_hand',
-    'raised_hand',
-    'hand_raise',
-    'raisehand',
-    'handraised',
-    'raise hand',
-    'hand raised',
-    'handraise',
-  ];
-
-  if (reactionValue === '✋') {
-    return true;
-  }
-
-  if (handTokens.some((token) => normalizedValue.includes(token))) {
-    return true;
-  }
-
-  if (handTokens.some((token) => eventType.includes(token) || eventAction.includes(token))) {
-    return true;
-  }
-
-  return false;
-};
-
-const extractReactionData = (event = {}) => {
-  const reactionValue = normalizeReactionValue(
-    event?.unicode ||
-    event?.type ||
-    event?.emoji ||
-    event?.reaction ||
-    event?.reaction?.emoji ||
-    event?.reaction?.unicode ||
-    event?.reaction?.name ||
-    event?.feedback ||
-    event?.value ||
-    event?.name ||
-    event?.reactionType ||
-    ''
-  );
-
-  const interactionType = isHandRaiseReaction(reactionValue, event)
-    ? 'hand_raise'
-    : 'reaction';
-
-  return {
-    interactionType,
-    reactionValue: reactionValue || (interactionType === 'hand_raise' ? 'raised' : 'reaction'),
-  };
 };
 
 const extractParticipantChanges = (event = {}) => {
@@ -333,130 +441,6 @@ const createParticipantLifecycleDetector = ({ onParticipantJoined, onParticipant
   return {
     onParticipantChangeEvent,
     clearPendingLeaves,
-  };
-};
-
-const createReactionDetectors = ({ onReaction }) => {
-  const emitReaction = ({ event = {}, sourcePrefix, isSelfEvent = false, reactionValue }) => {
-    const participantName = extractParticipantName(event);
-    const participantId = extractParticipantId(event);
-
-    onReaction?.({
-      participantName,
-      participantId,
-      isSelfEvent,
-      interactionType: 'reaction',
-      reaction: reactionValue || 'reaction',
-      sourceEventId: createSourceEventId(sourcePrefix),
-      timestamp: getIsoNow(),
-    });
-  };
-
-  const emitHandRaise = ({ event = {}, sourcePrefix, isSelfEvent = false, reactionValue = 'raised' }) => {
-    const participantName = extractParticipantName(event);
-    const participantId = extractParticipantId(event);
-
-    onReaction?.({
-      participantName,
-      participantId,
-      isSelfEvent,
-      interactionType: 'hand_raise',
-      reaction: reactionValue || 'raised',
-      sourceEventId: createSourceEventId(sourcePrefix),
-      timestamp: getIsoNow(),
-    });
-  };
-
-  const onReactionEvent = (event = {}, { sourcePrefix = 'reaction', isSelfEvent = false } = {}) => {
-    const { interactionType, reactionValue } = extractReactionData(event);
-    if (interactionType !== 'reaction') return;
-
-    emitReaction({ event, sourcePrefix, isSelfEvent, reactionValue });
-  };
-
-  const onHandRaiseFromReactionEvent = (event = {}, { sourcePrefix = 'reaction', isSelfEvent = false } = {}) => {
-    const { interactionType, reactionValue } = extractReactionData(event);
-    if (interactionType !== 'hand_raise') return;
-
-    emitHandRaise({
-      event,
-      sourcePrefix,
-      isSelfEvent,
-      reactionValue: reactionValue || 'raised',
-    });
-  };
-
-  const onFeedbackReactionEvent = (event = {}) => {
-    const feedback = String(event?.feedback || '').trim();
-    if (!feedback) return;
-
-    const normalizedFeedback = feedback.toLowerCase();
-    if (normalizedFeedback === 'raisehand' || normalizedFeedback === 'raise_hand') {
-      emitHandRaise({ event, sourcePrefix: 'feedback_raise_hand' });
-      return;
-    }
-
-    emitReaction({
-      event,
-      sourcePrefix: 'feedback_reaction',
-      reactionValue: feedback,
-    });
-  };
-
-  return {
-    onReactionEvent,
-    onHandRaiseFromReactionEvent,
-    onFeedbackReactionEvent,
-  };
-};
-
-const createMicToggleDetector = ({ onMicToggle }) => {
-  const onMyMediaChangeEvent = (event = {}) => {
-    const participantName = extractParticipantName(event);
-    const participantId = extractParticipantId(event);
-
-    const explicitMuted =
-      typeof event?.media?.audio?.state === 'boolean'
-        ? !event.media.audio.state
-        : typeof event?.audio?.muted === 'boolean'
-          ? event.audio.muted
-          : typeof event?.muted === 'boolean'
-            ? event.muted
-            : null;
-
-    if (explicitMuted === null) return;
-
-    onMicToggle?.({
-      participantName,
-      participantId,
-      isMuted: explicitMuted,
-      sourceEventId: createSourceEventId('mic_toggle'),
-      timestamp: getIsoNow(),
-    });
-  };
-
-  const onIncomingParticipantAudioChangeEvent = (event = {}) => {
-    const participants = toArray(event?.participants);
-
-    participants.forEach((participant) => {
-      const participantId = participant?.participantUUID || null;
-      const audioOn = typeof participant?.audio === 'boolean' ? participant.audio : null;
-
-      if (!participantId || audioOn === null) return;
-
-      onMicToggle?.({
-        participantName: '',
-        participantId,
-        isMuted: !audioOn,
-        sourceEventId: createSourceEventId('incoming_participant_audio'),
-        timestamp: getIsoNow(),
-      });
-    });
-  };
-
-  return {
-    onMyMediaChangeEvent,
-    onIncomingParticipantAudioChangeEvent,
   };
 };
 
@@ -653,9 +637,19 @@ async function configureZoomSdk(zoomSdk, debug = () => {}) {
       });
 
       if (supportedApis.length > 0) {
-        const negotiatedCapabilities = successfulCapabilities.filter((capability) =>
+        let negotiatedCapabilities = successfulCapabilities.filter((capability) =>
           supportedApis.includes(capability)
         );
+
+        // Some Zoom clients under-report listener APIs in getSupportedJsApis.
+        // Keep critical listeners from the last known-good config to avoid dropping subscriptions.
+        const criticalFromSuccessfulConfig = successfulCapabilities.filter((capability) =>
+          ZOOM_CRITICAL_LISTENER_CAPABILITIES.includes(capability)
+        );
+        negotiatedCapabilities = uniqueList([
+          ...negotiatedCapabilities,
+          ...criticalFromSuccessfulConfig,
+        ]);
 
         if (negotiatedCapabilities.length > 0) {
           try {
@@ -867,9 +861,10 @@ async function loadZoomSdkFromScript(debug = () => {}, { skipPackage = false } =
 export async function initZoomSdkBridge({
   onParticipantJoined,
   onParticipantLeft,
-  onReaction,
-  onMicToggle,
   onMeetingEnded,
+  onReaction,
+  onFeedbackReaction,
+  onMyMediaChange,
   onDebug,
 }) {
   const debug = createDebugEmitter(onDebug);
@@ -941,9 +936,6 @@ export async function initZoomSdkBridge({
       debug,
     });
 
-    const reactionDetectors = createReactionDetectors({ onReaction });
-    const micToggleDetector = createMicToggleDetector({ onMicToggle });
-
     const ensureConfiguredAfterPreConfigError = async (source = 'unknown') => {
       if (reconfiguredAfterPreConfigError) return false;
 
@@ -969,7 +961,14 @@ export async function initZoomSdkBridge({
     };
 
     const registerZoomListener = async (methodName, handler) => {
-      if (typeof zoomSdk?.[methodName] !== 'function') return;
+      if (typeof zoomSdk?.[methodName] !== 'function') {
+        debug('listener-register', 'Zoom listener unavailable on SDK instance', {
+          methodName,
+          registered: false,
+          reason: 'method-not-found',
+        }, 'warn');
+        return;
+      }
 
       try {
         await trace(
@@ -982,6 +981,11 @@ export async function initZoomSdkBridge({
             `zoomSdk.${methodName} listener registration timed out`
           )
         );
+
+        debug('listener-register', 'Zoom listener registered', {
+          methodName,
+          registered: true,
+        });
       } catch (error) {
         debug('listener-register', 'Zoom listener registration failed', {
           methodName,
@@ -1020,55 +1024,6 @@ export async function initZoomSdkBridge({
       participantLifecycleDetector.onParticipantChangeEvent(event || {});
     });
 
-    await registerZoomListener('onReaction', (event) => {
-      debug('zoom-event-raw', 'onReaction raw event', { eventData: event || {} });
-      reactionDetectors.onHandRaiseFromReactionEvent(event || {}, { sourcePrefix: 'reaction' });
-      reactionDetectors.onReactionEvent(event || {}, { sourcePrefix: 'reaction' });
-    });
-
-    await registerZoomListener('onEmojiReaction', (event) => {
-      debug('zoom-event-raw', 'onEmojiReaction raw event', { eventData: event || {} });
-      reactionDetectors.onHandRaiseFromReactionEvent(event || {}, { sourcePrefix: 'emoji' });
-      reactionDetectors.onReactionEvent(event || {}, { sourcePrefix: 'emoji' });
-    });
-
-    await registerZoomListener('onMyReaction', (event) => {
-      debug('zoom-event-raw', 'onMyReaction raw event', { eventData: event || {} });
-      reactionDetectors.onHandRaiseFromReactionEvent(event || {}, {
-        sourcePrefix: 'my_reaction',
-        isSelfEvent: true,
-      });
-      reactionDetectors.onReactionEvent(event || {}, {
-        sourcePrefix: 'my_reaction',
-        isSelfEvent: true,
-      });
-    });
-
-    await registerZoomListener('onMyMediaChange', (event) => {
-      debug('zoom-event-raw', 'onMyMediaChange raw event', { eventData: event || {} });
-      micToggleDetector.onMyMediaChangeEvent(event || {});
-    });
-
-    await registerZoomListener('onIncomingParticipantAudioChange', (event) => {
-      debug('zoom-event-raw', 'onIncomingParticipantAudioChange raw event', { eventData: event || {} });
-      micToggleDetector.onIncomingParticipantAudioChangeEvent(event || {});
-    });
-
-    await registerZoomListener('onFeedbackReaction', (event) => {
-      debug('zoom-event-raw', 'onFeedbackReaction raw event', { eventData: event || {} });
-      reactionDetectors.onFeedbackReactionEvent(event || {});
-    });
-
-    await registerZoomListener('onRemoveFeedbackReaction', (event) => {
-      debug('zoom-event-raw', 'onRemoveFeedbackReaction raw event', { eventData: event || {} });
-      const participantId = extractParticipantId(event || {});
-      if (!participantId) return;
-
-      debug('reaction-remove', 'Received onRemoveFeedbackReaction event', {
-        participantId,
-      });
-    });
-
     await registerZoomListener('onMeeting', (event) => {
       debug('zoom-event-raw', 'onMeeting raw event', { eventData: event || {} });
       const action = String(event?.action || '').toLowerCase();
@@ -1080,6 +1035,168 @@ export async function initZoomSdkBridge({
       if (action === 'ended' || action === 'leave') {
         onMeetingEnded?.({ timestamp: getIsoNow() });
       }
+    });
+
+    const emitReactionFromEvent = (event = {}, source = 'onReaction') => {
+      const participantName = extractParticipantName(event);
+      const participantId = extractParticipantId(event);
+      const reactionDetails = extractReactionDetails(event);
+      const reaction = reactionDetails.value;
+      const eventTimestamp = getIsoNow();
+
+      // Zoom can emit repeated identical onReaction events in short bursts.
+      // Dedupe very-close duplicates so we persist one participation event per user action.
+      const dedupeIdentity = String(participantId || participantName || 'unknown').trim().toLowerCase();
+      const dedupeSignal =
+        normalizeSignalText(reactionDetails.emoji || reactionDetails.unicode || reactionDetails.name || reaction) ||
+        'unknown-signal';
+      const dedupeKey = `${dedupeIdentity}|${dedupeSignal}`;
+      const globalDedupeKey = `global|${dedupeSignal}`;
+      const dedupeWindowMs = 1200;
+      const globalDedupeWindowMs = 450;
+
+      if (!emitReactionFromEvent.recentEvents) {
+        emitReactionFromEvent.recentEvents = new Map();
+      }
+
+      const now = Date.now();
+      const lastSeen = emitReactionFromEvent.recentEvents.get(dedupeKey);
+      const lastSeenGlobal = emitReactionFromEvent.recentEvents.get(globalDedupeKey);
+      if (
+        (typeof lastSeen === 'number' && now - lastSeen < dedupeWindowMs) ||
+        (typeof lastSeenGlobal === 'number' && now - lastSeenGlobal < globalDedupeWindowMs)
+      ) {
+        debug('zoom-event-raw', 'Skipped duplicate reaction/feedback signal', {
+          source,
+          dedupeKey,
+          globalDedupeKey,
+          dedupeWindowMs,
+          globalDedupeWindowMs,
+        });
+        return;
+      }
+
+      emitReactionFromEvent.recentEvents.set(dedupeKey, now);
+      emitReactionFromEvent.recentEvents.set(globalDedupeKey, now);
+
+      const cutoff = now - (dedupeWindowMs * 4);
+      for (const [key, ts] of emitReactionFromEvent.recentEvents.entries()) {
+        if (ts < cutoff) {
+          emitReactionFromEvent.recentEvents.delete(key);
+        }
+      }
+
+      if (!reaction) {
+        debug('zoom-event-raw', 'Reaction event skipped because no reaction value was found', {
+          source,
+          eventData: event || {},
+        }, 'warn');
+        return;
+      }
+
+      onReaction?.({
+        participantName,
+        participantId,
+        reaction,
+        reactionEmoji: reactionDetails.emoji || '',
+        reactionUnicode: reactionDetails.unicode || '',
+        reactionName: reactionDetails.name || '',
+        source,
+        timestamp: eventTimestamp,
+        rawEvent: reactionDetails.rawEvent || {},
+        eventData: reactionDetails.eventData || {},
+      });
+    };
+
+    const emitFeedbackReactionFromEvent = (event = {}, source = 'onFeedbackReaction') => {
+      const participantName = extractParticipantName(event);
+      const participantId = extractParticipantId(event);
+      const reactionDetails = extractReactionDetails(event);
+      const feedback = reactionDetails.value;
+      const eventTimestamp = getIsoNow();
+
+      const dedupeIdentity = String(participantId || participantName || 'unknown').trim().toLowerCase();
+      const dedupeSignal =
+        normalizeSignalText(reactionDetails.emoji || reactionDetails.unicode || reactionDetails.name || feedback) ||
+        'unknown-signal';
+      const dedupeKey = `${dedupeIdentity}|feedback_reaction|${dedupeSignal}`;
+      const dedupeWindowMs = 1200;
+
+      if (!emitFeedbackReactionFromEvent.recentEvents) {
+        emitFeedbackReactionFromEvent.recentEvents = new Map();
+      }
+
+      const now = Date.now();
+      const lastSeen = emitFeedbackReactionFromEvent.recentEvents.get(dedupeKey);
+      if (typeof lastSeen === 'number' && now - lastSeen < dedupeWindowMs) {
+        debug('zoom-event-raw', 'Skipped duplicate feedback reaction signal', {
+          source,
+          dedupeKey,
+          dedupeWindowMs,
+        });
+        return;
+      }
+
+      emitFeedbackReactionFromEvent.recentEvents.set(dedupeKey, now);
+
+      const cutoff = now - (dedupeWindowMs * 4);
+      for (const [key, ts] of emitFeedbackReactionFromEvent.recentEvents.entries()) {
+        if (ts < cutoff) {
+          emitFeedbackReactionFromEvent.recentEvents.delete(key);
+        }
+      }
+
+      if (!feedback) {
+        debug('zoom-event-raw', 'Feedback reaction event skipped because no value was found', {
+          source,
+          eventData: event || {},
+        }, 'warn');
+        return;
+      }
+
+      onFeedbackReaction?.({
+        participantName,
+        participantId,
+        feedback,
+        reactionEmoji: reactionDetails.emoji || '',
+        reactionUnicode: reactionDetails.unicode || '',
+        reactionName: reactionDetails.name || '',
+        source,
+        timestamp: eventTimestamp,
+        rawEvent: reactionDetails.rawEvent || {},
+        eventData: reactionDetails.eventData || {},
+      });
+    };
+
+    const signalListeners = [
+      { methodName: 'onReaction', source: 'onReaction' },
+    ];
+
+    for (const listener of signalListeners) {
+      await registerZoomListener(listener.methodName, (event) => {
+        debug('zoom-event-raw', `${listener.source} raw event`, { eventData: event || {} });
+        emitReactionFromEvent(event || {}, listener.source);
+      });
+    }
+
+    await registerZoomListener('onFeedbackReaction', (event) => {
+      debug('zoom-event-raw', 'onFeedbackReaction raw event', { eventData: event || {} });
+      emitFeedbackReactionFromEvent(event || {}, 'onFeedbackReaction');
+    });
+
+    await registerZoomListener('onMyMediaChange', (event) => {
+      debug('zoom-event-raw', 'onMyMediaChange raw event', { eventData: event || {} });
+
+      const isMuted = extractMediaMutedState(event || {});
+      if (typeof isMuted !== 'boolean') {
+        return;
+      }
+
+      onMyMediaChange?.({
+        isMuted,
+        source: 'onMyMediaChange',
+        timestamp: getIsoNow(),
+      });
     });
 
     debug('context-phase', 'Starting Zoom SDK context fetch block');

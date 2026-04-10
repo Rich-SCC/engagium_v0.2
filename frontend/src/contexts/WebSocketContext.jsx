@@ -99,6 +99,30 @@ const formatSpeakingDuration = (seconds) => {
   return `${minutes}m ${secs}s`;
 };
 
+const normalizeSignalText = (value) => String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+
+const REACTION_TO_EMOJI = {
+  joy: '😂',
+  laugh: '😂',
+  openmouth: '😮',
+  wow: '😮',
+  heart: '❤️',
+  clap: '👏',
+  thumbsup: '👍',
+  thumbsup: '👍',
+  thumbsdown: '👎',
+  tada: '🎉',
+  fire: '🔥',
+  yes: '✅',
+  no: '❌',
+};
+
+const toReactionEmoji = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return REACTION_TO_EMOJI[normalizeSignalText(raw)] || raw;
+};
+
 export const WebSocketProvider = ({ children }) => {
   const { user, token } = useAuth();
   const [socket, setSocket] = useState(null);
@@ -141,7 +165,8 @@ export const WebSocketProvider = ({ children }) => {
     const name = log.student_name || log.full_name;
     const type = log.interaction_type;
     const isMuted = log.additional_data?.isMuted;
-    const reaction = log.additional_data?.reaction || log.interaction_value || log.reaction;
+    const reaction = toReactionEmoji(log.additional_data?.reaction || log.interaction_value || log.reaction);
+    const handAction = log.additional_data?.handAction || log.interaction_value;
     const speakingSeconds = Number(
       log.additional_data?.speakingDurationSeconds || log.additional_data?.duration_seconds || log.duration_seconds
     );
@@ -156,7 +181,7 @@ export const WebSocketProvider = ({ children }) => {
       case 'chat':
         return `${name} sent a message`;
       case 'hand_raise':
-        return `${name} raised hand`;
+        return handAction === 'lowered' ? `${name} lowered hand` : `${name} raised hand ✋`;
       case 'reaction':
         return reaction ? `${name} reacted ${reaction}` : `${name} reacted`;
       case 'mic_toggle':
@@ -471,11 +496,12 @@ export const WebSocketProvider = ({ children }) => {
         const durationLabel = metadata?.speakingDurationLabel || formatSpeakingDuration(
           Number(metadata?.speakingDurationSeconds || duration_seconds)
         );
-        const reactionLabel = metadata?.reaction;
+        const reactionLabel = toReactionEmoji(metadata?.reaction || data.interaction_value);
+        const handAction = metadata?.handAction || data.interaction_value;
 
         switch (type) {
           case 'chat': return `${name} sent a message`;
-          case 'hand_raise': return `${name} raised hand`;
+          case 'hand_raise': return handAction === 'lowered' ? `${name} lowered hand` : `${name} raised hand ✋`;
           case 'reaction': return reactionLabel ? `${name} reacted ${reactionLabel}` : `${name} reacted`;
           case 'mic_toggle': {
             const isMuted = metadata && typeof metadata.isMuted === 'boolean'

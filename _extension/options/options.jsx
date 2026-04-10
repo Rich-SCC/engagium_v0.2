@@ -119,8 +119,7 @@ function OptionsApp() {
       }
 
       // Validate token using the new extension token verification endpoint
-      const isDev = !('update_url' in chrome.runtime.getManifest());
-      const baseUrl = isDev ? 'http://localhost:3001' : 'https://engagium.app';
+      const baseUrl = getApiBaseUrl();
       
       const response = await fetch(`${baseUrl}/api/extension-tokens/verify`, {
         method: 'POST',

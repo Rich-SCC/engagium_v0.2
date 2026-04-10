@@ -75,7 +75,7 @@ export const STORAGE_KEYS = {
 // Dev builds don't have 'update_url', production builds do
 const isDev = !('update_url' in chrome.runtime.getManifest());
 export const API_BASE_URL = isDev
-  ? 'http://localhost:3001/api' 
+  ? 'https://dev.engagium.app/api'
   : 'https://engagium.app/api';
 
 export const DB_NAME = 'EngagiumExtension';

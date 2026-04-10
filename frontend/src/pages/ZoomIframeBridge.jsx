@@ -1,6 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { zoomIframeAPI } from '@/services/zoomIframeApi';
 import { initZoomSdkBridge } from '@/services/zoomSdkBridge';
+import { normalizeMeetingUrl } from '@/utils/urlUtils';
+import heroLogo from '@/assets/images/hero-logo.png';
+import {
+  ArrowPathIcon,
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+  PlayCircleIcon,
+  SignalIcon,
+  StopCircleIcon,
+} from '@heroicons/react/24/outline';
 
 const TOKEN_STORAGE_KEY = 'engagium_zoom_bridge_token';
 const CLASS_ID_STORAGE_KEY = 'engagium_zoom_bridge_class_id';
@@ -85,11 +95,6 @@ const getAutoStart = () => {
   return params.get('autostart') === '1';
 };
 
-const getMockMode = () => {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('mock') === '1';
-};
-
 const formatTime = (ts) =>
   new Date(ts).toLocaleTimeString('en-US', {
     hour: '2-digit',
@@ -97,12 +102,233 @@ const formatTime = (ts) =>
     second: '2-digit',
   });
 
-const formatDebugLabel = (phase = 'unknown') =>
-  String(phase)
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (m) => m.toUpperCase());
+const shortenId = (value = '') => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.length <= 8 ? text : text.slice(0, 5);
+};
+
+const getEventSummaryText = (event = {}) => {
+  const payload = event?.payload || {};
+
+  if (payload?.participantName) {
+    return payload.participantName;
+  }
+
+  if (payload?.participant?.name) {
+    return payload.participant.name;
+  }
+
+  if (payload?.sessionId) {
+    return `ID: ${shortenId(payload.sessionId)}`;
+  }
+
+  if (payload?.meetingUUID) {
+    return `Meeting: ${shortenId(payload.meetingUUID)}`;
+  }
+
+  return '';
+};
 
 const waitForMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const buildSourceEventId = (prefix = 'evt') =>
+  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const normalizeSignalText = (value) => String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+
+const PARTICIPATION_GUARD_WINDOWS_MS = {
+  exactDuplicate: 2000,
+  reactionBurst: 1200,
+  sameReactionCooldown: 6000,
+  handCooldown: 2500,
+};
+
+const detectHandFeedbackAction = (signal = '', source = '') => {
+  const normalizedSignal = normalizeSignalText(signal);
+  const normalizedSource = normalizeSignalText(source);
+
+  if (!normalizedSignal && !normalizedSource) return null;
+
+  if (
+    normalizedSignal.includes('handraise') ||
+    normalizedSignal.includes('raisehand') ||
+    normalizedSignal.includes('raisedhand') ||
+    normalizedSignal.includes('handup') ||
+    normalizedSignal === 'raisehand'
+  ) {
+    return 'raised';
+  }
+
+  if (
+    normalizedSignal.includes('lowerhand') ||
+    normalizedSignal.includes('handlower') ||
+    normalizedSignal.includes('putdownhand') ||
+    normalizedSignal.includes('unraisehand') ||
+    normalizedSignal.includes('unraisedhand') ||
+    normalizedSignal === 'false' ||
+    normalizedSignal === '0'
+  ) {
+    return 'lowered';
+  }
+
+  if (normalizedSignal === 'true' || normalizedSignal === '1') {
+    return 'raised';
+  }
+
+  // If the event came from onFeedback and value contains "hand", treat as raise signal.
+  if ((normalizedSource === 'onfeedback' || normalizedSource === 'onfeedbackreaction') && normalizedSignal.includes('hand')) {
+    return 'raised';
+  }
+
+  return null;
+};
+
+const detectHandFeedbackActionFromRawEvent = (rawEvent = {}) => {
+  if (!rawEvent || typeof rawEvent !== 'object') return null;
+
+  const boolCandidates = [
+    rawEvent?.isHandRaised,
+    rawEvent?.handRaised,
+    rawEvent?.raiseHand,
+    rawEvent?.hand?.raised,
+  ];
+
+  for (const candidate of boolCandidates) {
+    if (typeof candidate === 'boolean') {
+      return candidate ? 'raised' : 'lowered';
+    }
+  }
+
+  if (typeof rawEvent?.lowerHand === 'boolean') {
+    return rawEvent.lowerHand ? 'lowered' : 'raised';
+  }
+
+  const textCandidates = [
+    rawEvent?.feedback,
+    rawEvent?.feedbackType,
+    rawEvent?.reaction,
+    rawEvent?.reactionType,
+    rawEvent?.action,
+    rawEvent?.status,
+    rawEvent?.event,
+    rawEvent?.eventType,
+    rawEvent?.type,
+    rawEvent?.name,
+    rawEvent?.value,
+  ];
+
+  for (const candidate of textCandidates) {
+    const inferred = detectHandFeedbackAction(candidate, 'onFeedback');
+    if (inferred) return inferred;
+  }
+
+  return null;
+};
+
+const getRawReactionDetails = ({ signal, reactionEmoji, reactionUnicode, reactionName, rawEvent, eventData }) => {
+  const payload = eventData || rawEvent?.eventData || rawEvent || {};
+  const nestedReaction = payload?.reaction || {};
+
+  const emoji = String(
+    reactionEmoji ||
+    nestedReaction?.emoji ||
+    payload?.unicode ||
+    payload?.emoji ||
+    signal ||
+    ''
+  ).trim();
+
+  const unicode = String(
+    reactionUnicode ||
+    nestedReaction?.unicode ||
+    payload?.reactionUnicode ||
+    payload?.unicode ||
+    ''
+  ).trim();
+
+  const name = String(
+    reactionName ||
+    nestedReaction?.name ||
+    payload?.reactionName ||
+    ''
+  ).trim();
+
+  const displayValue = emoji || unicode || name || String(signal || '').trim() || 'unknown';
+  return {
+    displayValue,
+    interactionValue: emoji || unicode || name || String(signal || '').trim() || 'unknown',
+    dedupeSignal: `reaction:${normalizeSignalText(emoji || unicode || name || signal || 'unknown')}`,
+    emoji: emoji || null,
+    unicode: unicode || null,
+    name: name || null,
+  };
+};
+
+const shouldBlockParticipationSignal = ({
+  cacheRef,
+  identity,
+  dedupeSignal,
+  interactionType,
+  now,
+}) => {
+  const exactKey = `exact|${identity}|${dedupeSignal}`;
+  const exactLastSeen = cacheRef.current.get(exactKey);
+  if (
+    typeof exactLastSeen === 'number' &&
+    now - exactLastSeen < PARTICIPATION_GUARD_WINDOWS_MS.exactDuplicate
+  ) {
+    return true;
+  }
+
+  if (interactionType === 'reaction') {
+    const reactionBurstKey = `reaction:any|${identity}`;
+    const reactionBurstLastSeen = cacheRef.current.get(reactionBurstKey);
+    if (
+      typeof reactionBurstLastSeen === 'number' &&
+      now - reactionBurstLastSeen < PARTICIPATION_GUARD_WINDOWS_MS.reactionBurst
+    ) {
+      return true;
+    }
+
+    const sameReactionKey = `reaction:same|${identity}|${dedupeSignal}`;
+    const sameReactionLastSeen = cacheRef.current.get(sameReactionKey);
+    if (
+      typeof sameReactionLastSeen === 'number' &&
+      now - sameReactionLastSeen < PARTICIPATION_GUARD_WINDOWS_MS.sameReactionCooldown
+    ) {
+      return true;
+    }
+
+    cacheRef.current.set(reactionBurstKey, now);
+    cacheRef.current.set(sameReactionKey, now);
+  }
+
+  if (interactionType === 'hand_raise') {
+    const handKey = `hand|${identity}|${dedupeSignal}`;
+    const handLastSeen = cacheRef.current.get(handKey);
+    if (
+      typeof handLastSeen === 'number' &&
+      now - handLastSeen < PARTICIPATION_GUARD_WINDOWS_MS.handCooldown
+    ) {
+      return true;
+    }
+
+    cacheRef.current.set(handKey, now);
+  }
+
+  cacheRef.current.set(exactKey, now);
+
+  const maxWindowMs = Math.max(...Object.values(PARTICIPATION_GUARD_WINDOWS_MS));
+  const cutoff = now - maxWindowMs * 4;
+  for (const [cachedKey, timestamp] of cacheRef.current.entries()) {
+    if (timestamp < cutoff) {
+      cacheRef.current.delete(cachedKey);
+    }
+  }
+
+  return false;
+};
+
 const BRIDGE_INIT_TIMEOUT_MS = 15000;
 const BOOT_INIT_SETTLE_DELAY_MS = 1500;
 const BOOT_INIT_MAX_ATTEMPTS = 2;
@@ -110,28 +336,6 @@ const LIFECYCLE_DEDUPE_WINDOW_MS = {
   joined: 15000,
   left: 75000,
 };
-
-const ZOOM_INSPECTOR_PRIORITIES = [
-  'getSupportedJsApis',
-  'getRunningContext',
-  'getMeetingUUID',
-  'getMeetingContext',
-  'getMeetingJoinUrl',
-  'getMeetingParticipants',
-  'getIncomingParticipantAudioState',
-  'getUserContext',
-  'onParticipantChange',
-  'onReaction',
-  'onEmojiReaction',
-  'onMyReaction',
-  'onMyMediaChange',
-  'onFeedbackReaction',
-  'onRemoveFeedbackReaction',
-  'onIncomingParticipantAudioChange',
-  'onMeeting',
-  'onRunningContextChange',
-  'onMyUserContextChange',
-];
 
 const getMeetingLinkFromZoomInit = (zoomInitResult) => {
   const joinUrl = zoomInitResult?.meetingJoinUrl?.joinUrl;
@@ -180,90 +384,38 @@ const getZoomSelfIdentity = (zoomInitResult) => {
 };
 
 const getParticipantIdFromRecord = (participant = {}) =>
-  participant?.participantUUID || participant?.userId || participant?.id || participant?.participantId || null;
+  participant?.participantUUID ||
+  participant?.participant_id ||
+  participant?.userId ||
+  participant?.id ||
+  participant?.participantId ||
+  participant?.student_id ||
+  null;
 
 const getParticipantNameFromRecord = (participant = {}) =>
-  participant?.screenName || participant?.displayName || participant?.userName || participant?.name || '';
+  participant?.screenName ||
+  participant?.displayName ||
+  participant?.userName ||
+  participant?.name ||
+  participant?.participant_name ||
+  participant?.student_name ||
+  participant?.full_name ||
+  '';
 
-const getParticipantMutedState = (participant = {}) => {
-  const parseBooleanLike = (value) => {
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'number') {
-      if (value === 1) return true;
-      if (value === 0) return false;
-    }
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      if (['true', '1', 'yes', 'on', 'unmuted'].includes(normalized)) return false;
-      if (['false', '0', 'no', 'off', 'muted'].includes(normalized)) return true;
-    }
-    return null;
-  };
-
-  if (typeof participant?.audio?.muted === 'boolean') return participant.audio.muted;
-  if (typeof participant?.isMuted === 'boolean') return participant.isMuted;
-  if (typeof participant?.muted === 'boolean') return participant.muted;
-  if (typeof participant?.isAudioMuted === 'boolean') return participant.isAudioMuted;
-
-  const candidates = [
-    participant?.audioMuted,
-    participant?.micMuted,
-    participant?.microphoneMuted,
-    participant?.mute,
-    participant?.audioStatus,
-    participant?.microphoneStatus,
-  ];
-
-  for (const candidate of candidates) {
-    const parsed = parseBooleanLike(candidate);
-    if (typeof parsed === 'boolean') return parsed;
-  }
-
-  const action = String(participant?.action || '').toLowerCase();
-  if (action.includes('muted') || action.includes('audio_muted') || action.includes('mute_on')) return true;
-  if (action.includes('unmuted') || action.includes('audio_unmuted') || action.includes('mute_off')) return false;
-
-  return null;
-};
-
-const getParticipantHandRaisedState = (participant = {}) => {
-  const parseBooleanLike = (value) => {
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'number') {
-      if (value === 1) return true;
-      if (value === 0) return false;
-    }
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      if (['true', '1', 'yes', 'raised', 'up'].includes(normalized)) return true;
-      if (['false', '0', 'no', 'lowered', 'down'].includes(normalized)) return false;
-    }
-    return null;
-  };
-
-  if (typeof participant?.isHandRaised === 'boolean') return participant.isHandRaised;
-  if (typeof participant?.handRaised === 'boolean') return participant.handRaised;
-  if (typeof participant?.raisedHand === 'boolean') return participant.raisedHand;
-  if (typeof participant?.hand_raise === 'boolean') return participant.hand_raise;
-
-  const candidates = [
-    participant?.handRaise,
-    participant?.isRaisedHand,
-    participant?.isRaiseHand,
-    participant?.handStatus,
-  ];
-
-  for (const candidate of candidates) {
-    const parsed = parseBooleanLike(candidate);
-    if (typeof parsed === 'boolean') return parsed;
-  }
-
-  const action = String(participant?.action || '').toLowerCase();
-  if (action.includes('raise_hand') || action.includes('hand_raised') || action.includes('hand_raise')) return true;
-  if (action.includes('lower_hand') || action.includes('hand_lowered')) return false;
-
-  return null;
-};
+const getCurrentParticipantsFromAttendance = (attendance = []) =>
+  attendance
+    .filter((record) =>
+      Array.isArray(record?.intervals)
+        ? record.intervals.some((interval) => !interval?.left_at)
+        : record?.status === 'present'
+    )
+    .map((record) => ({
+      participant_name: record?.participant_name || record?.student_name || record?.full_name || '',
+      student_name: record?.student_name || record?.full_name || record?.participant_name || '',
+      participant_id: record?.participant_id || null,
+      student_id: record?.student_id || null,
+    }))
+    .filter((participant) => Boolean(getParticipantNameFromRecord(participant)));
 
 const getParticipantKey = (participant = {}) => {
   const participantId = getParticipantIdFromRecord(participant);
@@ -286,6 +438,11 @@ const getParticipantIdentityTokens = (participant = {}) => {
   if (normalizedName) tokens.push(`name:${normalizedName}`);
 
   return tokens;
+};
+
+const getAccountDisplayName = (user = {}) => {
+  const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ').trim();
+  return fullName || user?.email || 'Unknown account';
 };
 
 const dedupeParticipantRecords = (participants = []) => {
@@ -331,12 +488,11 @@ const buildKnownParticipantsMap = (participants = []) => {
   return map;
 };
 
-const createBridgeSourceEventId = (prefix) =>
-  `zoom-bridge:${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-
 function ZoomIframeBridge() {
   const [token, setToken] = useState(getInitialToken());
   const [tokenInput, setTokenInput] = useState(getInitialToken());
+  const [tokenAccount, setTokenAccount] = useState(null);
+  const [isResolvingTokenAccount, setIsResolvingTokenAccount] = useState(false);
   const [classes, setClasses] = useState([]);
   const [selectedClassId, setSelectedClassId] = useState(getInitialClassId());
   const [meetingLinkOverride, setMeetingLinkOverride] = useState(getInitialMeetingLink());
@@ -346,23 +502,18 @@ function ZoomIframeBridge() {
   const [error, setError] = useState('');
   const [events, setEvents] = useState([]);
   const [zoomState, setZoomState] = useState({ initialized: false, data: null });
-  const [sdkDebug, setSdkDebug] = useState([]);
-  const [sdkPhase, setSdkPhase] = useState('idle');
-  const [selectedInspectorTarget, setSelectedInspectorTarget] = useState('');
-  const [inspectorRunTarget, setInspectorRunTarget] = useState('');
-  const [mockMode] = useState(getMockMode());
-  const [mockParticipantName, setMockParticipantName] = useState('Mock Student');
-  const [mockParticipantId, setMockParticipantId] = useState('mock-participant-001');
-  const [mockIsMuted, setMockIsMuted] = useState(true);
+  const [showTokenEditor, setShowTokenEditor] = useState(!getInitialToken());
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const tokenRef = useRef(token);
   const sessionRef = useRef(session);
+  const hydratedSessionIdRef = useRef(null);
   const sdkBootStartedRef = useRef(false);
   const sdkInitInFlightRef = useRef(false);
   const zoomSdkRef = useRef(null);
   const selfIdentityRef = useRef({ ids: [], names: [], raw: null });
   const knownParticipantsRef = useRef(new Map());
-  const recentInteractionRef = useRef(new Map());
   const recentLifecycleRef = useRef(new Map());
+  const recentParticipationSignalsRef = useRef(new Map());
 
   const requestTokenFromParent = useCallback((reason = 'bootstrap') => {
     window.parent?.postMessage(
@@ -377,6 +528,12 @@ function ZoomIframeBridge() {
 
   useEffect(() => {
     tokenRef.current = token;
+  }, [token]);
+
+  useEffect(() => {
+    if (token?.trim()) {
+      setShowTokenEditor(false);
+    }
   }, [token]);
 
   useEffect(() => {
@@ -398,178 +555,6 @@ function ZoomIframeBridge() {
   const appendEvent = useCallback((label, payload = {}) => {
     setEvents((prev) => [{ id: `${Date.now()}-${Math.random()}`, label, timestamp: new Date().toISOString(), payload }, ...prev].slice(0, 120));
   }, []);
-
-  const appendSdkDebug = useCallback((entry = {}) => {
-    const normalized = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      timestamp: entry.timestamp || new Date().toISOString(),
-      phase: entry.phase || 'unknown',
-      message: entry.message || 'Debug checkpoint',
-      level: entry.level || 'info',
-      meta: entry.meta || {},
-    };
-
-    setSdkPhase(normalized.phase);
-    setSdkDebug((prev) => [normalized, ...prev].slice(0, 80));
-  }, []);
-
-  const inspectorEntriesByTarget = useMemo(() => {
-    const entries = new Map();
-
-    sdkDebug.forEach((entry) => {
-      const phase = String(entry?.phase || '');
-
-      if (phase === 'zoom-api-raw') {
-        const target = String(entry?.meta?.requestedApi || '').trim();
-        if (!target || entries.has(target)) return;
-
-        entries.set(target, {
-          target,
-          kind: 'api',
-          timestamp: entry?.timestamp || null,
-          message: entry?.message || `${target} raw response`,
-          payload: entry?.meta?.responseValue,
-        });
-        return;
-      }
-
-      if (phase === 'zoom-event-raw') {
-        const message = String(entry?.message || '').trim();
-        const target = message.endsWith(' raw event')
-          ? message.slice(0, -' raw event'.length)
-          : '';
-
-        if (!target || entries.has(target)) return;
-
-        entries.set(target, {
-          target,
-          kind: 'event',
-          timestamp: entry?.timestamp || null,
-          message: message || `${target} raw event`,
-          payload: entry?.meta?.eventData,
-        });
-      }
-    });
-
-    return entries;
-  }, [sdkDebug]);
-
-  const inspectorTargets = useMemo(() => {
-    const configuredCapabilities = Array.isArray(zoomState?.data?.configuredCapabilities)
-      ? zoomState.data.configuredCapabilities
-      : [];
-
-    const merged = new Set([...ZOOM_INSPECTOR_PRIORITIES, ...configuredCapabilities]);
-    const ordered = [];
-
-    ZOOM_INSPECTOR_PRIORITIES.forEach((target) => {
-      if (merged.has(target)) {
-        ordered.push(target);
-        merged.delete(target);
-      }
-    });
-
-    Array.from(merged)
-      .sort((a, b) => String(a).localeCompare(String(b)))
-      .forEach((target) => ordered.push(target));
-
-    return ordered;
-  }, [zoomState?.data?.configuredCapabilities]);
-
-  useEffect(() => {
-    if (inspectorTargets.length === 0) {
-      setSelectedInspectorTarget('');
-      return;
-    }
-
-    if (!selectedInspectorTarget || !inspectorTargets.includes(selectedInspectorTarget)) {
-      setSelectedInspectorTarget(inspectorTargets[0]);
-    }
-  }, [inspectorTargets, selectedInspectorTarget]);
-
-  const selectedInspectorEntry = selectedInspectorTarget
-    ? inspectorEntriesByTarget.get(selectedInspectorTarget) || null
-    : null;
-
-  const getCurrentParticipantUUIDs = useCallback(() => {
-    const ids = new Set();
-
-    const addFromParticipants = (participants = []) => {
-      participants.forEach((participant) => {
-        const participantId = getParticipantIdFromRecord(participant);
-        const normalizedId = normalizeIdentityValue(participantId);
-        if (normalizedId) {
-          ids.add(participantId);
-        }
-      });
-    };
-
-    addFromParticipants(zoomState?.data?.meetingParticipants?.participants || []);
-    addFromParticipants(Array.from(knownParticipantsRef.current.values()));
-
-    return Array.from(ids);
-  }, [zoomState?.data?.meetingParticipants?.participants]);
-
-  const runInspectorApi = useCallback(async (target) => {
-    const sdk = zoomSdkRef.current;
-
-    if (!sdk) {
-      setError('Zoom SDK is not ready yet.');
-      return;
-    }
-
-    if (typeof sdk[target] !== 'function') {
-      setError(`Zoom SDK does not expose ${target} in this session.`);
-      return;
-    }
-
-    setError('');
-    setInspectorRunTarget(target);
-
-    try {
-      const callArgs = target === 'getIncomingParticipantAudioState'
-        ? [{ participantUUIDs: getCurrentParticipantUUIDs() }]
-        : [];
-
-      if (target === 'getIncomingParticipantAudioState' && callArgs[0].participantUUIDs.length === 0) {
-        setError('No participant UUIDs are available yet for getIncomingParticipantAudioState. Start tracking first.');
-        return;
-      }
-
-      const result = await sdk[target](...callArgs);
-
-      appendSdkDebug({
-        phase: 'zoom-api-raw',
-        message: `${target}() manual run result`,
-        meta: {
-          requestedApi: target,
-          responseValue: result,
-          requestArgs: callArgs,
-          runSource: 'manual-ui',
-        },
-      });
-
-      setSelectedInspectorTarget(target);
-      appendEvent(`Inspector ran ${target}`, { target });
-    } catch (apiError) {
-      appendSdkDebug({
-        phase: 'zoom-api-raw',
-        level: 'warn',
-        message: `${target}() manual run failed`,
-        meta: {
-          requestedApi: target,
-          error: apiError?.message || 'API call failed',
-          requestArgs: target === 'getIncomingParticipantAudioState'
-            ? [{ participantUUIDs: getCurrentParticipantUUIDs() }]
-            : [],
-          runSource: 'manual-ui',
-        },
-      });
-      setError(apiError?.message || `Failed to run ${target}`);
-    } finally {
-      setInspectorRunTarget('');
-    }
-  }, [appendEvent, appendSdkDebug, getCurrentParticipantUUIDs]);
 
   const sendLiveEvent = useCallback(async (eventType, data, sessionId = null) => {
     const activeToken = tokenRef.current;
@@ -657,8 +642,6 @@ function ZoomIframeBridge() {
     const record = {
       id: participantId,
       name: participantName,
-      isMuted: getParticipantMutedState(participant),
-      isHandRaised: getParticipantHandRaisedState(participant),
     };
 
     if (normalizedId) {
@@ -747,33 +730,95 @@ function ZoomIframeBridge() {
     }
   }, [resolveParticipantIdentity, upsertKnownParticipant]);
 
-  const isDuplicateInteraction = useCallback(({ interactionType, participantId, participantName, interactionValue, timestamp }) => {
-    const normalizedType = normalizeIdentityValue(interactionType);
-    const normalizedId = normalizeIdentityValue(participantId);
-    const normalizedName = normalizeIdentityValue(participantName);
-    const normalizedIdentity = normalizedId || normalizedName || 'unknown-identity';
-    const normalizedValue = normalizeIdentityValue(interactionValue) || 'unknown-value';
-    const eventTime = Number.isFinite(Date.parse(timestamp)) ? Date.parse(timestamp) : Date.now();
+  const processParticipationSignal = useCallback(async ({
+    participantName,
+    participantId,
+    signal,
+    reactionEmoji,
+    reactionUnicode,
+    reactionName,
+    timestamp,
+    source,
+    rawEvent,
+    eventData,
+    pipeline = 'reaction',
+  }) => {
+    if (!sessionRef.current?.id) return;
 
-    const cacheKey = `${normalizedType}|${normalizedIdentity}|${normalizedValue}`;
-    const lastSeen = recentInteractionRef.current.get(cacheKey);
-    const DEDUPE_WINDOW_MS = 2500;
+    const resolvedParticipant = await resolveParticipantIdentityAsync(participantId, participantName);
+    if (isSelfParticipant(resolvedParticipant.id, resolvedParticipant.name)) return;
 
-    if (lastSeen && eventTime - lastSeen < DEDUPE_WINDOW_MS) {
-      return true;
+    const handAction =
+      detectHandFeedbackAction(signal, source) ||
+      detectHandFeedbackActionFromRawEvent(rawEvent);
+
+    // Feedback reaction pipeline is dedicated to hand signals; ignore non-hand feedback noise.
+    if (pipeline === 'feedback_reaction' && !handAction) {
+      return;
     }
 
-    recentInteractionRef.current.set(cacheKey, eventTime);
+    const participantDisplayName = resolvedParticipant.name || participantName || 'Unknown participant';
+    const identityKey = String(
+      resolvedParticipant.id || participantId || participantDisplayName || 'unknown'
+    ).trim().toLowerCase();
 
-    const cutoff = eventTime - 20000;
-    for (const [key, value] of recentInteractionRef.current.entries()) {
-      if (value < cutoff) {
-        recentInteractionRef.current.delete(key);
-      }
+    const rawReaction = getRawReactionDetails({
+      signal,
+      reactionEmoji,
+      reactionUnicode,
+      reactionName,
+      rawEvent,
+      eventData,
+    });
+    const interactionType = handAction ? 'hand_raise' : 'reaction';
+    const interactionValue = handAction ? handAction : rawReaction.interactionValue;
+    const dedupeSignal = handAction
+      ? `hand:${handAction}`
+      : rawReaction.dedupeSignal;
+
+    if (shouldBlockParticipationSignal({
+      cacheRef: recentParticipationSignalsRef,
+      identity: identityKey,
+      dedupeSignal,
+      interactionType,
+      now: Date.now(),
+    })) {
+      return;
     }
 
-    return false;
-  }, []);
+    const eventLabel = handAction
+      ? handAction === 'raised'
+        ? (pipeline === 'feedback_reaction' ? 'Hand Raissed' : 'Hand raised')
+        : (pipeline === 'feedback_reaction' ? 'Hand lowered (feedback reaction)' : 'Hand lowered')
+      : `Reacted ${rawReaction.displayValue}`;
+
+    appendEvent(eventLabel, {
+      participantName: participantDisplayName,
+      reaction: handAction
+        ? handAction === 'raised' ? '✋' : '⬇'
+        : rawReaction.displayValue,
+    });
+
+    await sendLiveEvent('participation:logged', {
+      interactionType,
+      interactionValue,
+      studentName: participantDisplayName,
+      metadata: {
+        participant_name: participantDisplayName,
+        participant_id: resolvedParticipant.id || participantId || null,
+        reaction: handAction ? null : interactionValue,
+        reactionEmoji: handAction ? null : rawReaction.emoji,
+        reactionUnicode: handAction ? null : rawReaction.unicode,
+        reactionName: handAction ? null : rawReaction.name,
+        handAction: handAction || null,
+        source: 'zoom_sdk',
+        source_listener: source || (pipeline === 'feedback_reaction' ? 'onFeedbackReaction' : 'onReaction'),
+        source_event_id: buildSourceEventId(handAction ? 'feedbackreaction' : 'reaction'),
+        feedback_signal: pipeline === 'feedback_reaction' ? (String(signal || '').trim() || null) : null,
+      },
+      occurredAt: timestamp || new Date().toISOString(),
+    });
+  }, [appendEvent, isSelfParticipant, resolveParticipantIdentityAsync, sendLiveEvent]);
 
   const initializeZoomSdk = useCallback(async ({ trigger = 'boot' } = {}) => {
     const isRetry = trigger === 'retry';
@@ -789,13 +834,38 @@ function ZoomIframeBridge() {
 
     setError('');
     setStatus(isRetry ? 'Retrying Zoom SDK initialization...' : 'Initializing Zoom SDK...');
-    setSdkDebug([]);
-    setSdkPhase('idle');
 
     const runSingleInitAttempt = async () => Promise.race([
       initZoomSdkBridge({
-        onDebug: (entry) => {
-          appendSdkDebug(entry);
+        onReaction: async ({ participantName, participantId, reaction, reactionEmoji, reactionUnicode, reactionName, timestamp, source, rawEvent, eventData }) => {
+          await processParticipationSignal({
+            participantName,
+            participantId,
+            signal: reaction,
+            reactionEmoji,
+            reactionUnicode,
+            reactionName,
+            timestamp,
+            source,
+            rawEvent,
+            eventData,
+            pipeline: 'reaction',
+          });
+        },
+        onFeedbackReaction: async ({ participantName, participantId, feedback, reactionEmoji, reactionUnicode, reactionName, timestamp, source, rawEvent, eventData }) => {
+          await processParticipationSignal({
+            participantName,
+            participantId,
+            signal: feedback,
+            reactionEmoji,
+            reactionUnicode,
+            reactionName,
+            timestamp,
+            source,
+            rawEvent,
+            eventData,
+            pipeline: 'feedback_reaction',
+          });
         },
         onParticipantJoined: async ({ participantName, participantId, timestamp }) => {
           if (!sessionRef.current?.id) return;
@@ -844,69 +914,6 @@ function ZoomIframeBridge() {
           });
           removeKnownParticipant(resolvedParticipant.id, resolvedParticipant.name);
         },
-        onReaction: async ({ participantName, participantId, isSelfEvent = false, interactionType = 'reaction', reaction, sourceEventId, timestamp }) => {
-          if (!sessionRef.current?.id) return;
-          if (isSelfEvent) return;
-          if (isSelfParticipant(participantId, participantName)) return;
-          const resolvedParticipant = await resolveParticipantIdentityAsync(participantId, participantName);
-          if (isSelfParticipant(resolvedParticipant.id, resolvedParticipant.name)) return;
-          if (isDuplicateInteraction({
-            interactionType,
-            participantId: resolvedParticipant.id,
-            participantName: resolvedParticipant.name,
-            interactionValue: reaction,
-            timestamp,
-          })) {
-            return;
-          }
-
-          appendEvent(interactionType === 'hand_raise' ? 'Hand raise' : 'Reaction', {
-            participantName: resolvedParticipant.name,
-            reaction,
-          });
-          await sendLiveEvent('participation:logged', {
-            interactionType,
-            interactionValue: reaction,
-            studentName: resolvedParticipant.name,
-            metadata: {
-              participant_name: resolvedParticipant.name,
-              participant_id: resolvedParticipant.id,
-              reaction,
-              source: 'zoom_sdk',
-              source_event_id: sourceEventId,
-            },
-            timestamp,
-          });
-        },
-        onMicToggle: async ({ participantName, participantId, isMuted, sourceEventId, timestamp }) => {
-          if (!sessionRef.current?.id) return;
-          if (isSelfParticipant(participantId, participantName)) return;
-          const resolvedParticipant = await resolveParticipantIdentityAsync(participantId, participantName);
-          if (isSelfParticipant(resolvedParticipant.id, resolvedParticipant.name)) return;
-          if (isDuplicateInteraction({
-            interactionType: 'mic_toggle',
-            participantId: resolvedParticipant.id,
-            participantName: resolvedParticipant.name,
-            interactionValue: isMuted ? 'muted' : 'unmuted',
-            timestamp,
-          })) {
-            return;
-          }
-          appendEvent('Mic toggle', { participantName: resolvedParticipant.name, isMuted });
-          await sendLiveEvent('participation:logged', {
-            interactionType: 'mic_toggle',
-            interactionValue: isMuted ? 'muted' : 'unmuted',
-            studentName: resolvedParticipant.name,
-            metadata: {
-              participant_name: resolvedParticipant.name,
-              participant_id: resolvedParticipant.id,
-              isMuted,
-              source: 'zoom_sdk',
-              source_event_id: sourceEventId,
-            },
-            timestamp,
-          });
-        },
         onMeetingEnded: async ({ timestamp }) => {
           const activeSessionId = sessionRef.current?.id;
           const activeToken = tokenRef.current;
@@ -933,12 +940,6 @@ function ZoomIframeBridge() {
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         if (attempt > 1) {
-          appendSdkDebug({
-            phase: 'init-retry',
-            message: `Automatic boot retry ${attempt}/${maxAttempts}`,
-            level: 'warn',
-            meta: { trigger },
-          });
         }
 
         zoomInit = await runSingleInitAttempt();
@@ -956,7 +957,6 @@ function ZoomIframeBridge() {
 
       if (!zoomInit?.initialized) {
         setStatus('Zoom SDK initialization failed. Click "Retry Init" to try again.');
-        setSdkPhase('init-failed');
         if (zoomInit?.error) {
           setError(zoomInit.error);
         }
@@ -964,7 +964,6 @@ function ZoomIframeBridge() {
       }
 
       setStatus('Zoom SDK initialized');
-      setSdkPhase('initialized');
 
       const selfIdentity = getZoomSelfIdentity(zoomInit);
       selfIdentityRef.current = selfIdentity;
@@ -987,7 +986,7 @@ function ZoomIframeBridge() {
     } finally {
       sdkInitInFlightRef.current = false;
     }
-  }, [appendSdkDebug, appendEvent, isDuplicateInteraction, isDuplicateLifecycleEvent, isSelfParticipant, removeKnownParticipant, resolveParticipantIdentityAsync, sendLiveEvent, upsertKnownParticipant]);
+  }, [appendEvent, isDuplicateLifecycleEvent, isSelfParticipant, processParticipationSignal, removeKnownParticipant, resolveParticipantIdentityAsync, sendLiveEvent, upsertKnownParticipant]);
 
   const handleRetryInit = useCallback(async () => {
     sdkBootStartedRef.current = false;
@@ -1024,16 +1023,8 @@ function ZoomIframeBridge() {
     }
 
     setError('');
-    setStatus('Applying token...');
+    setStatus('Applying token and resolving account...');
     setToken(cleaned);
-
-    try {
-      await loadClassesForToken(cleaned);
-      setStatus('Token applied. Classes loaded.');
-    } catch (tokenError) {
-      setError(tokenError.message || 'Failed to load classes with provided token');
-      setStatus('Token applied but class fetch failed');
-    }
   };
 
   const handleRefreshClasses = async () => {
@@ -1054,8 +1045,24 @@ function ZoomIframeBridge() {
   };
 
   const handleStartSession = async () => {
+    if (sessionRef.current?.id) {
+      setSession(sessionRef.current);
+      setStatus('Tracking active in Zoom iframe bridge');
+      return;
+    }
+
     if (!token) {
       setError('Missing token. Provide ?token=... in iframe URL or send token via postMessage.');
+      return;
+    }
+
+    const hasMeetingContext = Boolean(
+      zoomState?.data?.meetingUuid?.meetingUUID ||
+      zoomState?.data?.meetingJoinUrl?.joinUrl
+    );
+
+    if (!hasMeetingContext) {
+      setError('Please join a Zoom meeting before starting tracking.');
       return;
     }
 
@@ -1142,99 +1149,6 @@ function ZoomIframeBridge() {
     }
   };
 
-  const createMockSourceEventId = (prefix) =>
-    `mock:${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-
-  const emitMockJoin = async () => {
-    if (!sessionRef.current?.id) return;
-
-    const payload = {
-      participant: {
-        id: mockParticipantId,
-        name: mockParticipantName,
-        joinedAt: new Date().toISOString(),
-      },
-    };
-
-    await sendLiveEvent('participant:joined', payload);
-    appendEvent('Mock event: participant joined', payload);
-  };
-
-  const emitMockLeave = async () => {
-    if (!sessionRef.current?.id) return;
-
-    const payload = {
-      participantId: mockParticipantId,
-      participant_name: mockParticipantName,
-      leftAt: new Date().toISOString(),
-    };
-
-    await sendLiveEvent('participant:left', payload);
-    appendEvent('Mock event: participant left', payload);
-  };
-
-  const emitMockReaction = async () => {
-    if (!sessionRef.current?.id) return;
-
-    const payload = {
-      interactionType: 'reaction',
-      interactionValue: 'thumbs_up',
-      studentName: mockParticipantName,
-      metadata: {
-        participant_name: mockParticipantName,
-        participant_id: mockParticipantId,
-        reaction: 'thumbs_up',
-        source: 'zoom_mock_ui',
-        source_event_id: createMockSourceEventId('reaction'),
-      },
-      timestamp: new Date().toISOString(),
-    };
-
-    await sendLiveEvent('participation:logged', payload);
-    appendEvent('Mock event: reaction', payload);
-  };
-
-  const emitMockMicToggle = async () => {
-    if (!sessionRef.current?.id) return;
-
-    const nextMuted = !mockIsMuted;
-    setMockIsMuted(nextMuted);
-
-    const payload = {
-      interactionType: 'mic_toggle',
-      interactionValue: nextMuted ? 'muted' : 'unmuted',
-      studentName: mockParticipantName,
-      metadata: {
-        participant_name: mockParticipantName,
-        participant_id: mockParticipantId,
-        isMuted: nextMuted,
-        source: 'zoom_mock_ui',
-        source_event_id: createMockSourceEventId('mic_toggle'),
-      },
-      timestamp: new Date().toISOString(),
-    };
-
-    await sendLiveEvent('participation:logged', payload);
-    appendEvent(`Mock event: mic ${nextMuted ? 'muted' : 'unmuted'}`, payload);
-  };
-
-  const emitMockEndSession = async () => {
-    if (!sessionRef.current?.id) return;
-
-    await sendLiveEvent('session:extension_disconnected', {
-      sessionId: sessionRef.current.id,
-      source: 'zoom_mock_ui',
-      reason: 'manual_mock_end',
-    });
-
-    await zoomIframeAPI.endSessionWithTimestamp(tokenRef.current, sessionRef.current.id, new Date().toISOString());
-    appendEvent('Mock event: session ended', { sessionId: sessionRef.current.id });
-    clearKnownParticipants();
-    zoomSdkRef.current = null;
-    setSession(null);
-    setStatus('Tracking stopped (mock end)');
-  };
-
   useEffect(() => {
     if (!session?.id) return undefined;
 
@@ -1261,58 +1175,8 @@ function ZoomIframeBridge() {
           currentMap.set(key, {
             id: participantId,
             name: participantName,
-            isMuted: getParticipantMutedState(participant),
-            isHandRaised: getParticipantHandRaisedState(participant),
           });
         });
-
-        if (typeof sdk.getIncomingParticipantAudioState === 'function') {
-          const participantIds = Array.from(currentMap.values())
-            .map((participant) => participant.id)
-            .filter(Boolean);
-
-          if (participantIds.length > 0) {
-            try {
-              const audioStateResponse = await sdk.getIncomingParticipantAudioState({
-                participantUUIDs: participantIds,
-              });
-
-              const audioRows = Array.isArray(audioStateResponse?.participants)
-                ? audioStateResponse.participants
-                : [];
-
-              const audioById = new Map(
-                audioRows
-                  .filter((row) => row?.participantUUID)
-                  .map((row) => [
-                    normalizeIdentityValue(row.participantUUID),
-                    typeof row.audio === 'boolean' ? !row.audio : null,
-                  ])
-              );
-
-              for (const [key, participant] of currentMap.entries()) {
-                const normalizedId = normalizeIdentityValue(participant.id);
-                if (!normalizedId) continue;
-
-                if (!audioById.has(normalizedId)) continue;
-                const isMuted = audioById.get(normalizedId);
-                if (typeof isMuted !== 'boolean') continue;
-
-                currentMap.set(key, {
-                  ...participant,
-                  isMuted,
-                });
-              }
-            } catch (audioStateError) {
-              appendSdkDebug({
-                phase: 'participant-poll-audio-state',
-                level: 'warn',
-                message: 'Incoming participant audio poll failed',
-                meta: { error: audioStateError?.message || 'audio poll failed' },
-              });
-            }
-          }
-        }
 
         const previousParticipants = dedupeParticipantRecords(Array.from(knownParticipantsRef.current.values()));
         const currentParticipants = dedupeParticipantRecords(Array.from(currentMap.values()));
@@ -1368,89 +1232,9 @@ function ZoomIframeBridge() {
           });
         }
 
-        for (const participant of currentParticipants) {
-          const previousParticipant = findMatchingParticipant(participant, previousParticipants);
-          if (!previousParticipant) continue;
-
-          if (
-            typeof previousParticipant.isMuted === 'boolean' &&
-            typeof participant.isMuted === 'boolean' &&
-            previousParticipant.isMuted !== participant.isMuted
-          ) {
-            const mutedAt = new Date().toISOString();
-            if (!isDuplicateInteraction({
-              interactionType: 'mic_toggle',
-              participantId: participant.id,
-              participantName: participant.name,
-              interactionValue: participant.isMuted ? 'muted' : 'unmuted',
-              timestamp: mutedAt,
-            })) {
-              await sendLiveEvent('participation:logged', {
-                interactionType: 'mic_toggle',
-                interactionValue: participant.isMuted ? 'muted' : 'unmuted',
-                studentName: participant.name,
-                metadata: {
-                  participant_name: participant.name,
-                  participant_id: participant.id,
-                  isMuted: participant.isMuted,
-                  source: 'zoom_poll',
-                  source_event_id: createBridgeSourceEventId('poll_mic_toggle'),
-                },
-                timestamp: mutedAt,
-              }, sessionRef.current.id);
-
-              appendEvent('Mic toggle (poll)', {
-                participantName: participant.name,
-                participantId: participant.id,
-                isMuted: participant.isMuted,
-              });
-            }
-          }
-
-          if (
-            typeof previousParticipant.isHandRaised === 'boolean' &&
-            typeof participant.isHandRaised === 'boolean' &&
-            previousParticipant.isHandRaised !== participant.isHandRaised &&
-            participant.isHandRaised
-          ) {
-            const raisedAt = new Date().toISOString();
-            if (!isDuplicateInteraction({
-              interactionType: 'hand_raise',
-              participantId: participant.id,
-              participantName: participant.name,
-              interactionValue: 'raised',
-              timestamp: raisedAt,
-            })) {
-              await sendLiveEvent('participation:logged', {
-                interactionType: 'hand_raise',
-                interactionValue: 'raised',
-                studentName: participant.name,
-                metadata: {
-                  participant_name: participant.name,
-                  participant_id: participant.id,
-                  handRaised: true,
-                  source: 'zoom_poll',
-                  source_event_id: createBridgeSourceEventId('poll_hand_raise'),
-                },
-                timestamp: raisedAt,
-              }, sessionRef.current.id);
-
-              appendEvent('Hand raise (poll)', {
-                participantName: participant.name,
-                participantId: participant.id,
-              });
-            }
-          }
-        }
-
         knownParticipantsRef.current = buildKnownParticipantsMap(currentParticipants);
       } catch (pollError) {
-        appendSdkDebug({
-          phase: 'participant-poll',
-          level: 'warn',
-          message: 'Participant poll failed',
-          meta: { error: pollError?.message || 'poll failed' },
-        });
+        // Poll failures are non-fatal; keep bridge running.
       }
     };
 
@@ -1461,7 +1245,7 @@ function ZoomIframeBridge() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [appendEvent, appendSdkDebug, isDuplicateInteraction, isDuplicateLifecycleEvent, isSelfParticipant, sendLiveEvent, session?.id, zoomState?.data?.zoomSdk]);
+  }, [appendEvent, isDuplicateLifecycleEvent, isSelfParticipant, sendLiveEvent, session?.id, zoomState?.data?.zoomSdk]);
 
   useEffect(() => {
     const listener = (evt) => {
@@ -1553,23 +1337,12 @@ function ZoomIframeBridge() {
            (window.navigator?.userAgent?.toLowerCase() || '').includes('zoom'));
 
         if (inZoomContext) {
-          appendSdkDebug({
-            phase: 'context-ready',
-            message: 'Zoom context detected, proceeding with initialization',
-            meta: { waitedMs: Date.now() - startTime },
-          });
           return true;
         }
 
         await new Promise(resolve => setTimeout(resolve, 300));
       }
 
-      appendSdkDebug({
-        phase: 'context-timeout',
-        message: 'Timeout waiting for Zoom context',
-        level: 'warn',
-        meta: { maxWaitMs },
-      });
       return false;
     };
 
@@ -1581,7 +1354,6 @@ function ZoomIframeBridge() {
 
       if (!contextReady) {
         setStatus('Initialization timed out waiting for Zoom context. Click "Retry Init" to try again.');
-        setSdkPhase('context-timeout');
         setError('Zoom context did not become available within timeout');
         return;
       }
@@ -1601,7 +1373,7 @@ function ZoomIframeBridge() {
       sdkBootStartedRef.current = false;
       mounted = false;
     };
-  }, [appendSdkDebug, initializeZoomSdk]);
+  }, [initializeZoomSdk]);
 
   useEffect(() => {
     if (!token) return;
@@ -1625,11 +1397,134 @@ function ZoomIframeBridge() {
   }, [token, loadClassesForToken]);
 
   useEffect(() => {
+    if (!token) {
+      setTokenAccount(null);
+      setIsResolvingTokenAccount(false);
+      return;
+    }
+
+    let mounted = true;
+
+    const resolveTokenAccount = async () => {
+      setIsResolvingTokenAccount(true);
+
+      try {
+        const response = await zoomIframeAPI.verifyTokenIdentity(token);
+        if (!mounted) return;
+
+        const resolvedUser = response?.data?.user || null;
+        if (!resolvedUser) {
+          setTokenAccount(null);
+          return;
+        }
+
+        setTokenAccount({
+          first_name: resolvedUser.first_name || '',
+          last_name: resolvedUser.last_name || '',
+          email: resolvedUser.email || '',
+        });
+      } catch {
+        if (!mounted) return;
+        setTokenAccount(null);
+      } finally {
+        if (mounted) {
+          setIsResolvingTokenAccount(false);
+        }
+      }
+    };
+
+    resolveTokenAccount();
+
+    return () => {
+      mounted = false;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || session?.id) return;
+
+    let mounted = true;
+
+    const normalizedCurrentMeetingLink = normalizeMeetingUrl(
+      (meetingLinkOverride || getMeetingLinkFromZoomInit(zoomState?.data || {})) || ''
+    ).toLowerCase();
+
+    const hydrateExistingSession = async () => {
+      try {
+        const response = await zoomIframeAPI.getActiveSessions(token);
+        if (!mounted) return;
+
+        const activeSessions = Array.isArray(response?.data) ? response.data : [];
+        if (activeSessions.length === 0) return;
+
+        let matchingSession = null;
+
+        if (normalizedCurrentMeetingLink) {
+          matchingSession = activeSessions.find((candidate) =>
+            normalizeMeetingUrl(candidate?.meeting_link || '').toLowerCase() === normalizedCurrentMeetingLink
+          ) || null;
+        }
+
+        if (!matchingSession && selectedClassId) {
+          matchingSession = activeSessions.find((candidate) => candidate?.class_id === selectedClassId) || null;
+        }
+
+        if (!matchingSession && activeSessions.length === 1) {
+          matchingSession = activeSessions[0];
+        }
+
+        if (!matchingSession) return;
+
+        setSession(matchingSession);
+        suppressInitialPollDiffRef.current = true;
+        if (matchingSession.class_id) {
+          setSelectedClassId((prev) => prev || matchingSession.class_id);
+        }
+
+        try {
+          const attendanceResponse = await zoomIframeAPI.getSessionAttendanceWithIntervals(token, matchingSession.id);
+          const attendanceRecords = Array.isArray(attendanceResponse?.data?.attendance)
+            ? attendanceResponse.data.attendance
+            : [];
+          const restoredParticipants = getCurrentParticipantsFromAttendance(attendanceRecords);
+
+          knownParticipantsRef.current = buildKnownParticipantsMap(restoredParticipants);
+          recentLifecycleRef.current = new Map();
+        } catch {
+          clearKnownParticipants();
+        }
+
+        setStatus('Resumed active tracking session');
+
+        if (hydratedSessionIdRef.current !== matchingSession.id) {
+          hydratedSessionIdRef.current = matchingSession.id;
+          appendEvent('Session resumed', {
+            sessionId: matchingSession.id,
+            source: 'active-session-hydration',
+          });
+        }
+      } catch {
+        // Silent fail: hydration is best-effort and should not block normal flow.
+      }
+    };
+
+    hydrateExistingSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, [appendEvent, clearKnownParticipants, meetingLinkOverride, selectedClassId, session?.id, token, zoomState?.data]);
+
+  useEffect(() => {
     if (!getAutoStart()) return;
-    if (!selectedClassId || !token || session?.id || isLoading) return;
+    const hasMeetingContext = Boolean(
+      zoomState?.data?.meetingUuid?.meetingUUID ||
+      zoomState?.data?.meetingJoinUrl?.joinUrl
+    );
+    if (!hasMeetingContext || !selectedClassId || !token || session?.id || isLoading) return;
 
     handleStartSession();
-  }, [selectedClassId, token]);
+  }, [selectedClassId, token, zoomState?.data?.meetingUuid?.meetingUUID, zoomState?.data?.meetingJoinUrl?.joinUrl, session?.id, isLoading]);
 
   const classOptions = useMemo(
     () =>
@@ -1640,189 +1535,143 @@ function ZoomIframeBridge() {
     [classes]
   );
 
+  const hasToken = Boolean(token?.trim());
+  const tokenPreview = hasToken
+    ? `${token.trim().slice(0, 8)}...${token.trim().slice(-4)}`
+    : '';
+  const tokenAccountLabel = tokenAccount
+    ? getAccountDisplayName(tokenAccount)
+    : '';
+  const tokenAccountSummary = tokenAccount?.email
+    ? `${tokenAccountLabel} (${tokenAccount.email})`
+    : tokenAccountLabel;
+  const compactEvents = useMemo(() => events.slice(0, 30), [events]);
+  const sdkReady = zoomState.initialized;
+  const trackingActive = Boolean(session?.id);
+  const meetingDetected = Boolean(
+    zoomState?.data?.meetingUuid?.meetingUUID ||
+    zoomState?.data?.meetingJoinUrl?.joinUrl
+  );
+  const statusTone = error
+    ? 'error'
+    : trackingActive
+      ? 'tracking'
+      : !sdkReady
+        ? 'connecting'
+        : meetingDetected
+          ? 'ready'
+          : 'waiting';
+  const statusLabel = error
+    ? 'Disconnected'
+    : trackingActive
+      ? 'Tracking Live'
+      : !sdkReady
+        ? 'Connecting to Zoom...'
+        : meetingDetected
+          ? 'Ready to Start'
+          : 'Waiting for Meeting';
+  const flowHint = trackingActive
+    ? 'Tracking is active. Class selection is locked until you stop.'
+    : !meetingDetected
+      ? 'Please join a Zoom meeting to begin tracking.'
+      : 'Meeting detected. Select your class and start tracking.';
+
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 p-4">
-      <div className="max-w-4xl mx-auto space-y-4">
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <h1 className="text-xl font-semibold">Engagium Zoom Bridge</h1>
-          <p className="text-sm text-slate-600 mt-1">Iframe-ready session tracker using Zoom events and extension-compatible APIs.</p>
-
-          <div className="mt-4 bg-slate-50 rounded-lg border border-slate-200 p-3">
-            <label className="block text-sm font-medium mb-1">Engagium Extension Token</label>
-            <div className="flex flex-col md:flex-row gap-2">
-              <input
-                className="flex-1 rounded-lg border border-slate-300 px-3 py-2"
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                placeholder="Paste extension token here"
-              />
-              <button
-                className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm"
-                onClick={handleApplyToken}
-                disabled={isLoading}
-              >
-                Apply Token
-              </button>
-              <button
-                className="rounded-lg bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 text-sm"
-                onClick={handleRefreshClasses}
-                disabled={isLoading || !token}
-              >
-                Refresh Classes
-              </button>
-            </div>
-            <p className="text-xs text-slate-500 mt-2">Classes are fetched using this token through extension-compatible API auth.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 text-sm">
-            <div className="bg-slate-50 rounded-lg p-3 border border-cyan-200 border-l-4 border-l-cyan-500">
-              <div className="font-medium text-cyan-700">Status</div>
-              <div className="text-slate-700 mt-1">{status}</div>
-              <div className="text-xs text-slate-500 mt-2">
-                Phase: <span className="font-medium text-slate-700">{formatDebugLabel(sdkPhase)}</span>
-              </div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-              <div className="font-medium">Zoom SDK</div>
-              <div className="text-slate-700 mt-1">{zoomState.initialized ? 'Initialized' : 'Unavailable (manual mode)'}</div>
-            </div>
-          </div>
-
-          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-accent-50/40 text-gray-900 p-3 md:p-4">
+      <div className="max-w-3xl mx-auto space-y-3">
+        <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+          <div className="px-3 py-3 border-b border-gray-200 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <img src={heroLogo} alt="Engagium Logo" className="h-8 w-auto" />
               <div>
-                <div className="text-sm font-medium">SDK Timeline</div>
-                <div className="text-xs text-slate-500 mt-0.5">Latest 80 SDK checkpoints from load, config, listeners, and context fetch.</div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  className="text-xs rounded border border-slate-300 px-2 py-1 hover:bg-slate-100"
-                  onClick={handleRetryInit}
-                  type="button"
-                >
-                  Retry Init
-                </button>
-                <button
-                  className="text-xs rounded border border-slate-300 px-2 py-1 hover:bg-slate-100"
-                  onClick={() => {
-                    setSdkDebug([]);
-                    setSdkPhase('idle');
-                  }}
-                  type="button"
-                >
-                  Clear
-                </button>
+                <h1 className="text-base font-bold text-accent-600 tracking-tight leading-none">engagium</h1>
+                <p className="text-[11px] text-gray-500 mt-0.5">Zoom Live Bridge</p>
               </div>
             </div>
 
-            <div className="mt-3 max-h-56 overflow-auto divide-y divide-slate-200 bg-white rounded border border-slate-200">
-              {sdkDebug.length === 0 ? (
-                <div className="text-xs text-slate-500 p-3">No SDK debug entries yet.</div>
-              ) : (
-                sdkDebug.map((entry) => (
-                  <div key={entry.id} className="p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-medium text-slate-800">{formatDebugLabel(entry.phase)}</div>
-                      <div className="text-[11px] text-slate-500">{formatTime(entry.timestamp)}</div>
-                    </div>
-                    <div className="text-xs mt-1 text-slate-700">{entry.message}</div>
-                    {entry.meta && Object.keys(entry.meta).length > 0 && (
-                      <pre className="text-[11px] mt-1 bg-slate-50 border border-slate-200 rounded p-2 overflow-auto">
-                        {JSON.stringify(entry.meta, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-medium">API Inspector</div>
-                <div className="text-xs text-slate-500 mt-0.5">Click any subscribed API or listener to view the latest raw payload captured from Zoom SDK.</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-[11px] text-slate-500">
-                  Subscribed: {inspectorTargets.length}
+            <div className="flex items-center gap-2">
+              {hasToken && (
+                <div className="hidden sm:block text-[11px] text-gray-500 max-w-[220px] truncate">
+                  {isResolvingTokenAccount
+                    ? `Verifying (${tokenPreview})`
+                    : tokenAccountSummary || `Token: ${tokenPreview}`}
                 </div>
-                <button
-                  className="text-xs rounded border border-blue-500 bg-blue-50 px-2 py-1 text-blue-800 hover:bg-blue-100 disabled:opacity-60"
-                  onClick={() => runInspectorApi('getSupportedJsApis')}
-                  disabled={inspectorRunTarget === 'getSupportedJsApis' || !zoomSdkRef.current}
-                  type="button"
-                >
-                  {inspectorRunTarget === 'getSupportedJsApis' ? 'Running getSupportedJsApis...' : 'Run getSupportedJsApis'}
-                </button>
-                <button
-                  className="text-xs rounded border border-cyan-500 bg-cyan-50 px-2 py-1 text-cyan-800 hover:bg-cyan-100 disabled:opacity-60"
-                  onClick={() => runInspectorApi('getIncomingParticipantAudioState')}
-                  disabled={inspectorRunTarget === 'getIncomingParticipantAudioState' || !zoomSdkRef.current}
-                  type="button"
-                >
-                  {inspectorRunTarget === 'getIncomingParticipantAudioState'
-                    ? 'Running getIncomingParticipantAudioState...'
-                    : 'Run getIncomingParticipantAudioState'}
-                </button>
-              </div>
+              )}
+              <button
+                type="button"
+                onClick={handleRetryInit}
+                className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                aria-label="Reconnect Zoom SDK"
+                title="Reconnect"
+              >
+                <ArrowPathIcon className="w-3.5 h-3.5" />
+              </button>
             </div>
+          </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {inspectorTargets.map((target) => {
-                const hasPayload = inspectorEntriesByTarget.has(target);
-                const isSelected = selectedInspectorTarget === target;
-
-                return (
+          <div className="p-3 space-y-3">
+            {(!hasToken || showTokenEditor) && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    placeholder="Paste extension token"
+                  />
                   <button
-                    key={target}
-                    className={`text-xs rounded border px-2.5 py-1.5 ${isSelected ? 'border-blue-500 bg-blue-50 text-blue-800' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}
-                    onClick={() => setSelectedInspectorTarget(target)}
-                    type="button"
+                    className="rounded-lg bg-accent-500 hover:bg-accent-600 text-white px-3 py-2 text-sm font-medium disabled:opacity-60"
+                    onClick={handleApplyToken}
+                    disabled={isLoading}
                   >
-                    {target}
-                    <span className={`ml-1.5 inline-block h-2 w-2 rounded-full ${hasPayload ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                    {hasToken ? 'Update Token' : 'Apply Token'}
                   </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-3 bg-white rounded border border-slate-200 p-3">
-              {!selectedInspectorTarget ? (
-                <div className="text-xs text-slate-500">No subscribed APIs detected yet.</div>
-              ) : selectedInspectorEntry ? (
-                <>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-medium text-slate-800">{selectedInspectorEntry.target}</div>
-                    <div className="text-[11px] text-slate-500">{selectedInspectorEntry.timestamp ? formatTime(selectedInspectorEntry.timestamp) : 'No timestamp'}</div>
-                  </div>
-                  <div className="text-xs text-slate-600 mt-1">{selectedInspectorEntry.message}</div>
-                  <pre className="text-[11px] mt-2 bg-slate-50 border border-slate-200 rounded p-2 overflow-auto max-h-64">
-                    {JSON.stringify(selectedInspectorEntry.payload ?? {}, null, 2)}
-                  </pre>
-                </>
-              ) : (
-                <div className="text-xs text-slate-500">
-                  No raw payload captured yet for {selectedInspectorTarget}. Trigger this API/event in Zoom and it will appear here.
                 </div>
-              )}
-            </div>
-          </div>
+                {hasToken && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTokenEditor(false)}
+                    className="mt-2 text-[11px] text-gray-500 hover:text-gray-700"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
 
-          {error && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm">
-              {error}
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-block h-2.5 w-2.5 rounded-full ${
+                      statusTone === 'error'
+                        ? 'bg-red-500'
+                        : statusTone === 'tracking' || statusTone === 'ready'
+                          ? 'bg-green-500'
+                          : 'bg-amber-500'
+                    } ${trackingActive ? 'animate-pulse' : ''}`}
+                  />
+                  <div className="text-xs font-semibold text-gray-800">{statusLabel}</div>
+                </div>
+                {hasToken && !showTokenEditor && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTokenEditor(true)}
+                    className="text-[11px] text-accent-600 hover:text-accent-700"
+                  >
+                    Change Token
+                  </button>
+                )}
+              </div>
+              <div className="text-[11px] text-gray-600 mt-1">{flowHint}</div>
             </div>
-          )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Class</label>
+            <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
               <select
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white text-sm"
                 value={selectedClassId}
                 onChange={(e) => setSelectedClassId(e.target.value)}
-                disabled={!!session?.id || isLoading}
+                disabled={trackingActive || isLoading || !meetingDetected}
               >
                 <option value="">Select class</option>
                 {classOptions.map((option) => (
@@ -1831,135 +1680,112 @@ function ZoomIframeBridge() {
                   </option>
                 ))}
               </select>
+
+              {!trackingActive ? (
+                <button
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white px-3 py-2.5 text-sm font-semibold disabled:opacity-60"
+                  onClick={handleStartSession}
+                  disabled={isLoading || !selectedClassId || !token || !meetingDetected}
+                >
+                  <PlayCircleIcon className="w-4 h-4" />
+                  Start Tracking
+                </button>
+              ) : (
+                <button
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white px-3 py-2.5 text-sm font-semibold disabled:opacity-60"
+                  onClick={handleEndSession}
+                  disabled={isLoading}
+                >
+                  <StopCircleIcon className="w-4 h-4" />
+                  Stop Tracking
+                </button>
+              )}
             </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-1">Meeting Link Override</label>
-              <input
-                className="w-full rounded-lg border border-slate-300 px-3 py-2"
-                placeholder="https://zoom.us/j/..."
-                value={meetingLinkOverride}
-                onChange={(e) => setMeetingLinkOverride(e.target.value)}
-                disabled={!!session?.id || isLoading}
-              />
-            </div>
-          </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((prev) => !prev)}
+              className="text-[11px] text-accent-600 hover:text-accent-700 font-medium"
+            >
+              {showAdvanced ? 'Hide Advanced Options' : 'Show Advanced Options'}
+            </button>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {!session?.id ? (
-              <button
-                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-sm disabled:opacity-60"
-                onClick={handleStartSession}
-                disabled={isLoading || !selectedClassId || !token}
-              >
-                Start Tracking
-              </button>
-            ) : (
-              <button
-                className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 text-sm disabled:opacity-60"
-                onClick={handleEndSession}
-                disabled={isLoading}
-              >
-                End Tracking
-              </button>
+            {showAdvanced && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 space-y-2">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+                    placeholder="Meeting link override"
+                    value={meetingLinkOverride}
+                    onChange={(e) => setMeetingLinkOverride(e.target.value)}
+                    disabled={trackingActive || isLoading}
+                  />
+                  <button
+                    className="rounded-lg bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 text-sm font-medium disabled:opacity-60"
+                    onClick={handleRefreshClasses}
+                    disabled={isLoading || !token}
+                  >
+                    Refresh Classes
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(error || trackingActive) && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="flex items-start gap-2">
+                  {error ? (
+                    <ExclamationCircleIcon className="w-4 h-4 text-red-600 mt-0.5" />
+                  ) : (
+                    <CheckCircleIcon className="w-4 h-4 text-green-600 mt-0.5" />
+                  )}
+                  <div className="text-xs text-gray-700">{error || status}</div>
+                </div>
+              </div>
+            )}
+
+            {trackingActive && (
+              <div className="text-[11px] text-gray-500">
+                Session ID: <span className="font-mono text-gray-700">{session.id}</span>
+              </div>
             )}
           </div>
-
-          {session?.id && (
-            <div className="mt-3 text-sm text-slate-600">
-              Active session: <span className="font-mono text-slate-800">{session.id}</span>
-            </div>
-          )}
         </div>
 
-        {mockMode && (
-          <div className="bg-white border border-amber-200 rounded-xl p-4 shadow-sm">
-            <h2 className="text-lg font-semibold text-amber-800">Mock Test Controls</h2>
-            <p className="text-sm text-slate-600 mt-1">
-              Emits synthetic Zoom-like events to your real backend contracts. Enabled via query parameter mock=1.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Participant Name</label>
-                <input
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2"
-                  value={mockParticipantName}
-                  onChange={(e) => setMockParticipantName(e.target.value)}
-                  disabled={!session?.id || isLoading}
-                />
+        <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+          <div className="px-3 py-2.5 border-b border-gray-200 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-accent-100 rounded-lg">
+                <SignalIcon className="w-4 h-4 text-accent-600" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Participant ID</label>
-                <input
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2"
-                  value={mockParticipantId}
-                  onChange={(e) => setMockParticipantId(e.target.value)}
-                  disabled={!session?.id || isLoading}
-                />
+                <h2 className="text-sm font-semibold text-gray-900">Activity Log</h2>
+                <p className="text-[11px] text-gray-500">Recent bridge events for this meeting</p>
               </div>
             </div>
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                className="rounded-lg bg-sky-600 hover:bg-sky-700 text-white px-3 py-2 text-sm disabled:opacity-50"
-                onClick={emitMockJoin}
-                disabled={!session?.id || isLoading}
-              >
-                Emit Join
-              </button>
-              <button
-                className="rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 text-sm disabled:opacity-50"
-                onClick={emitMockReaction}
-                disabled={!session?.id || isLoading}
-              >
-                Emit Reaction
-              </button>
-              <button
-                className="rounded-lg bg-violet-600 hover:bg-violet-700 text-white px-3 py-2 text-sm disabled:opacity-50"
-                onClick={emitMockMicToggle}
-                disabled={!session?.id || isLoading}
-              >
-                Emit Mic Toggle ({mockIsMuted ? 'muted' : 'unmuted'})
-              </button>
-              <button
-                className="rounded-lg bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 text-sm disabled:opacity-50"
-                onClick={emitMockLeave}
-                disabled={!session?.id || isLoading}
-              >
-                Emit Leave
-              </button>
-              <button
-                className="rounded-lg bg-rose-700 hover:bg-rose-800 text-white px-3 py-2 text-sm disabled:opacity-50"
-                onClick={emitMockEndSession}
-                disabled={!session?.id || isLoading}
-              >
-                Emit Session End
-              </button>
-            </div>
+            <span className="text-[11px] text-gray-500">{events.length} events</span>
           </div>
-        )}
-
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <h2 className="text-lg font-semibold">Live Event Stream</h2>
-          <p className="text-sm text-slate-600 mt-1">Last 120 bridge events emitted to backend.</p>
-
-          <div className="mt-3 max-h-[480px] overflow-auto divide-y divide-slate-100">
-            {events.length === 0 ? (
-              <div className="text-sm text-slate-500 py-6">No events yet.</div>
+          <div className="max-h-72 overflow-auto divide-y divide-gray-100 px-3 py-1">
+            {compactEvents.length === 0 ? (
+              <div className="text-sm text-gray-500 py-8 text-center">No events yet.</div>
             ) : (
-              events.map((event) => (
-                <div key={event.id} className="py-2">
-                  <div className="text-sm font-medium text-slate-800">{event.label}</div>
-                  <div className="text-xs text-slate-500">{formatTime(event.timestamp)}</div>
-                  <pre className="text-xs mt-1 bg-slate-50 border border-slate-200 rounded p-2 overflow-auto">
-                    {JSON.stringify(event.payload, null, 2)}
-                  </pre>
+              compactEvents.map((event) => (
+                <div key={event.id} className="py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-xs font-semibold text-gray-800 truncate">{event.label}</div>
+                    <div className="text-[11px] text-gray-500 whitespace-nowrap">{formatTime(event.timestamp)}</div>
+                  </div>
+                  {getEventSummaryText(event) && (
+                    <div className="text-[11px] text-gray-600 mt-1 line-clamp-2">
+                      {getEventSummaryText(event)}
+                    </div>
+                  )}
                 </div>
               ))
             )}
           </div>
         </div>
+
       </div>
     </div>
   );

@@ -52,8 +52,31 @@ const LiveEventFeed = () => {
     return {};
   };
 
+  const normalizeSignalText = (value) => String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+
+  const REACTION_TO_EMOJI = {
+    joy: '😂',
+    laugh: '😂',
+    openmouth: '😮',
+    wow: '😮',
+    heart: '❤️',
+    clap: '👏',
+    thumbsup: '👍',
+    thumbsdown: '👎',
+    tada: '🎉',
+    fire: '🔥',
+    yes: '✅',
+    no: '❌',
+  };
+
+  const toReactionEmoji = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    return REACTION_TO_EMOJI[normalizeSignalText(raw)] || raw;
+  };
+
   const getReactionEmoji = (event) =>
-    getEventMetadata(event).reaction || event.interaction_value || event.reaction || '';
+    toReactionEmoji(getEventMetadata(event).reaction || event.interaction_value || event.reaction || '');
 
   const displayEvents = useMemo(() => {
     const chronological = [...recentEvents].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));

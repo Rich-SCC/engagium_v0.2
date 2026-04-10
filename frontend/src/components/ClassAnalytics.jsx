@@ -1,1310 +1,1174 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { classesAPI, participationAPI, sessionsAPI } from '@/services/api';
-import DateRangePicker from './DateRangePicker';
 import {
   Area,
   AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Cell,
   Legend,
   Line,
   LineChart,
-  PolarAngleAxis,
-  PolarGrid,
-  PolarRadiusAxis,
-  Radar,
-  RadarChart,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
+  Pie,
+  PieChart,
+  ReferenceLine,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import {
-  AcademicCapIcon,
-  BoltIcon,
-  CalendarDaysIcon,
-  ClockIcon,
-  ExclamationTriangleIcon,
-  HandRaisedIcon,
-  HeartIcon,
-  InformationCircleIcon,
-  SparklesIcon,
-  UserGroupIcon,
-} from '@heroicons/react/24/outline';
-import {
-  aggregateSessionLogs,
-  computeEngagementScore,
-  createEmptyInteractionTotals,
-  formatMinutes,
-  round,
-  toNumber,
-  mergeParticipationSnapshots,
-} from '@/utils/analytics';
+import { classesAPI, participationAPI, sessionsAPI } from '@/services/api';
+import DateRangePicker from './DateRangePicker';
+import { aggregateSessionLogs, formatMinutes, round, toNumber } from '@/utils/analytics';
 
-const WEIGHTS = {
-  mic: 1.2,
-  reaction: 0.4,
-  chat: 0.6,
-};
-
-const TIMELINE_COLORS = {
-  chat: '#2563eb',
-  reaction: '#f59e0b',
-  handRaise: '#22c55e',
-  micToggle: '#7c3aed',
-};
-const TIMELINE_TOTAL_COLOR = '#0f172a';
-
-const TIMELINE_SERIES = [
-  { key: 'chat', label: 'Chat', color: TIMELINE_COLORS.chat },
-  { key: 'handRaise', label: 'Hand Raises', color: TIMELINE_COLORS.handRaise },
-  { key: 'micToggle', label: 'Mic Toggles', color: TIMELINE_COLORS.micToggle },
-  { key: 'reaction', label: 'Reactions', color: TIMELINE_COLORS.reaction },
+const TAB_DEFS = [
+  { key: 'summary', label: 'Summary' },
+  { key: 'student', label: 'Per-Student' },
+  { key: 'session', label: 'Per-Session' },
+  { key: 'trends', label: 'Trends' },
 ];
+
+const METRIC_GLOSSARY = [
+  {
+    label: 'Attendance Rate',
+    definition: 'Percent of sessions where the student was marked present or late.',
+  },
+  {
+    label: 'Engagement Score',
+    definition: '60% attendance + 40% participation signals (speaking 40%, chat 25%, hand raises 20%, reactions 15%).',
+  },
+  {
+    label: 'Speaking Proxy Minutes',
+    definition: 'Estimated speaking time inferred from mic-toggle intervals; not voice transcription.',
+  },
+  {
+    label: 'Participation Rate',
+    definition: 'Percent of attended sessions with at least one engagement signal logged.',
+  },
+];
+
+const formatDate = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleDateString();
+};
+
+const getWeekStart = (date) => {
+  const copy = new Date(date);
+  const day = copy.getDay();
+  const diff = copy.getDate() - day;
+  copy.setDate(diff);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+};
 
 const getSessionBucket = (bucketMap, sessionId) => {
   if (!bucketMap || !sessionId) return [];
   return bucketMap[sessionId] || bucketMap[String(sessionId)] || [];
 };
 
-const buildSessionParticipationSnapshot = (session, logs = []) => ({
-  sessionId: session.id,
-  session,
-  ...aggregateSessionLogs(logs),
-});
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const EARLY_BUFFER_MINUTES = 30;
+const OVERTIME_BUFFER_MINUTES = 90;
 
-const formatTimeLabel = (timeValue) => {
-  if (!timeValue || typeof timeValue !== 'string') return '-';
-  const value = timeValue.slice(0, 5);
-  if (!/^\d{2}:\d{2}$/.test(value)) return value;
-
-  const [hoursText, minutesText] = value.split(':');
-  const hours = Number.parseInt(hoursText, 10);
-  const minutes = Number.parseInt(minutesText, 10);
-  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) {
-    return value;
-  }
-
-  const date = new Date(Date.UTC(1970, 0, 1, hours, minutes, 0, 0));
-  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' });
+const TIMELINE_COLORS = {
+  chat: '#2563eb',
+  reaction: '#f59e0b',
+  handRaise: '#22c55e',
+  micToggle: '#7c3aed',
+  activity: '#64748b',
 };
 
-const formatDateTimeLabel = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '-';
-  return parsed.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+const parseTimeToMinutes = (value) => {
+  if (!value || typeof value !== 'string') return null;
+  const [hourText, minuteText] = value.trim().split(':');
+  const hour = Number.parseInt(hourText, 10);
+  const minute = Number.parseInt(minuteText, 10);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return (hour * 60) + minute;
 };
 
-const resolveSessionDate = (session) => {
-  if (session?.started_at) {
-    const startedAt = new Date(session.started_at);
-    if (!Number.isNaN(startedAt.getTime())) return startedAt;
-  }
+const parseMeridiemTimeToMinutes = (value) => {
+  if (!value || typeof value !== 'string') return null;
+  const match = value.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])$/);
+  if (!match) return null;
 
-  if (session?.session_date) {
-    const scheduledDate = new Date(session.session_date);
-    if (!Number.isNaN(scheduledDate.getTime())) return scheduledDate;
-  }
+  const hourRaw = Number.parseInt(match[1], 10);
+  const minute = Number.parseInt(match[2] || '0', 10);
+  const modifier = match[3].toUpperCase();
 
-  return null;
+  if (!Number.isInteger(hourRaw) || hourRaw < 1 || hourRaw > 12) return null;
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+
+  let hour = hourRaw % 12;
+  if (modifier === 'PM') hour += 12;
+  return (hour * 60) + minute;
 };
 
-const resolveSessionEnd = (session) => {
-  if (session?.ended_at) {
-    const endedAt = new Date(session.ended_at);
-    if (!Number.isNaN(endedAt.getTime())) return endedAt;
-  }
-
-  const start = resolveSessionDate(session);
-  if (!start) return null;
-
-  const durationMinutes = Math.max(1, toNumber(session.avg_duration_minutes));
-  return new Date(start.getTime() + durationMinutes * 60 * 1000);
+const parseLegacyTimeRange = (value) => {
+  if (!value || typeof value !== 'string') return { startMinutes: null, endMinutes: null };
+  const parts = value.split('-').map((part) => part.trim()).filter(Boolean);
+  if (parts.length !== 2) return { startMinutes: null, endMinutes: null };
+  return {
+    startMinutes: parseMeridiemTimeToMinutes(parts[0]),
+    endMinutes: parseMeridiemTimeToMinutes(parts[1]),
+  };
 };
 
-const diffMinutes = (left, right) => Math.max(0, (left.getTime() - right.getTime()) / (60 * 1000));
+const normalizeSchedules = (scheduleData) => {
+  if (!scheduleData) return [];
+  const source = Array.isArray(scheduleData) ? scheduleData : [scheduleData];
 
-const overlapMinutes = (startA, endA, startB, endB) => {
-  const start = Math.max(startA.getTime(), startB.getTime());
-  const end = Math.min(endA.getTime(), endB.getTime());
-  if (end <= start) return 0;
-  return (end - start) / (60 * 1000);
+  return source.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') return null;
+    const days = Array.isArray(entry.days)
+      ? entry.days
+        .filter((day) => typeof day === 'string' && day.trim())
+        .map((day) => day.trim().toLowerCase())
+      : [];
+
+    let startMinutes = parseTimeToMinutes(entry.startTime);
+    let endMinutes = parseTimeToMinutes(entry.endTime);
+
+    if (startMinutes === null || endMinutes === null) {
+      const parsed = parseLegacyTimeRange(entry.time);
+      if (startMinutes === null) startMinutes = parsed.startMinutes;
+      if (endMinutes === null) endMinutes = parsed.endMinutes;
+    }
+
+    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
+      return null;
+    }
+
+    return { index, days, startMinutes, endMinutes };
+  }).filter(Boolean);
 };
 
-const getWeekKey = (date) => {
-  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const day = target.getUTCDay() || 7;
-  target.setUTCDate(target.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
-  const week = Math.ceil((((target - yearStart) / 86400000) + 1) / 7);
-  return `${target.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
-};
-
-const normalizeName = (value) => String(value || '').trim().toLowerCase();
-
-const toTimeText = (date) => {
+const toLocalDateKey = (date) => {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
-const mergeAttendanceRecords = (records = []) => {
+const dateKeyToLocalDate = (dateKey) => {
+  const [year, month, day] = String(dateKey || '').split('-').map((part) => Number.parseInt(part, 10));
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+};
+
+const buildLocalDateTime = (dateKey, minutes) => {
+  const date = dateKeyToLocalDate(dateKey);
+  if (!date || !Number.isFinite(minutes)) return null;
+  return new Date(date.getTime() + (minutes * 60 * 1000));
+};
+
+const formatMinutesAsTime = (minutes) => {
+  if (!Number.isFinite(minutes)) return null;
+  const safe = Math.max(0, Math.floor(minutes));
+  const hour = String(Math.floor(safe / 60)).padStart(2, '0');
+  const minute = String(safe % 60).padStart(2, '0');
+  return `${hour}:${minute}`;
+};
+
+const buildBundleLabel = (bundle, index = 0) => {
+  const dateText = bundle?.date
+    ? formatDate(bundle.date)
+    : bundle?.planned_start_at
+      ? formatDate(bundle.planned_start_at)
+      : `Session ${index + 1}`;
+
+  const start = bundle?.planned_start_time || null;
+  const end = bundle?.planned_end_time || null;
+  if (start && end) {
+    return `${dateText} ${start}-${end}`;
+  }
+
+  return dateText;
+};
+
+const mergeAttendanceRowsForBundle = (rows = []) => {
   const statusPriority = { absent: 1, late: 2, present: 3 };
   const merged = new Map();
 
-  records.forEach((record) => {
-    const participantName = String(record?.participant_name || '').trim();
-    const key = record?.student_id
-      ? `student:${record.student_id}`
-      : `name:${participantName.toLowerCase()}`;
+  rows.forEach((row) => {
+    const participantName = String(row?.participant_name || row?.student_name || '').trim();
+    const key = row?.student_id ? `student:${row.student_id}` : `name:${participantName.toLowerCase()}`;
 
     if (!merged.has(key)) {
       merged.set(key, {
-        ...record,
+        ...row,
         id: key,
-        status: record?.status || 'absent',
+        status: row?.status || 'absent',
         total_duration_minutes: 0,
-        intervals: [],
-        first_joined_at: null,
-        last_left_at: null,
       });
     }
 
     const current = merged.get(key);
-    const incomingStatus = record?.status || 'absent';
+    current.total_duration_minutes += toNumber(row?.total_duration_minutes);
+    const incomingStatus = row?.status || 'absent';
     if ((statusPriority[incomingStatus] || 0) > (statusPriority[current.status] || 0)) {
       current.status = incomingStatus;
     }
-
-    current.total_duration_minutes += toNumber(record?.total_duration_minutes);
-
-    const joined = record?.first_joined_at ? new Date(record.first_joined_at) : null;
-    if (joined && !Number.isNaN(joined.getTime())) {
-      const existingJoined = current.first_joined_at ? new Date(current.first_joined_at) : null;
-      if (!existingJoined || Number.isNaN(existingJoined.getTime()) || joined < existingJoined) {
-        current.first_joined_at = joined.toISOString();
-      }
-    }
-
-    const left = record?.last_left_at ? new Date(record.last_left_at) : null;
-    if (left && !Number.isNaN(left.getTime())) {
-      const existingLeft = current.last_left_at ? new Date(current.last_left_at) : null;
-      if (!existingLeft || Number.isNaN(existingLeft.getTime()) || left > existingLeft) {
-        current.last_left_at = left.toISOString();
-      }
-    }
-
-    const intervals = Array.isArray(record?.intervals) ? record.intervals : [];
-    intervals.forEach((interval, index) => {
-      current.intervals.push({
-        ...interval,
-        id: interval.id || `${key}:${index}`,
-      });
-    });
   });
 
-  return Array.from(merged.values());
+  return [...merged.values()];
 };
 
-const buildPulseWindowFromBundle = (bundle) => {
-  if (!bundle) return null;
+const emptyParticipation = {
+  total_interactions: 0,
+  chat_messages: 0,
+  reactions: 0,
+  hand_raises: 0,
+  mic_toggles: 0,
+  speaking_proxy_minutes: 0,
+};
 
-  const fallbackStart = bundle?.actual_first_start_at ? new Date(bundle.actual_first_start_at) : null;
-  const fallbackEnd = bundle?.actual_last_end_at ? new Date(bundle.actual_last_end_at) : null;
-  const coreStart = bundle?.planned_start_at ? new Date(bundle.planned_start_at) : fallbackStart;
-  const coreEnd = bundle?.planned_end_at ? new Date(bundle.planned_end_at) : fallbackEnd;
+const buildEngagementScore = (student, classMax) => {
+  const presence = toNumber(student.attendance_rate);
+  const speakingPart = classMax.speaking > 0 ? (toNumber(student.speaking_proxy_minutes) / classMax.speaking) * 100 : 0;
+  const chatPart = classMax.chat > 0 ? (toNumber(student.chat_messages) / classMax.chat) * 100 : 0;
+  const handRaisePart = classMax.handRaises > 0 ? (toNumber(student.hand_raises) / classMax.handRaises) * 100 : 0;
+  const reactionPart = classMax.reactions > 0 ? (toNumber(student.reactions) / classMax.reactions) * 100 : 0;
 
-  if (!coreStart || !coreEnd || Number.isNaN(coreStart.getTime()) || Number.isNaN(coreEnd.getTime())) {
-    return null;
-  }
-
-  const sessions = [...(bundle?.sessions || [])].sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-  const breakSegments = [];
-
-  for (let index = 1; index < sessions.length; index += 1) {
-    const previousEnd = new Date(sessions[index - 1].end_at);
-    const currentStart = new Date(sessions[index].start_at);
-    if (!Number.isNaN(previousEnd.getTime()) && !Number.isNaN(currentStart.getTime()) && currentStart > previousEnd) {
-      breakSegments.push({ start: previousEnd, end: currentStart });
-    }
-  }
-
-  const totalMinutes = Math.max(1, diffMinutes(coreEnd, coreStart));
-  const breakMinutes = breakSegments.reduce(
-    (sum, segment) => sum + overlapMinutes(segment.start, segment.end, coreStart, coreEnd),
-    0
+  const participation = (
+    (speakingPart * 0.4) +
+    (chatPart * 0.25) +
+    (handRaisePart * 0.2) +
+    (reactionPart * 0.15)
   );
 
+  return round((presence * 0.6) + (participation * 0.4), 1);
+};
+
+const hasValidNumericValue = (value) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed);
+};
+
+const getRiskLabel = (student) => {
+  if (toNumber(student.attendance_rate) < 70 && toNumber(student.engagement_score) < 45) return 'High';
+  if (toNumber(student.attendance_rate) < 80 || toNumber(student.engagement_score) < 55) return 'Watch';
+  return 'Stable';
+};
+
+const getRiskTone = (label) => {
+  if (label === 'High') return 'bg-rose-50 text-rose-700 border-rose-200';
+  if (label === 'Watch') return 'bg-amber-50 text-amber-700 border-amber-200';
+  return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+};
+
+const normalizeText = (value) => String(value || '').trim().toLowerCase();
+
+const getEntityKey = (entity) => {
+  if (!entity) return null;
+  if (entity.student_id) return `student:${String(entity.student_id)}`;
+
+  const name = normalizeText(
+    entity.student_name
+    || entity.participant_name
+    || entity.full_name
+    || entity.name
+  );
+  return name ? `name:${name}` : null;
+};
+
+const formatRelativeTime = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!date || Number.isNaN(date.getTime())) return '-';
+
+  const diffMs = date.getTime() - Date.now();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  const absDays = Math.abs(diffDays);
+
+  if (absDays < 1) return diffDays <= 0 ? 'Today' : 'In less than a day';
+  if (absDays === 1) return diffDays < 0 ? '1 day ago' : 'In 1 day';
+  return diffDays < 0 ? `${absDays} days ago` : `In ${absDays} days`;
+};
+
+const buildSparklinePath = (values = [], width = 100, height = 30) => {
+  if (!values.length) return '';
+  const safeValues = values.map((value) => Number.isFinite(Number(value)) ? Number(value) : 0);
+  const min = Math.min(...safeValues);
+  const max = Math.max(...safeValues);
+  const range = max - min || 1;
+
+  return safeValues.map((value, index) => {
+    const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+    const y = height - (((value - min) / range) * height);
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(' ');
+};
+
+const getStudentIdentityKeys = (student) => {
+  const id = student?.id ? `student:${String(student.id)}` : null;
+  const names = [student?.full_name, student?.student_name, student?.participant_name]
+    .map(normalizeText)
+    .filter(Boolean)
+    .map((name) => `name:${name}`);
+  return [id, ...names].filter(Boolean);
+};
+
+const entityMatchesStudent = (entity, student) => {
+  if (!entity || !student) return false;
+
+  const studentId = String(student.id || '').trim();
+  if (studentId && String(entity.student_id || '').trim() === studentId) return true;
+
+  const entityName = normalizeText(entity.full_name || entity.student_name || entity.participant_name || entity.name);
+  const studentNames = [student.full_name, student.student_name, student.participant_name].map(normalizeText).filter(Boolean);
+  return entityName ? studentNames.includes(entityName) : false;
+};
+
+const overlapMinutes = (startA, endA, startB, endB) => {
+  if (!startA || !endA || !startB || !endB) return 0;
+  const startMs = Math.max(startA.getTime(), startB.getTime());
+  const endMs = Math.min(endA.getTime(), endB.getTime());
+  if (endMs <= startMs) return 0;
+  return diffMinutes(new Date(endMs), new Date(startMs));
+};
+
+const diffMinutes = (endDate, startDate) => {
+  if (!endDate || !startDate) return 0;
+  return Math.max(0, Math.round((endDate - startDate) / (1000 * 60)));
+};
+
+const buildStudentBundleSnapshot = (bundle, student, attendanceBySessionId, logsBySessionId) => {
+  if (!bundle || !student) return null;
+
+  const sourceSessionIds = Array.isArray(bundle.source_session_ids)
+    ? bundle.source_session_ids.map((id) => String(id))
+    : [];
+
+  const studentAttendanceRows = sourceSessionIds.flatMap((sessionId) => {
+    const rows = getSessionBucket(attendanceBySessionId, sessionId);
+    return rows.filter((row) => entityMatchesStudent(row, student));
+  });
+
+  const studentLogs = sourceSessionIds.flatMap((sessionId) => {
+    const logs = getSessionBucket(logsBySessionId, sessionId);
+    return logs.filter((log) => entityMatchesStudent(log, student));
+  });
+
+  const signalSnapshot = aggregateSessionLogs(studentLogs);
+  const totals = signalSnapshot.totals || {};
+
+  const bundleStart = bundle.planned_start_at || bundle.actual_first_start_at || bundle.session_date || null;
+  const bundleEnd = bundle.planned_end_at || bundle.actual_last_end_at || null;
+  const sessionStart = bundleStart ? new Date(bundleStart) : null;
+  const sessionEnd = bundleEnd ? new Date(bundleEnd) : null;
+  const sessionSpanMinutes = sessionStart && sessionEnd ? Math.max(1, diffMinutes(sessionEnd, sessionStart)) : null;
+
+  const intervals = studentAttendanceRows.flatMap((row) => {
+    const sourceIntervals = Array.isArray(row?.intervals) ? row.intervals : [];
+    return sourceIntervals.map((interval) => ({
+      start: interval?.joined_at ? new Date(interval.joined_at) : null,
+      end: interval?.left_at ? new Date(interval.left_at) : null,
+    })).filter((interval) => interval.start && interval.end && !Number.isNaN(interval.start.getTime()) && !Number.isNaN(interval.end.getTime()));
+  });
+
+  const joinCount = intervals.length;
+  const firstJoin = intervals.length > 0
+    ? intervals.reduce((earliest, interval) => (interval.start < earliest ? interval.start : earliest), intervals[0].start)
+    : null;
+  const lastLeave = intervals.length > 0
+    ? intervals.reduce((latest, interval) => (interval.end > latest ? interval.end : latest), intervals[0].end)
+    : null;
+
+  const totalDurationMinutes = studentAttendanceRows.reduce((sum, row) => sum + toNumber(row.total_duration_minutes), 0);
+  const attendanceRate = sessionSpanMinutes ? round((totalDurationMinutes / sessionSpanMinutes) * 100, 1) : 0;
+  const status = totalDurationMinutes <= 0 ? 'Absent' : attendanceRate >= 75 ? 'Present' : 'Partial';
+
+  const punctualityDelta = firstJoin && sessionStart ? diffMinutes(firstJoin, sessionStart) : null;
+  const punctuality = !firstJoin
+    ? '-'
+    : punctualityDelta <= 5
+      ? 'On-time'
+      : `Late (${punctualityDelta}m)`;
+
+  const stabilityScore = joinCount <= 1
+    ? 100
+    : Math.max(0, 100 - ((joinCount - 1) * 20));
+  const stabilityLabel = joinCount === 0 ? 'No joins' : joinCount >= 5 ? 'Unstable' : 'Stable';
+
+  const directInteractions = toNumber(totals.hand_raise);
+  const expressiveInteractions = toNumber(totals.reaction);
+  const passiveInteractions = toNumber(totals.chat) + toNumber(totals.mic_toggle);
+  const totalSignals = directInteractions + expressiveInteractions + passiveInteractions;
+  const heatmapSignals = directInteractions + expressiveInteractions;
+
   return {
-    start: coreStart,
-    end: coreEnd,
-    breakSegments,
-    spanMinutes: totalMinutes,
-    creditMinutes: Math.max(1, totalMinutes - breakMinutes),
+    id: bundle.id,
+    date: bundle.session_date || bundle.date || bundle.planned_start_at || null,
+    label: bundle.label || buildBundleLabel(bundle),
+    status,
+    attendanceRate,
+    durationMinutes: totalDurationMinutes,
+    sessionSpanMinutes: sessionSpanMinutes || 0,
+    punctuality,
+    punctualityDelta,
+    joinCount,
+    stabilityScore: round(stabilityScore, 1),
+    stabilityLabel,
+    stabilityText: joinCount === 0 ? 'No joins' : `${joinCount} Join${joinCount === 1 ? '' : 's'} (${stabilityLabel})`,
+    directInteractions,
+    expressiveInteractions,
+    passiveInteractions,
+    totalSignals,
+    heatmapSignals,
+    lastActiveAt: lastLeave,
+    isLurker: attendanceRate >= 80 && totalSignals === 0,
   };
 };
 
-const LIFETIME_BASELINE_START_ISO = '2000-01-01T00:00:00.000Z';
+const fetchAllParticipationLogs = async (sessionId) => {
+  const limit = 500;
+  try {
+    const firstResponse = await participationAPI.getLogs(sessionId, { page: 1, limit });
+    const firstPage = firstResponse?.data || {};
+    const logs = [...(firstPage.data || [])];
+    const totalPages = firstPage.pagination?.totalPages || 1;
 
-const getPreviousEquivalentRange = (start, end) => {
-  if (!(start instanceof Date) || !(end instanceof Date)) return null;
-  const currentStart = start.getTime();
-  const currentEnd = end.getTime();
-  if (!Number.isFinite(currentStart) || !Number.isFinite(currentEnd) || currentEnd <= currentStart) return null;
+    if (totalPages > 1) {
+      const pageNumbers = Array.from({ length: totalPages - 1 }, (_, index) => index + 2);
+      const remainingPages = await Promise.all(
+        pageNumbers.map((page) => participationAPI.getLogs(sessionId, { page, limit }))
+      );
 
-  const spanMs = currentEnd - currentStart;
-  const previousEnd = new Date(currentStart - 1);
-  const previousStart = new Date(previousEnd.getTime() - spanMs);
-  return { previousStart, previousEnd };
+      remainingPages.forEach((response) => {
+        const page = response?.data || {};
+        logs.push(...(page.data || []));
+      });
+    }
+
+    return logs;
+  } catch (error) {
+    console.warn('Failed to fetch participation logs:', error);
+    return [];
+  }
 };
 
-const createSessionRows = ({ sessions = [], snapshotById = new Map(), attendanceBySessionId = new Map() }) => (
-  sessions
-    .map((session) => {
-      const sessionDate = resolveSessionDate(session);
-      const durationMinutes = Math.max(0, toNumber(session.avg_duration_minutes));
-      const snapshot = snapshotById.get(session.id) || { totals: createEmptyInteractionTotals(), uniqueStudents: 0 };
-      const mergedAttendanceRows = mergeAttendanceRecords(attendanceBySessionId.get(session.id) || []);
-      const rosterCount = mergedAttendanceRows.length;
-      const presentCount = mergedAttendanceRows.filter(
-        (row) => toNumber(row.total_duration_minutes) > 0 || ['present', 'late'].includes(row.status)
-      ).length;
-      const inferredActiveCount = Math.max(
-        0,
-        toNumber(snapshot.uniqueStudents) || (Array.isArray(snapshot.students) ? snapshot.students.length : 0)
-      );
-      const activeCount = Math.min(presentCount || 0, inferredActiveCount);
-
-      const presenceRate = rosterCount > 0
-        ? round((presentCount / rosterCount) * 100, 1)
-        : round(toNumber(session.attendance_rate), 1);
-      const participationRate = presentCount > 0 ? round((activeCount / presentCount) * 100, 1) : 0;
-      const efficiencyGap = round(Math.abs(presenceRate - participationRate), 1);
-      const interactions = Math.max(0, toNumber(snapshot.totals?.totalInteractions));
-      const speakingMinutes = Math.max(0, toNumber(snapshot.totals?.speakingProxyMinutes));
-
-      return {
-        sessionId: session.id,
-        sessionDate,
-        dateLabel: sessionDate?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) || 'Unknown',
-        weekKey: sessionDate ? getWeekKey(sessionDate) : 'unknown-week',
-        durationMinutes,
-        rosterCount,
-        presentCount,
-        activeCount,
-        presenceRate,
-        participationRate,
-        efficiencyGap,
-        interactions,
-        speakingMinutes,
-        interactionsPerSession: interactions,
-        interactionsPerHour: durationMinutes > 0 ? round(interactions / (durationMinutes / 60), 2) : 0,
-        talkSharePct: durationMinutes > 0 ? round((speakingMinutes / durationMinutes) * 100, 1) : 0,
-        pulseScore: round(toNumber(session.pulse_engagement_score), 2),
-      };
-    })
-    .sort((left, right) => {
-      if (!left.sessionDate && !right.sessionDate) return 0;
-      if (!left.sessionDate) return -1;
-      if (!right.sessionDate) return 1;
-      return left.sessionDate.getTime() - right.sessionDate.getTime();
-    })
+const MetricCard = ({ label, value, hint, compact = false }) => (
+  <article className={`rounded-xl border border-slate-200 bg-white shadow-sm ${compact ? 'p-3' : 'p-4'}`}>
+    <div className="flex items-center gap-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      {hint ? (
+        <span className="group relative inline-flex">
+          <span className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-slate-300 text-[10px] font-bold text-slate-500">
+            i
+          </span>
+          <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-48 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium normal-case tracking-normal text-white opacity-0 shadow transition-opacity group-hover:opacity-100">
+            {hint}
+          </span>
+        </span>
+      ) : null}
+    </div>
+    <p className={`${compact ? 'mt-1 text-3xl' : 'mt-2 text-2xl'} font-bold text-slate-900`}>{value}</p>
+    {!compact && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+  </article>
 );
 
-const createTimeAgnosticSummary = (rows = []) => {
-  if (rows.length === 0) {
-    return {
-      sessions: 0,
-      interactionsPerSession: 0,
-      interactionsPerHour: 0,
-      presenceRate: 0,
-      participationRate: 0,
-      efficiencyGap: 0,
-      talkSharePct: 0,
-      consistencyIndex: 0,
-    };
-  }
+const TimelineTooltip = ({ active, payload, label }) => {
+  if (!active || !Array.isArray(payload) || payload.length === 0) return null;
 
-  const totals = rows.reduce(
-    (acc, row) => {
-      acc.sessions += 1;
-      acc.durationMinutes += Math.max(0, toNumber(row.durationMinutes));
-      acc.interactions += Math.max(0, toNumber(row.interactions));
-      acc.speakingMinutes += Math.max(0, toNumber(row.speakingMinutes));
-      acc.roster += Math.max(0, toNumber(row.rosterCount));
-      acc.present += Math.max(0, toNumber(row.presentCount));
-      acc.active += Math.max(0, toNumber(row.activeCount));
-      return acc;
-    },
-    { sessions: 0, durationMinutes: 0, interactions: 0, speakingMinutes: 0, roster: 0, present: 0, active: 0 }
+  const rows = payload.filter((item) => item?.dataKey !== 'activityShade');
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-3 text-sm shadow-sm">
+      <p className="mb-1 font-semibold text-slate-900">{label}</p>
+      {rows.map((item) => (
+        <p key={`${item.dataKey}-${item.name}`} style={{ color: item.color || '#0f172a' }}>
+          {item.name}: {toNumber(item.value)}
+        </p>
+      ))}
+    </div>
   );
-
-  const interactionsPerSession = totals.sessions > 0 ? round(totals.interactions / totals.sessions, 2) : 0;
-  const interactionsPerHour = totals.durationMinutes > 0 ? round(totals.interactions / (totals.durationMinutes / 60), 2) : 0;
-  const presenceRate = totals.roster > 0 ? round((totals.present / totals.roster) * 100, 1) : 0;
-  const participationRate = totals.present > 0 ? round((totals.active / totals.present) * 100, 1) : 0;
-  const efficiencyGap = round(Math.abs(presenceRate - participationRate), 1);
-  const talkSharePct = totals.durationMinutes > 0 ? round((totals.speakingMinutes / totals.durationMinutes) * 100, 1) : 0;
-
-  const perSessionRatios = rows.map((row) => toNumber(row.interactionsPerHour)).filter((value) => Number.isFinite(value));
-  const mean = perSessionRatios.length > 0
-    ? perSessionRatios.reduce((sum, value) => sum + value, 0) / perSessionRatios.length
-    : 0;
-  const variance = perSessionRatios.length > 0
-    ? perSessionRatios.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / perSessionRatios.length
-    : 0;
-  const stdev = Math.sqrt(Math.max(0, variance));
-  const consistencyIndex = mean > 0 ? round(Math.max(0, 100 - ((stdev / mean) * 100)), 1) : 0;
-
-  return {
-    sessions: totals.sessions,
-    interactionsPerSession,
-    interactionsPerHour,
-    presenceRate,
-    participationRate,
-    efficiencyGap,
-    talkSharePct,
-    consistencyIndex,
-  };
 };
 
-const computeDelta = (currentValue, baselineValue) => {
-  const current = toNumber(currentValue);
-  const baseline = toNumber(baselineValue);
-  if (baseline <= 0) return null;
-  return round(((current - baseline) / baseline) * 100, 1);
-};
+const ChartCanvas = ({ height = 288, children }) => {
+  const containerRef = React.useRef(null);
+  const [width, setWidth] = useState(0);
 
-const hasMeaningfulBaseline = (currentSummary, baselineSummary) => {
-  if (!currentSummary || !baselineSummary) return false;
-  if (baselineSummary.sessions <= 0) return false;
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
 
-  const comparableKeys = [
-    'interactionsPerSession',
-    'interactionsPerHour',
-    'presenceRate',
-    'participationRate',
-    'efficiencyGap',
-    'talkSharePct',
-    'consistencyIndex',
-  ];
-
-  const differs = comparableKeys.some((key) => Math.abs(toNumber(currentSummary[key]) - toNumber(baselineSummary[key])) > 0.01);
-  return differs;
-};
-
-const getDeltaTone = (delta, lowerIsBetter = false) => {
-  if (delta === null || !Number.isFinite(delta)) {
-    return {
-      chip: 'border-slate-200 bg-slate-50 text-slate-600',
-      text: 'No baseline',
-      detail: 'Awaiting baseline',
+    const updateWidth = () => {
+      const nextWidth = Math.floor(containerRef.current?.getBoundingClientRect()?.width || 0);
+      if (nextWidth > 0) {
+        setWidth(nextWidth);
+      }
     };
-  }
 
-  const score = lowerIsBetter ? -delta : delta;
-  if (score >= 8) {
-    return {
-      chip: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-      text: `${delta > 0 ? '+' : ''}${delta}%`,
-      detail: 'Above baseline',
+    updateWidth();
+
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        updateWidth();
+      });
+      observer.observe(containerRef.current);
+    }
+    window.addEventListener('resize', updateWidth);
+
+    return () => {
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', updateWidth);
     };
-  }
+  }, []);
 
-  if (score <= -8) {
-    return {
-      chip: 'border-rose-200 bg-rose-50 text-rose-700',
-      text: `${delta > 0 ? '+' : ''}${delta}%`,
-      detail: 'Below baseline',
-    };
-  }
-
-  return {
-    chip: 'border-amber-200 bg-amber-50 text-amber-700',
-    text: `${delta > 0 ? '+' : ''}${delta}%`,
-    detail: 'Near baseline',
-  };
+  return (
+    <div ref={containerRef} className="w-full" style={{ height: `${height}px` }}>
+      {width > 0 ? children(Math.max(320, width), height) : null}
+    </div>
+  );
 };
 
-const ClassAnalytics = ({ classId, onSelectStudent }) => {
+const ClassAnalytics = ({ classId }) => {
   const [startDate, setStartDate] = useState(() => {
     const date = new Date();
     date.setDate(date.getDate() - 30);
     return date;
   });
-  const [endDate, setEndDate] = useState(new Date());
+  const [endDate, setEndDate] = useState(() => new Date());
+  const [activeTab, setActiveTab] = useState('summary');
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [selectedStudentId, setSelectedStudentId] = useState(null);
+  const [selectedTrendPulseWeekKey, setSelectedTrendPulseWeekKey] = useState('');
 
-  const [selectedBundleId, setSelectedBundleId] = useState(null);
-  const [selectedStudentBundleId, setSelectedStudentBundleId] = useState(null);
-  const [profiledStudentId, setProfiledStudentId] = useState(null);
-  const [activeAnalyticsTab, setActiveAnalyticsTab] = useState('summary');
-  const [studentScope, setStudentScope] = useState('date-range');
-  const [showPulseFormula, setShowPulseFormula] = useState(false);
-  const [timelineVisibility, setTimelineVisibility] = useState({
-    total: true,
-    chat: true,
-    handRaise: true,
-    micToggle: true,
-    reaction: true,
-  });
-
-  const handleQuickSelect = (start, end) => {
-    setStartDate(start);
-    setEndDate(end);
-  };
-
-  const previousRange = useMemo(() => getPreviousEquivalentRange(startDate, endDate), [startDate, endDate]);
-
-  const { data: analyticsData, isLoading, error } = useQuery({
+  const { data: analyticsData, isLoading: analyticsLoading } = useQuery({
     queryKey: ['classAnalytics', classId, startDate.toISOString(), endDate.toISOString()],
-    queryFn: () =>
-      classesAPI.getClassAnalytics(classId, {
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString(),
-      }),
-    enabled: !!classId,
-    staleTime: 2 * 60 * 1000,
+    queryFn: () => classesAPI.getClassAnalytics(classId, { startDate, endDate }),
+    enabled: Boolean(classId),
     refetchOnWindowFocus: false,
   });
 
-  const analytics = analyticsData?.data;
-  const sessionTrends = analytics?.sessionTrends || [];
-  const scheduleBundles = analytics?.scheduleBundles || [];
-  const studentPerformance = analytics?.studentPerformance || [];
+  const analytics = analyticsData?.data || {};
+  const sessionTrends = analytics.sessionTrends || [];
+  const studentPerformance = analytics.studentPerformance || [];
+  const classInfo = analytics.class || null;
+  const scheduleBundles = analytics.scheduleBundles || [];
 
-  const { data: previousAnalyticsData } = useQuery({
-    queryKey: [
-      'classAnalyticsPreviousPeriod',
-      classId,
-      previousRange?.previousStart?.toISOString(),
-      previousRange?.previousEnd?.toISOString(),
-    ],
-    queryFn: () =>
-      classesAPI.getClassAnalytics(classId, {
-        startDate: previousRange.previousStart.toISOString(),
-        endDate: previousRange.previousEnd.toISOString(),
-      }),
-    enabled: !!classId && !!previousRange,
-    staleTime: 2 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-
-  const previousAnalytics = previousAnalyticsData?.data;
-  const previousSessionTrends = previousAnalytics?.sessionTrends || [];
-
-  const { data: lifetimeAnalyticsData } = useQuery({
-    queryKey: ['classAnalyticsLifetime', classId],
-    queryFn: () =>
-      classesAPI.getClassAnalytics(classId, {
-        startDate: LIFETIME_BASELINE_START_ISO,
-        endDate: new Date().toISOString(),
-      }),
-    enabled: !!classId,
-    staleTime: 10 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-
-  const lifetimeAnalytics = lifetimeAnalyticsData?.data;
-  const lifetimeSessionTrends = lifetimeAnalytics?.sessionTrends || [];
-
-  const sessionIds = useMemo(() => sessionTrends.map((session) => session.id).filter(Boolean), [sessionTrends]);
-  const previousSessionIds = useMemo(
-    () => previousSessionTrends.map((session) => session.id).filter(Boolean),
-    [previousSessionTrends]
-  );
-  const lifetimeSessionIds = useMemo(
-    () => lifetimeSessionTrends.map((session) => session.id).filter(Boolean),
-    [lifetimeSessionTrends]
+  const sessionIds = useMemo(
+    () => sessionTrends.map((session) => session.id).filter(Boolean),
+    [sessionTrends]
   );
 
   const { data: bulkParticipationData, isLoading: participationLoading } = useQuery({
-    queryKey: ['classParticipationAnalytics', classId, startDate.toISOString(), endDate.toISOString(), sessionIds.join('|')],
+    queryKey: ['classParticipationAnalytics', classId, sessionIds.join('|')],
     queryFn: () => participationAPI.getBulkLogs(sessionIds),
-    enabled: !!classId && sessionTrends.length > 0,
-    staleTime: 2 * 60 * 1000,
+    enabled: Boolean(classId) && sessionIds.length > 0,
+    staleTime: 120000,
     refetchOnWindowFocus: false,
   });
 
   const { data: bulkAttendanceData, isLoading: attendanceLoading } = useQuery({
-    queryKey: ['classAttendanceAnalytics', classId, startDate.toISOString(), endDate.toISOString(), sessionIds.join('|')],
+    queryKey: ['classAttendanceAnalytics', classId, sessionIds.join('|')],
     queryFn: () => sessionsAPI.getBulkAttendanceWithIntervals(sessionIds),
-    enabled: !!classId && sessionTrends.length > 0,
-    staleTime: 2 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-
-  const { data: previousBulkParticipationData } = useQuery({
-    queryKey: ['classParticipationPreviousPeriod', classId, previousSessionIds.join('|')],
-    queryFn: () => participationAPI.getBulkLogs(previousSessionIds),
-    enabled: !!classId && previousSessionIds.length > 0,
-    staleTime: 2 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-
-  const { data: previousBulkAttendanceData } = useQuery({
-    queryKey: ['classAttendancePreviousPeriod', classId, previousSessionIds.join('|')],
-    queryFn: () => sessionsAPI.getBulkAttendanceWithIntervals(previousSessionIds),
-    enabled: !!classId && previousSessionIds.length > 0,
-    staleTime: 2 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-
-  const { data: lifetimeBulkParticipationData } = useQuery({
-    queryKey: ['classParticipationLifetime', classId, lifetimeSessionIds.join('|')],
-    queryFn: () => participationAPI.getBulkLogs(lifetimeSessionIds),
-    enabled: !!classId && lifetimeSessionIds.length > 0,
-    staleTime: 10 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-
-  const { data: lifetimeBulkAttendanceData } = useQuery({
-    queryKey: ['classAttendanceLifetime', classId, lifetimeSessionIds.join('|')],
-    queryFn: () => sessionsAPI.getBulkAttendanceWithIntervals(lifetimeSessionIds),
-    enabled: !!classId && lifetimeSessionIds.length > 0,
-    staleTime: 10 * 60 * 1000,
+    enabled: Boolean(classId) && sessionIds.length > 0,
+    staleTime: 120000,
     refetchOnWindowFocus: false,
   });
 
   const logsBySessionId = bulkParticipationData?.data || {};
-  const attendanceBySessionPayload = bulkAttendanceData?.data || {};
-  const previousLogsBySessionId = previousBulkParticipationData?.data || {};
-  const previousAttendanceBySessionPayload = previousBulkAttendanceData?.data || {};
-  const lifetimeLogsBySessionId = lifetimeBulkParticipationData?.data || {};
-  const lifetimeAttendanceBySessionPayload = lifetimeBulkAttendanceData?.data || {};
+  const attendanceBySessionId = bulkAttendanceData?.data || {};
 
-  const participationSnapshots = useMemo(
-    () => sessionTrends.map((session) => buildSessionParticipationSnapshot(session, getSessionBucket(logsBySessionId, session.id))),
-    [sessionTrends, logsBySessionId]
-  );
+  const sessionRows = useMemo(() => {
+    return sessionTrends.map((session) => {
+      const logs = getSessionBucket(logsBySessionId, session.id);
+      const attendanceRows = getSessionBucket(attendanceBySessionId, session.id);
+      const participationSnapshot = aggregateSessionLogs(logs);
 
-  const participationSummary = useMemo(() => mergeParticipationSnapshots(participationSnapshots), [participationSnapshots]);
-
-  const sessionSnapshotById = useMemo(
-    () => new Map(participationSummary.sessions.map((snapshot) => [snapshot.sessionId, snapshot])),
-    [participationSummary.sessions]
-  );
-
-  const previousSessionSnapshotById = useMemo(() => {
-    const snapshots = previousSessionTrends.map((session) => (
-      buildSessionParticipationSnapshot(session, getSessionBucket(previousLogsBySessionId, session.id))
-    ));
-    return new Map(snapshots.map((snapshot) => [snapshot.sessionId, snapshot]));
-  }, [previousSessionTrends, previousLogsBySessionId]);
-
-  const lifetimeSessionSnapshotById = useMemo(() => {
-    const snapshots = lifetimeSessionTrends.map((session) => (
-      buildSessionParticipationSnapshot(session, getSessionBucket(lifetimeLogsBySessionId, session.id))
-    ));
-    return new Map(snapshots.map((snapshot) => [snapshot.sessionId, snapshot]));
-  }, [lifetimeSessionTrends, lifetimeLogsBySessionId]);
-
-  const studentParticipationById = useMemo(
-    () => new Map(
-      participationSummary.students
-        .filter((student) => student?.student_id)
-        .map((student) => [String(student.student_id), student])
-    ),
-    [participationSummary.students]
-  );
-
-  const studentParticipationByNumber = useMemo(
-    () => new Map(
-      participationSummary.students
-        .filter((student) => student?.student_number)
-        .map((student) => [String(student.student_number), student])
-    ),
-    [participationSummary.students]
-  );
-
-  const studentParticipationByName = useMemo(
-    () => new Map(
-      participationSummary.students
-        .filter((student) => normalizeName(student?.full_name || student?.student_name || student?.participant_name))
-        .map((student) => [normalizeName(student.full_name || student.student_name || student.participant_name), student])
-    ),
-    [participationSummary.students]
-  );
-
-  const attendanceBySessionId = useMemo(() => {
-    const map = new Map();
-    sessionIds.forEach((sessionId) => {
-      map.set(sessionId, getSessionBucket(attendanceBySessionPayload, sessionId));
-    });
-    return map;
-  }, [attendanceBySessionPayload, sessionIds]);
-
-  const previousAttendanceBySessionId = useMemo(() => {
-    const map = new Map();
-    previousSessionIds.forEach((sessionId) => {
-      map.set(sessionId, getSessionBucket(previousAttendanceBySessionPayload, sessionId));
-    });
-    return map;
-  }, [previousAttendanceBySessionPayload, previousSessionIds]);
-
-  const lifetimeAttendanceBySessionId = useMemo(() => {
-    const map = new Map();
-    lifetimeSessionIds.forEach((sessionId) => {
-      map.set(sessionId, getSessionBucket(lifetimeAttendanceBySessionPayload, sessionId));
-    });
-    return map;
-  }, [lifetimeAttendanceBySessionPayload, lifetimeSessionIds]);
-
-  const enrichedStudents = useMemo(() => {
-    const classAverages = {
-      avgDurationMinutes:
-        studentPerformance.length > 0
-          ? studentPerformance.reduce((sum, student) => sum + toNumber(student.avg_duration_minutes), 0) / studentPerformance.length
-          : 0,
-    };
-
-    const merged = studentPerformance.map((student) => {
-      const participation = studentParticipationById.get(String(student.id))
-        || studentParticipationByNumber.get(String(student.student_number || ''))
-        || studentParticipationByName.get(normalizeName(student.full_name))
-        || {
-        total_interactions: 0,
-        chat_messages: 0,
-        reactions: 0,
-        hand_raises: 0,
-        mic_toggles: 0,
-        speaking_proxy_minutes: 0,
-        sessions_with_activity: 0,
+      return {
+        id: session.id,
+        title: session.title || null,
+        session_date: session.session_date || session.started_at,
+        started_at: session.started_at || null,
+        ended_at: session.ended_at || null,
+        label: session.title || formatDate(session.session_date || session.started_at),
+        attendance_rate: toNumber(session.attendance_rate),
+        avg_duration_minutes: toNumber(session.avg_duration_minutes),
+        total_participants: toNumber(session.total_participants),
+        present_count: toNumber(session.present_count),
+        interactions: toNumber(participationSnapshot.totals.totalInteractions),
+        chat: toNumber(participationSnapshot.totals.chat),
+        reaction: toNumber(participationSnapshot.totals.reaction),
+        hand_raise: toNumber(participationSnapshot.totals.hand_raise),
+        mic_toggle: toNumber(participationSnapshot.totals.mic_toggle),
+        speaking_proxy_minutes: toNumber(participationSnapshot.totals.speakingProxyMinutes),
+        attendanceRows,
       };
+    });
+  }, [sessionTrends, logsBySessionId, attendanceBySessionId]);
+
+  const participationByStudent = useMemo(() => {
+    const merged = new Map();
+
+    sessionIds.forEach((sessionId) => {
+      const logs = getSessionBucket(logsBySessionId, sessionId);
+      const snapshot = aggregateSessionLogs(logs);
+
+      snapshot.students.forEach((student) => {
+        const key = student.student_id ? String(student.student_id) : `name:${String(student.full_name || '').toLowerCase()}`;
+        if (!merged.has(key)) {
+          merged.set(key, {
+            ...emptyParticipation,
+            student_id: student.student_id,
+            full_name: student.full_name,
+          });
+        }
+
+        const current = merged.get(key);
+        current.total_interactions += toNumber(student.total_interactions);
+        current.chat_messages += toNumber(student.chat_messages);
+        current.reactions += toNumber(student.reactions);
+        current.hand_raises += toNumber(student.hand_raises);
+        current.mic_toggles += toNumber(student.mic_toggles);
+        current.speaking_proxy_minutes += toNumber(student.speaking_proxy_minutes);
+      });
+    });
+
+    return merged;
+  }, [sessionIds, logsBySessionId]);
+
+  const studentRows = useMemo(() => {
+    const rows = studentPerformance.map((student) => {
+      const studentIdKey = student.id ? String(student.id) : null;
+      const nameKey = `name:${String(student.full_name || '').toLowerCase()}`;
+      const participation = (studentIdKey && participationByStudent.get(studentIdKey)) || participationByStudent.get(nameKey) || emptyParticipation;
+
+      const chatMessages = hasValidNumericValue(student.chat_messages)
+        ? toNumber(student.chat_messages)
+        : toNumber(student.chat_count, toNumber(participation.chat_messages));
+      const reactions = hasValidNumericValue(student.reactions)
+        ? toNumber(student.reactions)
+        : toNumber(student.reaction_count, toNumber(participation.reactions));
+      const handRaises = hasValidNumericValue(student.hand_raises)
+        ? toNumber(student.hand_raises)
+        : toNumber(student.hand_raise_count, toNumber(participation.hand_raises));
+      const micToggles = hasValidNumericValue(student.mic_toggles)
+        ? toNumber(student.mic_toggles)
+        : toNumber(student.mic_toggle_count, toNumber(participation.mic_toggles));
+      const speakingProxyMinutes = hasValidNumericValue(student.speaking_proxy_minutes)
+        ? toNumber(student.speaking_proxy_minutes)
+        : toNumber(participation.speaking_proxy_minutes);
+      const totalInteractions = hasValidNumericValue(student.total_interactions)
+        ? toNumber(student.total_interactions)
+        : toNumber(participation.total_interactions);
 
       return {
         ...student,
-        total_interactions: participation.total_interactions,
-        chat_messages: participation.chat_messages,
-        reactions: participation.reactions,
-        hand_raises: participation.hand_raises,
-        mic_toggles: participation.mic_toggles,
-        speaking_proxy_minutes: participation.speaking_proxy_minutes,
-        sessions_with_activity: participation.sessions_with_activity,
-        engagement_score: computeEngagementScore({
-          attendanceRate: toNumber(student.attendance_rate),
-          avgDurationMinutes: toNumber(student.avg_duration_minutes),
-          totalInteractions: toNumber(participation.total_interactions),
-          speakingProxyMinutes: toNumber(participation.speaking_proxy_minutes),
-          classAverages,
-          classMaxima: {
-            totalInteractions: 1,
-            speakingProxyMinutes: 1,
-          },
-        }),
+        ...participation,
+        chat_messages: chatMessages,
+        reactions,
+        hand_raises: handRaises,
+        mic_toggles: micToggles,
+        speaking_proxy_minutes: speakingProxyMinutes,
+        total_interactions: totalInteractions,
       };
     });
 
-    const maxInteractions = merged.reduce((max, student) => Math.max(max, toNumber(student.total_interactions)), 0) || 1;
-    const maxSpeakingProxyMinutes = merged.reduce((max, student) => Math.max(max, toNumber(student.speaking_proxy_minutes)), 0) || 1;
-
-    return merged.map((student) => ({
-      ...student,
-      engagement_score: computeEngagementScore({
-        attendanceRate: toNumber(student.attendance_rate),
-        avgDurationMinutes: toNumber(student.avg_duration_minutes),
-        totalInteractions: toNumber(student.total_interactions),
-        speakingProxyMinutes: toNumber(student.speaking_proxy_minutes),
-        classAverages,
-        classMaxima: {
-          totalInteractions: maxInteractions,
-          speakingProxyMinutes: maxSpeakingProxyMinutes,
-        },
+    const maxValues = rows.reduce(
+      (acc, row) => ({
+        speaking: Math.max(acc.speaking, toNumber(row.speaking_proxy_minutes)),
+        chat: Math.max(acc.chat, toNumber(row.chat_messages)),
+        handRaises: Math.max(acc.handRaises, toNumber(row.hand_raises)),
+        reactions: Math.max(acc.reactions, toNumber(row.reactions)),
       }),
-    }));
-  }, [studentPerformance, studentParticipationById, studentParticipationByNumber, studentParticipationByName]);
+      { speaking: 0, chat: 0, handRaises: 0, reactions: 0 }
+    );
 
-  const bundleRows = useMemo(
-    () =>
-      scheduleBundles.map((bundle) => {
-        const sessionIdsInBundle = Array.isArray(bundle.session_ids) ? bundle.session_ids : [];
-        const participationTotals = sessionIdsInBundle.reduce(
-          (totals, sessionId) => {
-            const snapshot = sessionSnapshotById.get(sessionId);
-            if (!snapshot) return totals;
+    return rows
+      .map((row) => {
+        const engagementScore = hasValidNumericValue(row.engagement_score)
+          ? round(toNumber(row.engagement_score), 1)
+          : buildEngagementScore(row, maxValues);
+        const risk = getRiskLabel({ ...row, engagement_score: engagementScore });
+        return {
+          ...row,
+          engagement_score: engagementScore,
+          risk,
+        };
+      })
+      .sort((left, right) => toNumber(right.engagement_score) - toNumber(left.engagement_score));
+  }, [studentPerformance, participationByStudent]);
 
-            totals.chat += toNumber(snapshot.totals?.chat);
-            totals.reaction += toNumber(snapshot.totals?.reaction);
-            totals.hand_raise += toNumber(snapshot.totals?.hand_raise);
-            totals.mic_toggle += toNumber(snapshot.totals?.mic_toggle);
-            totals.speakingProxyMinutes += toNumber(snapshot.totals?.speakingProxyMinutes);
-            totals.totalInteractions += toNumber(snapshot.totals?.totalInteractions);
-            return totals;
-          },
-          {
+  useEffect(() => {
+    if (!selectedStudentId && studentRows.length > 0) {
+      setSelectedStudentId(String(studentRows[0].id));
+    }
+  }, [studentRows, selectedStudentId]);
+
+  const selectedStudent = useMemo(
+    () => studentRows.find((row) => String(row.id) === String(selectedStudentId)) || studentRows[0] || null,
+    [studentRows, selectedStudentId]
+  );
+
+  const bundledSessionRows = useMemo(() => {
+    const sessionById = new Map(sessionRows.map((row) => [String(row.id), row]));
+    const normalizedSchedules = normalizeSchedules(classInfo?.schedule);
+
+    if (normalizedSchedules.length > 0) {
+      const bundles = new Map();
+
+      sessionRows.forEach((row) => {
+        const startedAt = row.started_at ? new Date(row.started_at) : null;
+        if (!startedAt || Number.isNaN(startedAt.getTime())) return;
+
+        const fallbackEndAt = new Date(startedAt.getTime() + (Math.max(1, toNumber(row.avg_duration_minutes)) * 60 * 1000));
+        const endedAt = row.ended_at ? new Date(row.ended_at) : fallbackEndAt;
+        const safeEnd = Number.isNaN(endedAt.getTime()) ? fallbackEndAt : endedAt;
+
+        const dateKey = toLocalDateKey(startedAt);
+        if (!dateKey) return;
+
+        const dayName = DAY_NAMES[startedAt.getDay()];
+        const candidates = normalizedSchedules.filter((schedule) => schedule.days.length === 0 || schedule.days.includes(dayName));
+        if (candidates.length === 0) return;
+
+        let bestSchedule = null;
+        let bestOverlapMs = -1;
+
+        candidates.forEach((schedule) => {
+          const plannedStart = buildLocalDateTime(dateKey, schedule.startMinutes);
+          const plannedEnd = buildLocalDateTime(dateKey, schedule.endMinutes);
+          if (!plannedStart || !plannedEnd) return;
+
+          const windowStart = new Date(plannedStart.getTime() - (EARLY_BUFFER_MINUTES * 60 * 1000));
+          const windowEnd = new Date(plannedEnd.getTime() + (OVERTIME_BUFFER_MINUTES * 60 * 1000));
+          const overlapStartMs = Math.max(windowStart.getTime(), startedAt.getTime());
+          const overlapEndMs = Math.min(windowEnd.getTime(), safeEnd.getTime());
+          const overlapMs = overlapEndMs - overlapStartMs;
+
+          if (overlapMs > bestOverlapMs) {
+            bestOverlapMs = overlapMs;
+            bestSchedule = schedule;
+          }
+        });
+
+        if (!bestSchedule || bestOverlapMs <= 0) return;
+
+        const bundleKey = `${dateKey}::${bestSchedule.index}`;
+        const plannedStart = buildLocalDateTime(dateKey, bestSchedule.startMinutes);
+        const plannedEnd = buildLocalDateTime(dateKey, bestSchedule.endMinutes);
+
+        if (!bundles.has(bundleKey)) {
+          bundles.set(bundleKey, {
+            id: bundleKey,
+            date: dateKey,
+            schedule_index: bestSchedule.index,
+            planned_start_time: formatMinutesAsTime(bestSchedule.startMinutes),
+            planned_end_time: formatMinutesAsTime(bestSchedule.endMinutes),
+            planned_start_at: plannedStart?.toISOString() || null,
+            planned_end_at: plannedEnd?.toISOString() || null,
+            session_count: 0,
+            source_session_ids: [],
+            sessions: [],
+            total_participants: 0,
+            present_count: 0,
+            attendance_rate: 0,
+            actual_first_start_at: null,
+            actual_last_end_at: null,
+            avg_duration_minutes: 0,
+            interactions: 0,
             chat: 0,
             reaction: 0,
             hand_raise: 0,
             mic_toggle: 0,
-            speakingProxyMinutes: 0,
-            totalInteractions: 0,
-          }
-        );
-
-        return {
-          ...bundle,
-          core_credit_minutes: Math.max(1, toNumber(bundle.planned_minutes) - toNumber(bundle.break_minutes)),
-          participationTotals,
-        };
-      }),
-    [scheduleBundles, sessionSnapshotById]
-  );
-
-  const effectiveBundleRows = useMemo(() => {
-    if (bundleRows.length > 0) return bundleRows;
-
-    const toLocalDateKey = (date) => {
-      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-
-    const fallbackSessions = sessionTrends
-      .map((session) => {
-        const startedAt = resolveSessionDate(session);
-        const endedAt = resolveSessionEnd(session);
-        if (!startedAt || !endedAt || Number.isNaN(startedAt.getTime()) || Number.isNaN(endedAt.getTime())) {
-          return null;
+            speaking_proxy_minutes: 0,
+            allAttendanceRows: [],
+          });
         }
 
-        const snapshot = sessionSnapshotById.get(session.id);
-        return {
-          session,
-          start: startedAt,
-          end: endedAt,
-          durationMinutes: Math.max(1, toNumber(session.avg_duration_minutes)),
-          dateKey: toLocalDateKey(startedAt),
-          totals: {
-            chat: toNumber(snapshot?.totals?.chat),
-            reaction: toNumber(snapshot?.totals?.reaction),
-            hand_raise: toNumber(snapshot?.totals?.hand_raise),
-            mic_toggle: toNumber(snapshot?.totals?.mic_toggle),
-            speakingProxyMinutes: toNumber(snapshot?.totals?.speakingProxyMinutes),
-            totalInteractions: toNumber(snapshot?.totals?.totalInteractions),
-          },
-        };
-      })
-      .filter(Boolean)
-      .sort((left, right) => left.start.getTime() - right.start.getTime());
+        const bundle = bundles.get(bundleKey);
+        bundle.session_count += 1;
+        bundle.source_session_ids.push(String(row.id));
+        bundle.sessions.push({
+          id: String(row.id),
+          start_at: startedAt.toISOString(),
+          end_at: safeEnd.toISOString(),
+        });
+        bundle.total_participants += toNumber(row.total_participants);
+        bundle.present_count += toNumber(row.present_count);
+        bundle.avg_duration_minutes += toNumber(row.avg_duration_minutes);
+        bundle.interactions += toNumber(row.interactions);
+        bundle.chat += toNumber(row.chat);
+        bundle.reaction += toNumber(row.reaction);
+        bundle.hand_raise += toNumber(row.hand_raise);
+        bundle.mic_toggle += toNumber(row.mic_toggle);
+        bundle.speaking_proxy_minutes += toNumber(row.speaking_proxy_minutes);
+        bundle.allAttendanceRows.push(...(row.attendanceRows || []));
+      });
 
-    if (fallbackSessions.length === 0) return [];
+      return [...bundles.values()]
+        .map((bundle, index) => {
+          const sorted = [...bundle.sessions].sort((left, right) => new Date(left.start_at).getTime() - new Date(right.start_at).getTime());
+          const mergedAttendanceRows = mergeAttendanceRowsForBundle(bundle.allAttendanceRows || []);
+          const participants = mergedAttendanceRows.length;
+          const presentCount = mergedAttendanceRows.filter(
+            (row) => row.status === 'present' || row.status === 'late' || toNumber(row.total_duration_minutes) > 0
+          ).length;
 
-    const MAX_GAP_MINUTES_FOR_SAME_SESSION = 25;
-    const bundles = [];
-    let current = null;
+          if (sorted.length > 0) {
+            bundle.actual_first_start_at = sorted[0].start_at;
+            bundle.actual_last_end_at = sorted[sorted.length - 1].end_at;
+          }
 
-    fallbackSessions.forEach((item) => {
-      const startIso = item.start.toISOString();
-      const endIso = item.end.toISOString();
+          bundle.attendance_rate = participants > 0
+            ? round((presentCount / participants) * 100, 1)
+            : 0;
 
-      if (!current) {
-        current = {
-          bundle_id: `synthetic-${item.dateKey}-${item.session.id}`,
-          date: item.dateKey,
-          day_name: item.start.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
-          schedule_index: bundles.length,
-          planned_start_time: toTimeText(item.start),
-          planned_end_time: toTimeText(item.end),
-          planned_start_at: startIso,
-          planned_end_at: endIso,
-          actual_first_start_at: startIso,
-          actual_last_end_at: endIso,
-          actual_total_minutes: item.durationMinutes,
-          break_minutes: 0,
-          core_credit_minutes: item.durationMinutes,
-          session_ids: [item.session.id],
-          sessions: [{ id: item.session.id, start_at: startIso, end_at: endIso }],
-          participationTotals: { ...item.totals },
-        };
-        return;
-      }
-
-      const currentEnd = new Date(current.actual_last_end_at);
-      const gapMinutes = diffMinutes(item.start, currentEnd);
-      const isSameDay = current.date === item.dateKey;
-      const shouldMerge = isSameDay && gapMinutes <= MAX_GAP_MINUTES_FOR_SAME_SESSION;
-
-      if (!shouldMerge) {
-        current.core_credit_minutes = Math.max(1, current.actual_total_minutes - current.break_minutes);
-        bundles.push(current);
-        current = {
-          bundle_id: `synthetic-${item.dateKey}-${item.session.id}`,
-          date: item.dateKey,
-          day_name: item.start.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
-          schedule_index: bundles.length,
-          planned_start_time: toTimeText(item.start),
-          planned_end_time: toTimeText(item.end),
-          planned_start_at: startIso,
-          planned_end_at: endIso,
-          actual_first_start_at: startIso,
-          actual_last_end_at: endIso,
-          actual_total_minutes: item.durationMinutes,
-          break_minutes: 0,
-          core_credit_minutes: item.durationMinutes,
-          session_ids: [item.session.id],
-          sessions: [{ id: item.session.id, start_at: startIso, end_at: endIso }],
-          participationTotals: { ...item.totals },
-        };
-        return;
-      }
-
-      current.actual_last_end_at = endIso;
-      current.planned_end_at = endIso;
-      current.planned_end_time = toTimeText(item.end);
-      current.actual_total_minutes += item.durationMinutes;
-      current.break_minutes += Math.max(0, gapMinutes);
-      current.session_ids.push(item.session.id);
-      current.sessions.push({ id: item.session.id, start_at: startIso, end_at: endIso });
-      current.participationTotals.chat += item.totals.chat;
-      current.participationTotals.reaction += item.totals.reaction;
-      current.participationTotals.hand_raise += item.totals.hand_raise;
-      current.participationTotals.mic_toggle += item.totals.mic_toggle;
-      current.participationTotals.speakingProxyMinutes += item.totals.speakingProxyMinutes;
-      current.participationTotals.totalInteractions += item.totals.totalInteractions;
-    });
-
-    if (current) {
-      current.core_credit_minutes = Math.max(1, current.actual_total_minutes - current.break_minutes);
-      bundles.push(current);
+          return {
+            ...bundle,
+            id: String(bundle.id || `bundle-${index + 1}`),
+            label: buildBundleLabel(bundle, index),
+            session_date: bundle.date || bundle.planned_start_at || null,
+            total_participants: participants,
+            present_count: presentCount,
+            avg_duration_minutes: bundle.session_count > 0 ? round(bundle.avg_duration_minutes / bundle.session_count, 1) : 0,
+            interactions: round(bundle.interactions, 1),
+            chat: round(bundle.chat, 1),
+            reaction: round(bundle.reaction, 1),
+            hand_raise: round(bundle.hand_raise, 1),
+            mic_toggle: round(bundle.mic_toggle, 1),
+            speaking_proxy_minutes: round(bundle.speaking_proxy_minutes, 1),
+            attendanceRows: mergedAttendanceRows,
+          };
+        })
+        .sort((left, right) => {
+          const leftDate = left?.session_date ? new Date(left.session_date) : null;
+          const rightDate = right?.session_date ? new Date(right.session_date) : null;
+          const leftTime = leftDate && !Number.isNaN(leftDate.getTime()) ? leftDate.getTime() : 0;
+          const rightTime = rightDate && !Number.isNaN(rightDate.getTime()) ? rightDate.getTime() : 0;
+          if (leftTime !== rightTime) return leftTime - rightTime;
+          return toNumber(left.schedule_index) - toNumber(right.schedule_index);
+        });
     }
 
-    return bundles;
-  }, [bundleRows, sessionTrends, sessionSnapshotById]);
+    if (scheduleBundles.length > 0) {
+      return scheduleBundles.map((bundle, index) => {
+        const bundleSessionIds = Array.isArray(bundle?.session_ids)
+          ? bundle.session_ids.map((id) => String(id))
+          : [];
 
-  const bundleBySessionId = useMemo(() => {
-    const map = new Map();
-    bundleRows.forEach((bundle) => {
-      (bundle.session_ids || []).forEach((sessionId) => {
-        map.set(sessionId, bundle);
-      });
-    });
-    return map;
-  }, [bundleRows]);
+        const matchedRows = bundleSessionIds
+          .map((id) => sessionById.get(id))
+          .filter(Boolean);
 
-  const enrichedSessions = useMemo(
-    () =>
-      sessionTrends.map((session) => {
-        const snapshot = sessionSnapshotById.get(session.id) || { totals: createEmptyInteractionTotals(), students: [] };
-        const bundle = bundleBySessionId.get(session.id);
-        const duration = toNumber(session.avg_duration_minutes);
-        const coreCreditMinutes = Math.max(1, toNumber(bundle?.core_credit_minutes) || duration || 1);
-        const normalizedAttendancePct = round((duration / coreCreditMinutes) * 100, 1);
-        const pulseEngagementScore = round(
-          ((toNumber(snapshot.totals.speakingProxyMinutes) * WEIGHTS.mic) +
-            (toNumber(snapshot.totals.reaction) * WEIGHTS.reaction) +
-            (toNumber(snapshot.totals.chat) * WEIGHTS.chat)) /
-            Math.max(1, duration),
-          2
+        const mergedAttendanceRows = mergeAttendanceRowsForBundle(
+          matchedRows.flatMap((row) => row.attendanceRows || [])
         );
 
+        const participants = mergedAttendanceRows.length;
+        const presentCount = mergedAttendanceRows.filter(
+          (row) => row.status === 'present' || row.status === 'late' || toNumber(row.total_duration_minutes) > 0
+        ).length;
+
+        const fallbackAttendance = matchedRows.length > 0
+          ? round(matchedRows.reduce((sum, row) => sum + toNumber(row.attendance_rate), 0) / matchedRows.length, 1)
+          : 0;
+
         return {
-          ...session,
-          chat_count: snapshot.totals.chat,
-          reaction_count: snapshot.totals.reaction,
-          mic_toggle_count: snapshot.totals.mic_toggle,
-          hand_raise_count: snapshot.totals.hand_raise,
-          speaking_proxy_minutes: snapshot.totals.speakingProxyMinutes,
-          total_interactions: snapshot.totals.totalInteractions,
-          participating_students: snapshot.uniqueStudents || snapshot.students.length || 0,
-          core_credit_minutes: coreCreditMinutes,
-          normalized_attendance_pct: normalizedAttendancePct,
-          pulse_engagement_score: pulseEngagementScore,
+          id: String(bundle?.bundle_id || `bundle-${index + 1}`),
+          label: buildBundleLabel(bundle, index),
+          session_date: bundle?.date || bundle?.planned_start_at || matchedRows[0]?.session_date || null,
+          source_session_ids: bundleSessionIds,
+          attendance_rate: participants > 0 ? round((presentCount / participants) * 100, 1) : fallbackAttendance,
+          total_participants: participants,
+          present_count: presentCount,
+          avg_duration_minutes: matchedRows.length > 0
+            ? round(matchedRows.reduce((sum, row) => sum + toNumber(row.avg_duration_minutes), 0) / matchedRows.length, 1)
+            : 0,
+          interactions: round(matchedRows.reduce((sum, row) => sum + toNumber(row.interactions), 0), 1),
+          chat: round(matchedRows.reduce((sum, row) => sum + toNumber(row.chat), 0), 1),
+          reaction: round(matchedRows.reduce((sum, row) => sum + toNumber(row.reaction), 0), 1),
+          hand_raise: round(matchedRows.reduce((sum, row) => sum + toNumber(row.hand_raise), 0), 1),
+          mic_toggle: round(matchedRows.reduce((sum, row) => sum + toNumber(row.mic_toggle), 0), 1),
+          speaking_proxy_minutes: round(matchedRows.reduce((sum, row) => sum + toNumber(row.speaking_proxy_minutes), 0), 1),
+          attendanceRows: mergedAttendanceRows,
         };
-      }),
-    [sessionTrends, sessionSnapshotById, bundleBySessionId]
-  );
-
-  useEffect(() => {
-    if (!selectedBundleId && effectiveBundleRows.length > 0) {
-      setSelectedBundleId(effectiveBundleRows[effectiveBundleRows.length - 1].bundle_id);
+      });
     }
-  }, [effectiveBundleRows, selectedBundleId]);
+
+    // Fallback when no schedule bundles are returned: treat each fragment as one session.
+    return sessionRows.map((row, index) => ({
+      ...row,
+      id: String(row.id || `session-${index + 1}`),
+      source_session_ids: [String(row.id)],
+    }));
+  }, [classInfo, scheduleBundles, sessionRows]);
 
   useEffect(() => {
-    if (effectiveBundleRows.length === 0) {
-      setSelectedStudentBundleId(null);
+    if (!selectedSessionId && bundledSessionRows.length > 0) {
+      setSelectedSessionId(String(bundledSessionRows[bundledSessionRows.length - 1].id));
       return;
     }
 
-    const hasCurrent = effectiveBundleRows.some((bundle) => bundle.bundle_id === selectedStudentBundleId);
-    if (!hasCurrent) {
-      setSelectedStudentBundleId(effectiveBundleRows[effectiveBundleRows.length - 1].bundle_id);
+    if (selectedSessionId && !bundledSessionRows.some((row) => String(row.id) === String(selectedSessionId))) {
+      setSelectedSessionId(bundledSessionRows.length > 0 ? String(bundledSessionRows[bundledSessionRows.length - 1].id) : null);
     }
-  }, [effectiveBundleRows, selectedStudentBundleId]);
+  }, [bundledSessionRows, selectedSessionId]);
 
-  const selectedBundle = useMemo(
-    () => effectiveBundleRows.find((bundle) => bundle.bundle_id === selectedBundleId) || null,
-    [effectiveBundleRows, selectedBundleId]
+  const selectedSession = useMemo(
+    () => bundledSessionRows.find((row) => String(row.id) === String(selectedSessionId)) || bundledSessionRows[bundledSessionRows.length - 1] || null,
+    [bundledSessionRows, selectedSessionId]
   );
 
-  const selectedStudentBundle = useMemo(
-    () => effectiveBundleRows.find((bundle) => bundle.bundle_id === selectedStudentBundleId) || null,
-    [effectiveBundleRows, selectedStudentBundleId]
-  );
+  const studentHistoryMap = useMemo(() => {
+    const map = new Map();
 
-  const currentSessionRows = useMemo(
-    () => createSessionRows({
-      sessions: enrichedSessions,
-      snapshotById: sessionSnapshotById,
-      attendanceBySessionId,
-    }),
-    [enrichedSessions, sessionSnapshotById, attendanceBySessionId]
-  );
-
-  const previousSessionRows = useMemo(
-    () => createSessionRows({
-      sessions: previousSessionTrends,
-      snapshotById: previousSessionSnapshotById,
-      attendanceBySessionId: previousAttendanceBySessionId,
-    }),
-    [previousSessionTrends, previousSessionSnapshotById, previousAttendanceBySessionId]
-  );
-
-  const lifetimeSessionRows = useMemo(
-    () => createSessionRows({
-      sessions: lifetimeSessionTrends,
-      snapshotById: lifetimeSessionSnapshotById,
-      attendanceBySessionId: lifetimeAttendanceBySessionId,
-    }),
-    [lifetimeSessionTrends, lifetimeSessionSnapshotById, lifetimeAttendanceBySessionId]
-  );
-
-  const currentSummary = useMemo(() => createTimeAgnosticSummary(currentSessionRows), [currentSessionRows]);
-  const previousSummary = useMemo(() => createTimeAgnosticSummary(previousSessionRows), [previousSessionRows]);
-  const lifetimeSummary = useMemo(() => createTimeAgnosticSummary(lifetimeSessionRows), [lifetimeSessionRows]);
-
-  const baselineSummary = previousSummary.sessions > 0 ? previousSummary : lifetimeSummary;
-  const baselineModeLabel = previousSummary.sessions > 0 ? 'previous equivalent period' : 'class lifetime average';
-  const showBaselineDelta = hasMeaningfulBaseline(currentSummary, baselineSummary);
-
-  const engagementEfficiencyBand = currentSummary.efficiencyGap <= 12
-    ? { label: 'Healthy', tone: 'text-emerald-700 border-emerald-200 bg-emerald-50' }
-    : currentSummary.efficiencyGap <= 24
-      ? { label: 'Watch', tone: 'text-amber-700 border-amber-200 bg-amber-50' }
-      : { label: 'Critical', tone: 'text-rose-700 border-rose-200 bg-rose-50' };
-
-  const talkShareRatio = useMemo(() => {
-    const talk = Math.max(0, toNumber(currentSummary.talkSharePct));
-    const listen = Math.max(0, 100 - talk);
-    return `${round(talk, 1)}:${round(listen, 1)}`;
-  }, [currentSummary.talkSharePct]);
-
-  const summaryCards = useMemo(
-    () => [
-      {
-        id: 'interaction-intensity',
-        title: 'Interaction Intensity',
-        value: `${currentSummary.interactionsPerSession}`,
-        subtitle: `${currentSummary.interactionsPerHour}/hour`,
-        delta: showBaselineDelta ? computeDelta(currentSummary.interactionsPerSession, baselineSummary.interactionsPerSession) : null,
-        lowerIsBetter: false,
-        footprint: 'xl:col-span-3',
-      },
-      {
-        id: 'engagement-efficiency',
-        title: 'Engagement Efficiency Gap',
-        value: `${currentSummary.efficiencyGap}%`,
-        subtitle: `Presence ${currentSummary.presenceRate}% vs participation ${currentSummary.participationRate}%`,
-        delta: showBaselineDelta ? computeDelta(currentSummary.efficiencyGap, baselineSummary.efficiencyGap) : null,
-        lowerIsBetter: true,
-        footprint: 'xl:col-span-3',
-      },
-      {
-        id: 'talk-share',
-        title: 'Instructor Talk Share (Proxy)',
-        value: `${currentSummary.talkSharePct}%`,
-        subtitle: `Talk-to-listen ${talkShareRatio}`,
-        delta: showBaselineDelta ? computeDelta(currentSummary.talkSharePct, baselineSummary.talkSharePct) : null,
-        lowerIsBetter: true,
-        footprint: 'xl:col-span-2',
-      },
-      {
-        id: 'session-consistency',
-        title: 'Session Consistency',
-        value: `${currentSummary.consistencyIndex}%`,
-        subtitle: `${currentSummary.sessions} sessions in range`,
-        delta: showBaselineDelta ? computeDelta(currentSummary.consistencyIndex, baselineSummary.consistencyIndex) : null,
-        lowerIsBetter: false,
-        footprint: 'xl:col-span-2',
-      },
-      {
-        id: 'active-participation',
-        title: 'Active Participation',
-        value: `${currentSummary.participationRate}%`,
-        subtitle: `Logged-in presence ${currentSummary.presenceRate}%`,
-        delta: showBaselineDelta ? computeDelta(currentSummary.participationRate, baselineSummary.participationRate) : null,
-        lowerIsBetter: false,
-        footprint: 'xl:col-span-2',
-      },
-    ],
-    [baselineSummary, currentSummary, talkShareRatio]
-  );
-
-  const drilldownMode = currentSessionRows.length <= 24 ? 'session' : 'weekly';
-
-  const fragmentDrilldownData = useMemo(() => {
-    if (drilldownMode === 'session') {
-      return currentSessionRows.map((row) => ({
-        label: row.dateLabel,
-        bucketSize: 1,
-        interactionsPerHour: row.interactionsPerHour,
-        presenceRate: row.presenceRate,
-        participationRate: row.participationRate,
-        efficiencyGap: row.efficiencyGap,
-      }));
-    }
-
-    const weekly = new Map();
-    currentSessionRows.forEach((row) => {
-      if (!weekly.has(row.weekKey)) {
-        weekly.set(row.weekKey, {
-          label: row.weekKey,
-          sessions: 0,
-          interactionsPerHourSum: 0,
-          presenceRateSum: 0,
-          participationRateSum: 0,
-          efficiencyGapSum: 0,
+    studentRows.forEach((student) => {
+      const history = bundledSessionRows
+        .map((bundle) => buildStudentBundleSnapshot(bundle, student, attendanceBySessionId, logsBySessionId))
+        .filter(Boolean)
+        .sort((left, right) => {
+          const leftTime = left?.date ? new Date(left.date).getTime() : 0;
+          const rightTime = right?.date ? new Date(right.date).getTime() : 0;
+          return leftTime - rightTime;
         });
-      }
 
-      const bucket = weekly.get(row.weekKey);
-      bucket.sessions += 1;
-      bucket.interactionsPerHourSum += toNumber(row.interactionsPerHour);
-      bucket.presenceRateSum += toNumber(row.presenceRate);
-      bucket.participationRateSum += toNumber(row.participationRate);
-      bucket.efficiencyGapSum += toNumber(row.efficiencyGap);
+      getStudentIdentityKeys(student).forEach((key) => {
+        map.set(key, history);
+      });
     });
 
-    return Array.from(weekly.values())
-      .sort((left, right) => left.label.localeCompare(right.label))
-      .map((bucket) => ({
-        label: bucket.label,
-        bucketSize: bucket.sessions,
-        interactionsPerHour: round(bucket.interactionsPerHourSum / Math.max(1, bucket.sessions), 2),
-        presenceRate: round(bucket.presenceRateSum / Math.max(1, bucket.sessions), 1),
-        participationRate: round(bucket.participationRateSum / Math.max(1, bucket.sessions), 1),
-        efficiencyGap: round(bucket.efficiencyGapSum / Math.max(1, bucket.sessions), 1),
-      }));
-  }, [currentSessionRows, drilldownMode]);
+    return map;
+  }, [studentRows, bundledSessionRows, attendanceBySessionId, logsBySessionId]);
 
-  const selectedSessionLogs = useMemo(
-    () =>
-      (selectedBundle?.session_ids || []).flatMap((sessionId) => getSessionBucket(logsBySessionId, sessionId)),
-    [logsBySessionId, selectedBundle]
-  );
+  const selectedStudentHistory = useMemo(() => {
+    if (!selectedStudent) return [];
 
-  const selectedStudentSessionLogs = useMemo(
-    () =>
-      (selectedStudentBundle?.session_ids || []).flatMap((sessionId) => getSessionBucket(logsBySessionId, sessionId)),
-    [logsBySessionId, selectedStudentBundle]
-  );
+    const keys = getStudentIdentityKeys(selectedStudent);
+    for (const key of keys) {
+      const history = studentHistoryMap.get(key);
+      if (history) return history;
+    }
 
-  const allSessionLogs = useMemo(
-    () => sessionIds.flatMap((sessionId) => getSessionBucket(logsBySessionId, sessionId)),
-    [sessionIds, logsBySessionId]
-  );
+    return [];
+  }, [selectedStudent, studentHistoryMap]);
 
-  const selectedAttendanceRows = useMemo(
-    () => {
-      const rawRows = (selectedBundle?.session_ids || []).flatMap((sessionId) => attendanceBySessionId.get(sessionId) || []);
-      return mergeAttendanceRecords(rawRows);
-    },
-    [attendanceBySessionId, selectedBundle]
-  );
-
-  const selectedStudentAttendanceRows = useMemo(
-    () => {
-      const rawRows = (selectedStudentBundle?.session_ids || []).flatMap((sessionId) => attendanceBySessionId.get(sessionId) || []);
-      return mergeAttendanceRecords(rawRows);
-    },
-    [attendanceBySessionId, selectedStudentBundle]
-  );
-
-  const selectedSession = useMemo(() => {
-    if (!selectedBundle) return null;
-
-    const totals = selectedBundle.participationTotals || createEmptyInteractionTotals();
-    const duration = Math.max(1, toNumber(selectedBundle.actual_total_minutes));
-    const coreCreditMinutes = Math.max(1, toNumber(selectedBundle.core_credit_minutes));
-    const pulseEngagementScore = round(
-      ((toNumber(totals.speakingProxyMinutes) * WEIGHTS.mic) +
-        (toNumber(totals.reaction) * WEIGHTS.reaction) +
-        (toNumber(totals.chat) * WEIGHTS.chat)) /
-        duration,
-      2
+  const selectedStudentClassAverages = useMemo(() => {
+    const totals = studentRows.reduce(
+      (acc, student) => {
+        acc.attendance += toNumber(student.attendance_rate);
+        acc.engagement += toNumber(student.engagement_score);
+        acc.count += 1;
+        return acc;
+      },
+      { attendance: 0, engagement: 0, count: 0 }
     );
 
     return {
-      pulse_engagement_score: pulseEngagementScore,
-      core_credit_minutes: coreCreditMinutes,
-      normalized_attendance_pct: round((duration / coreCreditMinutes) * 100, 1),
+      attendance: totals.count > 0 ? round(totals.attendance / totals.count, 1) : 0,
+      engagement: totals.count > 0 ? round(totals.engagement / totals.count, 1) : 0,
     };
-  }, [selectedBundle]);
+  }, [studentRows]);
 
-  const pulseWindow = useMemo(() => {
-    return buildPulseWindowFromBundle(selectedBundle);
-  }, [selectedBundle]);
+  const selectedStudentRecentHistory = useMemo(() => {
+    if (selectedStudentHistory.length === 0) return [];
 
-  const studentPulseWindow = useMemo(() => buildPulseWindowFromBundle(selectedStudentBundle), [selectedStudentBundle]);
-
-  const studentsForProfile = useMemo(() => {
-    if (studentScope !== 'pulse-session' || !studentPulseWindow) {
-      return enrichedStudents;
+    const lastDate = selectedStudentHistory[selectedStudentHistory.length - 1]?.date;
+    const lastDateObject = lastDate ? new Date(lastDate) : null;
+    if (!lastDateObject || Number.isNaN(lastDateObject.getTime())) {
+      return selectedStudentHistory.slice(-5);
     }
 
-    const parseAdditionalData = (log) => {
-      if (!log?.additional_data) return null;
-      if (typeof log.additional_data === 'string') {
-        try {
-          return JSON.parse(log.additional_data);
-        } catch {
-          return null;
-        }
-      }
-      return log.additional_data;
-    };
+    const cutoff = new Date(lastDateObject);
+    cutoff.setDate(cutoff.getDate() - 7);
 
-    const byStudent = new Map();
-
-    selectedStudentAttendanceRows.forEach((row) => {
-      const key = row.student_id
-        ? `student:${row.student_id}`
-        : `name:${normalizeName(row.student_name || row.participant_name)}`;
-
-      const durationMinutes = toNumber(row.total_duration_minutes);
-      const attendanceRate = round((durationMinutes / Math.max(1, studentPulseWindow.creditMinutes)) * 100, 1);
-
-      byStudent.set(key, {
-        id: row.student_id || key,
-        full_name: row.student_name || row.participant_name || 'Unknown student',
-        student_id: row.student_id || null,
-        student_number: row.student_number || null,
-        attendance_rate: attendanceRate,
-        avg_duration_minutes: durationMinutes,
-        total_interactions: 0,
-        chat_messages: 0,
-        reactions: 0,
-        hand_raises: 0,
-        mic_toggles: 0,
-        speaking_proxy_minutes: 0,
-        sessions_with_activity: 0,
-      });
+    const weeklyHistory = selectedStudentHistory.filter((entry) => {
+      const entryDate = entry?.date ? new Date(entry.date) : null;
+      return entryDate && !Number.isNaN(entryDate.getTime()) && entryDate >= cutoff;
     });
 
-    selectedStudentSessionLogs.forEach((log) => {
-      const fallbackName = log.full_name || log.student_name || log.participant_name || 'Unknown student';
-      const key = log.student_id
-        ? `student:${log.student_id}`
-        : `name:${normalizeName(fallbackName)}`;
+    return weeklyHistory.length > 0 ? weeklyHistory : selectedStudentHistory.slice(-5);
+  }, [selectedStudentHistory]);
 
-      if (!byStudent.has(key)) {
-        byStudent.set(key, {
-          id: log.student_id || key,
-          full_name: fallbackName,
-          student_id: log.student_id || null,
-          student_number: log.student_number || null,
-          attendance_rate: 0,
-          avg_duration_minutes: 0,
-          total_interactions: 0,
-          chat_messages: 0,
-          reactions: 0,
-          hand_raises: 0,
-          mic_toggles: 0,
-          speaking_proxy_minutes: 0,
-          sessions_with_activity: 0,
-        });
-      }
+  const selectedStudentBehavior = useMemo(() => {
+    if (!selectedStudent) {
+      return {
+        relativeStanding: 'No student selected',
+        reliabilityScore: 0,
+        reliabilityLabel: 'Unknown',
+        velocityDelta: 0,
+        velocityDirection: 'flat',
+        semesterSignalAverage: 0,
+        recentSignalAverage: 0,
+        historyCount: 0,
+        lurker: false,
+        signalMix: {
+          direct: 0,
+          expressive: 0,
+          passive: 0,
+        },
+      };
+    }
 
-      const entry = byStudent.get(key);
-      entry.total_interactions += 1;
+    const semesterSignalAverage = selectedStudentHistory.length > 0
+      ? round(selectedStudentHistory.reduce((sum, row) => sum + toNumber(row.heatmapSignals), 0) / selectedStudentHistory.length, 1)
+      : 0;
 
-      if (log.interaction_type === 'chat') entry.chat_messages += 1;
-      if (log.interaction_type === 'reaction') entry.reactions += 1;
-      if (log.interaction_type === 'hand_raise') entry.hand_raises += 1;
-      if (log.interaction_type === 'mic_toggle') {
-        entry.mic_toggles += 1;
-        const additional = parseAdditionalData(log) || {};
-        const speakingSeconds = toNumber(additional.speakingDurationSeconds || additional.speaking_duration_seconds);
-        if (speakingSeconds > 0) {
-          entry.speaking_proxy_minutes += speakingSeconds / 60;
-        }
-      }
-    });
+    const recentSignalAverage = selectedStudentRecentHistory.length > 0
+      ? round(selectedStudentRecentHistory.reduce((sum, row) => sum + toNumber(row.heatmapSignals), 0) / selectedStudentRecentHistory.length, 1)
+      : 0;
 
-    const rows = Array.from(byStudent.values());
-    const classAveragesScoped = {
-      avgDurationMinutes: rows.length > 0
-        ? rows.reduce((sum, row) => sum + toNumber(row.avg_duration_minutes), 0) / rows.length
-        : 0,
+    const velocityDelta = round(recentSignalAverage - semesterSignalAverage, 1);
+    const velocityDirection = velocityDelta > 0 ? 'up' : velocityDelta < 0 ? 'down' : 'flat';
+    const reliabilityScore = selectedStudentHistory.length > 0
+      ? round(selectedStudentHistory.reduce((sum, row) => sum + toNumber(row.stabilityScore), 0) / selectedStudentHistory.length, 1)
+      : 0;
+    const reliabilityLabel = reliabilityScore >= 80 ? 'High Stability' : reliabilityScore >= 55 ? 'Moderate Stability' : 'Low Stability';
+
+    const signalMix = selectedStudentHistory.reduce(
+      (acc, row) => {
+        acc.direct += toNumber(row.directInteractions);
+        acc.expressive += toNumber(row.expressiveInteractions);
+        acc.passive += toNumber(row.passiveInteractions);
+        return acc;
+      },
+      { direct: 0, expressive: 0, passive: 0 }
+    );
+
+    const attendanceAverage = toNumber(selectedStudent.attendance_rate);
+    const engagementAverage = toNumber(selectedStudent.engagement_score);
+    const classAttendanceAverage = selectedStudentClassAverages.attendance;
+    const classEngagementAverage = selectedStudentClassAverages.engagement;
+
+    let relativeStanding = 'Typical';
+    if (attendanceAverage >= classAttendanceAverage + 10 && engagementAverage >= classEngagementAverage + 10) {
+      relativeStanding = 'Active Participant';
+    } else if (attendanceAverage >= classAttendanceAverage + 10 && engagementAverage <= classEngagementAverage - 10) {
+      relativeStanding = 'Quiet but Present';
+    } else if (velocityDelta >= 3) {
+      relativeStanding = 'Improving';
+    } else if (attendanceAverage <= classAttendanceAverage - 10 || engagementAverage <= classEngagementAverage - 10) {
+      relativeStanding = 'Concerning';
+    }
+
+    return {
+      relativeStanding,
+      reliabilityScore,
+      reliabilityLabel,
+      velocityDelta,
+      velocityDirection,
+      semesterSignalAverage,
+      recentSignalAverage,
+      historyCount: selectedStudentHistory.length,
+      lurker: selectedStudent.attendance_rate >= 80 && signalMix.direct + signalMix.expressive === 0,
+      signalMix,
     };
-    const maxInteractions = Math.max(1, ...rows.map((row) => toNumber(row.total_interactions)));
-    const maxSpeaking = Math.max(1, ...rows.map((row) => toNumber(row.speaking_proxy_minutes)));
+  }, [selectedStudent, selectedStudentHistory, selectedStudentRecentHistory, selectedStudentClassAverages]);
 
-    return rows
-      .map((row) => ({
-        ...row,
-        sessions_with_activity: row.total_interactions > 0 ? 1 : 0,
-        speaking_proxy_minutes: round(row.speaking_proxy_minutes, 2),
-        engagement_score: computeEngagementScore({
-          attendanceRate: toNumber(row.attendance_rate),
-          avgDurationMinutes: toNumber(row.avg_duration_minutes),
-          totalInteractions: toNumber(row.total_interactions),
-          speakingProxyMinutes: toNumber(row.speaking_proxy_minutes),
-          classAverages: classAveragesScoped,
-          classMaxima: {
-            totalInteractions: maxInteractions,
-            speakingProxyMinutes: maxSpeaking,
-          },
-        }),
-      }))
-      .sort((left, right) => left.full_name.localeCompare(right.full_name));
-  }, [studentScope, enrichedStudents, selectedStudentAttendanceRows, selectedStudentSessionLogs, studentPulseWindow]);
+  const studentOverviewRows = useMemo(() => {
+    return studentRows.map((student) => {
+      const history = getStudentIdentityKeys(student).map((key) => studentHistoryMap.get(key)).find(Boolean) || [];
+      const sparklineValues = history.slice(-5).map((row) => toNumber(row.heatmapSignals));
+      const lastKnownRow = [...history].reverse().find((row) => row.status !== 'Absent') || history[history.length - 1] || null;
+      const lastActiveAt = lastKnownRow?.lastActiveAt || lastKnownRow?.date || null;
+      const lastActiveDate = lastActiveAt ? new Date(lastActiveAt) : null;
+      const isCurrentSession = lastActiveDate && !Number.isNaN(lastActiveDate.getTime())
+        ? Date.now() - lastActiveDate.getTime() < (24 * 60 * 60 * 1000)
+        : false;
 
-  useEffect(() => {
-    if (studentsForProfile.length === 0) {
-      setProfiledStudentId(null);
-      return;
-    }
+      return {
+        ...student,
+        history,
+        sparklineValues,
+        lastActiveAt,
+        lastActiveLabel: isCurrentSession ? 'Current Session' : formatRelativeTime(lastActiveAt),
+        lurker: history.some((row) => row.isLurker),
+      };
+    });
+  }, [studentRows, studentHistoryMap]);
 
-    const hasCurrent = studentsForProfile.some((student) => String(student.id) === String(profiledStudentId));
-    if (!hasCurrent) {
-      setProfiledStudentId(studentsForProfile[0].id);
-    }
-  }, [studentsForProfile, profiledStudentId]);
+  const selectedStudentSignalMixData = useMemo(() => ([
+    { name: 'Direct Interaction', value: selectedStudentBehavior.signalMix.direct, color: '#2563eb' },
+    { name: 'Expressive Interaction', value: selectedStudentBehavior.signalMix.expressive, color: '#f59e0b' },
+    { name: 'Passive Metadata', value: selectedStudentBehavior.signalMix.passive, color: '#64748b' },
+  ]), [selectedStudentBehavior]);
+
+  const selectedStudentHeatmapMax = useMemo(() => {
+    return Math.max(1, ...selectedStudentHistory.map((row) => toNumber(row.heatmapSignals)));
+  }, [selectedStudentHistory]);
+
+  const selectedStudentHeatmapSummary = useMemo(() => {
+    const totalSignals = selectedStudentHistory.reduce((sum, row) => sum + toNumber(row.heatmapSignals), 0);
+    const peakRow = selectedStudentHistory.reduce((best, row) => {
+      if (!best) return row;
+      return toNumber(row.heatmapSignals) > toNumber(best.heatmapSignals) ? row : best;
+    }, null);
+
+    return {
+      sessionsTracked: selectedStudentHistory.length,
+      totalSignals: round(totalSignals, 1),
+      averageSignals: selectedStudentHistory.length > 0 ? round(totalSignals / selectedStudentHistory.length, 1) : 0,
+      peakSignals: peakRow ? round(toNumber(peakRow.heatmapSignals), 1) : 0,
+      peakDate: peakRow?.date || null,
+    };
+  }, [selectedStudentHistory]);
 
   const synchronizedTimeline = useMemo(() => {
-    if (!selectedBundle || !pulseWindow) return [];
+    if (!selectedSession) return [];
 
-    const bucketSize = pulseWindow.spanMinutes > 120 ? 10 : 5;
-    const bucketCount = Math.max(1, Math.ceil(pulseWindow.spanMinutes / bucketSize));
+    const sourceSessionIds = Array.isArray(selectedSession.source_session_ids)
+      ? selectedSession.source_session_ids.map((id) => String(id))
+      : selectedSession?.id
+        ? [String(selectedSession.id)]
+        : [];
+
+    const sourceSessions = sourceSessionIds
+      .map((sessionId) => sessionRows.find((row) => String(row.id) === sessionId))
+      .filter(Boolean);
+
+    const starts = sourceSessions
+      .map((session) => session?.started_at ? new Date(session.started_at) : null)
+      .filter((date) => date && !Number.isNaN(date.getTime()));
+    const ends = sourceSessions
+      .map((session) => session?.ended_at ? new Date(session.ended_at) : null)
+      .filter((date) => date && !Number.isNaN(date.getTime()));
+
+    let sessionStart = starts.length > 0 ? new Date(Math.min(...starts.map((date) => date.getTime()))) : null;
+    let sessionEnd = ends.length > 0 ? new Date(Math.max(...ends.map((date) => date.getTime()))) : null;
+
+    if (!sessionStart || Number.isNaN(sessionStart.getTime())) {
+      const fallbackStart = selectedSession?.session_date ? new Date(selectedSession.session_date) : null;
+      sessionStart = fallbackStart && !Number.isNaN(fallbackStart.getTime()) ? fallbackStart : null;
+    }
+    if ((!sessionEnd || Number.isNaN(sessionEnd.getTime())) && sessionStart) {
+      sessionEnd = new Date(sessionStart.getTime() + (Math.max(1, toNumber(selectedSession.avg_duration_minutes)) * 60 * 1000));
+    }
+    if (!sessionStart || !sessionEnd || Number.isNaN(sessionStart.getTime()) || Number.isNaN(sessionEnd.getTime()) || sessionEnd <= sessionStart) {
+      return [];
+    }
+
+    const allLogs = sourceSessionIds.flatMap((sessionId) => getSessionBucket(logsBySessionId, sessionId));
+    const spanMinutes = Math.max(1, diffMinutes(sessionEnd, sessionStart));
+    const bucketSize = spanMinutes > 120 ? 10 : 5;
+    const bucketCount = Math.max(1, Math.ceil(spanMinutes / bucketSize) + 1);
     const buckets = Array.from({ length: bucketCount }, (_, index) => {
       const minute = index * bucketSize;
-      const labelTime = new Date(pulseWindow.start.getTime() + minute * 60 * 1000);
       return {
         minute,
-        label: labelTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+        label: `${minute}m`,
         chat: 0,
         reaction: 0,
         handRaise: 0,
         micToggle: 0,
         activity: 0,
+        activityShade: 0,
       };
     });
 
-    selectedSessionLogs.forEach((log) => {
+    allLogs.forEach((log) => {
       const timestamp = log?.timestamp ? new Date(log.timestamp) : null;
       if (!timestamp || Number.isNaN(timestamp.getTime())) return;
-      if (timestamp < pulseWindow.start || timestamp > pulseWindow.end) return;
+      if (timestamp < sessionStart || timestamp > sessionEnd) return;
 
-      const minuteOffset = diffMinutes(timestamp, pulseWindow.start);
+      const minuteOffset = diffMinutes(timestamp, sessionStart);
       const bucketIndex = Math.min(buckets.length - 1, Math.floor(minuteOffset / bucketSize));
       const bucket = buckets[bucketIndex];
       const interaction = log?.interaction_type;
@@ -1314,1235 +1178,1343 @@ const ClassAnalytics = ({ classId, onSelectStudent }) => {
       if (interaction === 'hand_raise') bucket.handRaise += 1;
       if (interaction === 'mic_toggle') bucket.micToggle += 1;
       bucket.activity = bucket.chat + bucket.reaction + bucket.handRaise + bucket.micToggle;
+      bucket.activityShade = bucket.activity;
     });
 
     return buckets;
-  }, [selectedBundle, selectedSessionLogs, pulseWindow]);
+  }, [selectedSession, logsBySessionId, sessionRows]);
 
-  const peakMoment = useMemo(() => {
-    if (synchronizedTimeline.length === 0) return null;
-    return [...synchronizedTimeline].sort((left, right) => right.reaction - left.reaction || right.activity - left.activity)[0];
-  }, [synchronizedTimeline]);
+  const selectedSessionWindow = useMemo(() => {
+    if (!selectedSession) return null;
 
-  const presenceRows = useMemo(() => {
-    if (!pulseWindow) return [];
-
-    return selectedAttendanceRows
-      .map((record) => {
-        const intervals = (record.intervals || [])
-          .map((interval) => {
-            const start = new Date(interval.joined_at);
-            const end = interval.left_at ? new Date(interval.left_at) : pulseWindow.end;
-            if (
-              Number.isNaN(start.getTime()) ||
-              Number.isNaN(end.getTime()) ||
-              end <= pulseWindow.start ||
-              start >= pulseWindow.end
-            ) {
-              return null;
-            }
-
-            const clippedStart = new Date(Math.max(start.getTime(), pulseWindow.start.getTime()));
-            const clippedEnd = new Date(Math.min(end.getTime(), pulseWindow.end.getTime()));
-
-            const leftPct = ((clippedStart.getTime() - pulseWindow.start.getTime()) / (pulseWindow.spanMinutes * 60 * 1000)) * 100;
-            const widthPct = ((clippedEnd.getTime() - clippedStart.getTime()) / (pulseWindow.spanMinutes * 60 * 1000)) * 100;
-
-            return {
-              start: clippedStart,
-              end: clippedEnd,
-              leftPct,
-              widthPct,
-            };
-          })
-          .filter(Boolean);
-
-        const rawMinutes = intervals.reduce((sum, segment) => sum + diffMinutes(segment.end, segment.start), 0);
-        const deductedBreakMinutes = pulseWindow.breakSegments.reduce((sum, breakSegment) => {
-          return (
-            sum +
-            intervals.reduce(
-              (inner, interval) => inner + overlapMinutes(interval.start, interval.end, breakSegment.start, breakSegment.end),
-              0
-            )
-          );
-        }, 0);
-
-        const creditedMinutes = Math.max(0, rawMinutes - deductedBreakMinutes);
-
-        return {
-          id: record.student_id || record.participant_name,
-          studentId: record.student_id,
-          name: record.student_name || record.participant_name || 'Unknown participant',
-          intervals,
-          creditedPct: round((creditedMinutes / pulseWindow.creditMinutes) * 100, 1),
-        };
-      })
-      .sort((left, right) => right.creditedPct - left.creditedPct);
-  }, [selectedAttendanceRows, pulseWindow]);
-
-  const reactionDiversityByStudent = useMemo(() => {
-    const map = new Map();
-    const sourceLogs = studentScope === 'pulse-session' ? selectedStudentSessionLogs : allSessionLogs;
-
-    sourceLogs.forEach((log) => {
-      if (log?.interaction_type !== 'reaction') return;
-      const studentId = log?.student_id;
-      if (!studentId) return;
-      const reaction = log?.additional_data?.reaction || log?.interaction_value || log?.reaction || 'reaction';
-      if (!map.has(studentId)) map.set(studentId, new Set());
-      map.get(studentId).add(String(reaction));
-    });
-    return map;
-  }, [studentScope, selectedStudentSessionLogs, allSessionLogs]);
-
-  const profiledStudent = useMemo(
-    () => studentsForProfile.find((student) => String(student.id) === String(profiledStudentId)) || null,
-    [studentsForProfile, profiledStudentId]
-  );
-
-  const profileRadarComparisonData = useMemo(() => {
-    if (!profiledStudent || studentsForProfile.length === 0) return [];
-
-    const avg = (values) => {
-      if (!Array.isArray(values) || values.length === 0) return 0;
-      return values.reduce((sum, value) => sum + toNumber(value), 0) / values.length;
-    };
-
-    const maxChat = Math.max(1, ...studentsForProfile.map((item) => toNumber(item.chat_messages)));
-    const maxSpeak = Math.max(1, ...studentsForProfile.map((item) => toNumber(item.speaking_proxy_minutes)));
-    const maxHandRaise = Math.max(1, ...studentsForProfile.map((item) => toNumber(item.hand_raises)));
-    const diversityValues = studentsForProfile.map((item) => reactionDiversityByStudent.get(item.id)?.size || 0);
-    const maxDiversity = Math.max(1, ...diversityValues);
-
-    return [
-      {
-        axis: 'Attendance',
-        student: toNumber(profiledStudent.attendance_rate),
-        classAvg: avg(studentsForProfile.map((item) => toNumber(item.attendance_rate))),
-      },
-      {
-        axis: 'Mic Usage',
-        student: round((toNumber(profiledStudent.speaking_proxy_minutes) / maxSpeak) * 100, 1),
-        classAvg: round(avg(studentsForProfile.map((item) => (toNumber(item.speaking_proxy_minutes) / maxSpeak) * 100)), 1),
-      },
-      {
-        axis: 'Chat Frequency',
-        student: round((toNumber(profiledStudent.chat_messages) / maxChat) * 100, 1),
-        classAvg: round(avg(studentsForProfile.map((item) => (toNumber(item.chat_messages) / maxChat) * 100)), 1),
-      },
-      {
-        axis: 'Reaction Diversity',
-        student: round(((reactionDiversityByStudent.get(profiledStudent.id)?.size || 0) / maxDiversity) * 100, 1),
-        classAvg: round(avg(studentsForProfile.map((item) => ((reactionDiversityByStudent.get(item.id)?.size || 0) / maxDiversity) * 100)), 1),
-      },
-      {
-        axis: 'Hand Raises',
-        student: round((toNumber(profiledStudent.hand_raises) / maxHandRaise) * 100, 1),
-        classAvg: round(avg(studentsForProfile.map((item) => (toNumber(item.hand_raises) / maxHandRaise) * 100)), 1),
-      },
-    ];
-  }, [profiledStudent, studentsForProfile, reactionDiversityByStudent]);
-
-  const studentPersona = useMemo(() => {
-    if (!profiledStudent) return 'N/A';
-
-    const attendance = toNumber(profiledStudent.attendance_rate);
-    const chat = toNumber(profiledStudent.chat_messages);
-    const speak = toNumber(profiledStudent.speaking_proxy_minutes);
-
-    if (attendance >= 85 && (chat >= 8 || speak >= 5)) return 'Vocal Contributor';
-    if (attendance >= 85 && chat < 8 && speak < 5) return 'Reliable Listener';
-    if (attendance >= 70 && (chat >= 5 || speak >= 3)) return 'Consistent Participant';
-    if (attendance < 70 && (chat < 3 && speak < 2)) return 'Passive Observer';
-    return 'Emerging Participant';
-  }, [profiledStudent]);
-
-  const resilienceByStudent = useMemo(() => {
-    const map = new Map();
-    if (studentScope !== 'pulse-session' || !studentPulseWindow || studentPulseWindow.breakSegments.length === 0) {
-      return map;
-    }
-
-    const meaningfulBreaks = studentPulseWindow.breakSegments.filter(
-      (segment) => diffMinutes(segment.end, segment.start) >= 20
-    );
-
-    if (meaningfulBreaks.length === 0) return map;
-
-    selectedStudentAttendanceRows.forEach((row) => {
-      const rowKey = row.student_id || `name:${normalizeName(row.student_name || row.participant_name)}`;
-      const rowIntervals = (row.intervals || [])
-        .map((interval) => {
-          const start = interval?.joined_at ? new Date(interval.joined_at) : null;
-          const end = interval?.left_at ? new Date(interval.left_at) : studentPulseWindow.end;
-          if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
-          return { start, end };
-        })
-        .filter(Boolean);
-
-      const resilient = meaningfulBreaks.some((breakSegment) => {
-        const before = rowIntervals.some((segment) => segment.start < breakSegment.start);
-        const after = rowIntervals.some((segment) => segment.end > breakSegment.end);
-        return before && after;
+    const fragments = [];
+    if (Array.isArray(selectedSession.sessions) && selectedSession.sessions.length > 0) {
+      selectedSession.sessions.forEach((fragment) => {
+        const start = fragment?.start_at ? new Date(fragment.start_at) : null;
+        const end = fragment?.end_at ? new Date(fragment.end_at) : null;
+        if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return;
+        fragments.push({ start, end });
       });
+    }
 
-      map.set(rowKey, resilient);
-      if (row.student_id) {
-        map.set(row.student_id, resilient);
-      }
-    });
+    if (fragments.length === 0 && Array.isArray(selectedSession.source_session_ids)) {
+      selectedSession.source_session_ids.forEach((sessionId) => {
+        const source = sessionRows.find((row) => String(row.id) === String(sessionId));
+        if (!source?.started_at) return;
 
-    return map;
-  }, [studentScope, selectedStudentAttendanceRows, studentPulseWindow]);
+        const start = new Date(source.started_at);
+        const fallbackEnd = new Date(start.getTime() + (Math.max(1, toNumber(source.avg_duration_minutes)) * 60 * 1000));
+        const parsedEnd = source.ended_at ? new Date(source.ended_at) : fallbackEnd;
+        const end = Number.isNaN(parsedEnd.getTime()) ? fallbackEnd : parsedEnd;
 
-  const longitudinalAttendanceData = useMemo(() => {
-    return enrichedSessions.map((session) => {
-      const attendanceRows = attendanceBySessionId.get(session.id) || [];
-      const minutesAttended = round(attendanceRows.reduce((sum, row) => sum + toNumber(row.total_duration_minutes), 0), 1);
-
-      return {
-        date: resolveSessionDate(session)?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) || 'Unknown',
-        minutesAttended,
-        normalizedAttendance: toNumber(session.normalized_attendance_pct),
-      };
-    });
-  }, [enrichedSessions, attendanceBySessionId]);
-
-  const lateJoinerData = useMemo(() => {
-    const byStudent = new Map();
-
-    enrichedSessions.forEach((session) => {
-      const sessionStart = resolveSessionDate(session);
-      if (!sessionStart) return;
-
-      const attendanceRows = attendanceBySessionId.get(session.id) || [];
-      attendanceRows.forEach((row) => {
-        if (!row.student_id) return;
-        const firstJoined = row.first_joined_at
-          ? new Date(row.first_joined_at)
-          : row.intervals?.[0]?.joined_at
-            ? new Date(row.intervals[0].joined_at)
-            : null;
-
-        if (!firstJoined || Number.isNaN(firstJoined.getTime())) return;
-
-        const lateMinutes = Math.max(0, diffMinutes(firstJoined, sessionStart));
-        if (!byStudent.has(row.student_id)) {
-          byStudent.set(row.student_id, {
-            studentId: row.student_id,
-            name: row.student_name || row.participant_name || 'Unknown student',
-            totalLateMinutes: 0,
-            sessions: 0,
-          });
-        }
-
-        const item = byStudent.get(row.student_id);
-        item.totalLateMinutes += lateMinutes;
-        item.sessions += 1;
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return;
+        fragments.push({ start, end });
       });
-    });
-
-    return Array.from(byStudent.values()).map((item) => ({
-      studentId: item.studentId,
-      name: item.name,
-      avgLateMinutes: round(item.totalLateMinutes / Math.max(1, item.sessions), 1),
-      sessions: item.sessions,
-    }));
-  }, [enrichedSessions, attendanceBySessionId]);
-
-  const studentHighlights = useMemo(() => {
-    if (!profiledStudent) return { strengths: [], concerns: [], resilience: null };
-
-    const total = Math.max(1, studentsForProfile.length);
-    const rankDesc = (selector) => {
-      const sorted = [...studentsForProfile].sort((left, right) => toNumber(selector(right)) - toNumber(selector(left)));
-      const index = sorted.findIndex((student) => String(student.id) === String(profiledStudent.id));
-      return index >= 0 ? index + 1 : total;
-    };
-
-    const attendanceRank = rankDesc((student) => student.attendance_rate);
-    const engagementRank = rankDesc((student) => student.engagement_score);
-
-    let classAvgLate = 0;
-    let studentLate = 0;
-
-    if (studentScope === 'pulse-session') {
-      const latencyRows = selectedStudentAttendanceRows
-        .map((row) => {
-          const firstJoined = row.first_joined_at ? new Date(row.first_joined_at) : null;
-          if (!firstJoined || !studentPulseWindow || Number.isNaN(firstJoined.getTime())) return null;
-          return {
-            id: row.student_id || `name:${normalizeName(row.student_name || row.participant_name)}`,
-            lateMinutes: Math.max(0, diffMinutes(firstJoined, studentPulseWindow.start)),
-          };
-        })
-        .filter(Boolean);
-
-      classAvgLate = latencyRows.length > 0
-        ? latencyRows.reduce((sum, row) => sum + toNumber(row.lateMinutes), 0) / latencyRows.length
-        : 0;
-      studentLate = toNumber(
-        latencyRows.find((row) => String(row.id) === String(profiledStudent.id))?.lateMinutes,
-        0
-      );
-    } else {
-      classAvgLate = lateJoinerData.length > 0
-        ? lateJoinerData.reduce((sum, row) => sum + toNumber(row.avgLateMinutes), 0) / lateJoinerData.length
-        : 0;
-      studentLate = toNumber(lateJoinerData.find((row) => String(row.studentId) === String(profiledStudent.id))?.avgLateMinutes, 0);
     }
 
-    const meaningfulBreakCount = (studentPulseWindow?.breakSegments || []).filter(
-      (segment) => diffMinutes(segment.end, segment.start) >= 20
-    ).length;
-    const hasMeaningfulBreaks = meaningfulBreakCount > 0;
-    const isResilient = hasMeaningfulBreaks ? !!resilienceByStudent.get(profiledStudent.id) : null;
+    if (fragments.length === 0) return null;
 
-    const strengths = [];
-    const concerns = [];
+    const sorted = [...fragments].sort((left, right) => left.start.getTime() - right.start.getTime());
+    const start = sorted[0].start;
+    const end = sorted[sorted.length - 1].end;
+    const breakSegments = [];
 
-    if (attendanceRank <= Math.max(1, Math.ceil(total * 0.3))) {
-      strengths.push(`Attendance strength: ranked #${attendanceRank} of ${total}.`);
+    for (let index = 0; index < sorted.length - 1; index += 1) {
+      const current = sorted[index];
+      const next = sorted[index + 1];
+      if (next.start <= current.end) continue;
+      breakSegments.push({ start: current.end, end: next.start });
     }
 
-    if (engagementRank <= Math.max(1, Math.ceil(total * 0.35))) {
-      strengths.push(`Engagement strength: ranked #${engagementRank} of ${total}.`);
-    }
-
-    if (classAvgLate > 0 && studentLate <= classAvgLate * 0.6) {
-      strengths.push(`Joins ${round(classAvgLate - studentLate, 1)}m earlier than class average.`);
-    }
-
-    if (hasMeaningfulBreaks && !isResilient) {
-      const firstBreak = studentPulseWindow?.breakSegments?.[0] || null;
-      const gapText = firstBreak
-        ? `${firstBreak.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })} - ${firstBreak.end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
-        : 'post-break';
-      concerns.push(`Dropout risk: did not return after ${gapText}.`);
-    }
-
-    if (attendanceRank > Math.ceil(total * 0.7)) {
-      concerns.push(`Attendance concern: ranked #${attendanceRank} of ${total}.`);
-    }
-
-    if (classAvgLate > 0 && studentLate >= classAvgLate * 1.4) {
-      concerns.push(`Late-join concern: joins ${round(studentLate - classAvgLate, 1)}m later than class average.`);
-    }
+    const spanMinutes = Math.max(1, diffMinutes(end, start));
+    const breakMinutes = breakSegments.reduce((sum, segment) => sum + diffMinutes(segment.end, segment.start), 0);
 
     return {
-      strengths: strengths.slice(0, 2),
-      concerns: concerns.slice(0, 2),
-      resilience: isResilient,
-      hasMeaningfulBreaks,
+      start,
+      end,
+      spanMinutes,
+      breakSegments,
+      breakMinutes,
+      creditMinutes: Math.max(1, spanMinutes - breakMinutes),
     };
-  }, [
-    profiledStudent,
-    studentsForProfile,
-    studentScope,
-    selectedStudentAttendanceRows,
-    lateJoinerData,
-    resilienceByStudent,
-    studentPulseWindow,
-  ]);
+  }, [selectedSession, sessionRows]);
 
-  const weeklyActivePassiveData = useMemo(() => {
-    const map = new Map();
+  const presenceRows = useMemo(() => {
+    if (!selectedSession || !selectedSessionWindow) return [];
 
-    enrichedSessions.forEach((session) => {
-      const date = resolveSessionDate(session);
-      if (!date) return;
+    const sourceSessionIds = Array.isArray(selectedSession.source_session_ids)
+      ? selectedSession.source_session_ids.map((id) => String(id))
+      : [];
 
-      const weekKey = getWeekKey(date);
-      const attendanceRows = attendanceBySessionId.get(session.id) || [];
-      const totalMinutes = attendanceRows.reduce((sum, row) => sum + toNumber(row.total_duration_minutes), 0);
-
-      const activeMinutes =
-        toNumber(session.speaking_proxy_minutes) +
-        toNumber(session.chat_count) * 0.2 +
-        toNumber(session.reaction_count) * 0.1 +
-        toNumber(session.hand_raise_count) * 0.2 +
-        toNumber(session.mic_toggle_count) * 0.1;
-
-      if (!map.has(weekKey)) {
-        map.set(weekKey, { week: weekKey, active: 0, passive: 0 });
-      }
-
-      const week = map.get(weekKey);
-      week.active += activeMinutes;
-      week.passive += Math.max(0, totalMinutes - activeMinutes);
+    const flattenedRows = sourceSessionIds.flatMap((sessionId) => {
+      const rows = getSessionBucket(attendanceBySessionId, sessionId);
+      return rows.map((row) => ({ ...row, _sessionId: sessionId }));
     });
 
-    return Array.from(map.values())
-      .sort((left, right) => left.week.localeCompare(right.week))
-      .map((item) => ({
-        week: item.week,
-        active: round(item.active, 1),
-        passive: round(item.passive, 1),
+    if (flattenedRows.length === 0) return [];
+
+    const merged = new Map();
+
+    flattenedRows.forEach((row) => {
+      const participantName = String(row?.student_name || row?.participant_name || 'Unknown participant').trim();
+      const key = row?.student_id ? `student:${row.student_id}` : `name:${participantName.toLowerCase()}`;
+
+      if (!merged.has(key)) {
+        merged.set(key, {
+          key,
+          studentId: row?.student_id || null,
+          name: participantName || 'Unknown participant',
+          intervals: [],
+        });
+      }
+
+      const current = merged.get(key);
+      const intervals = Array.isArray(row?.intervals) ? row.intervals : [];
+
+      intervals.forEach((interval) => {
+        const start = interval?.joined_at ? new Date(interval.joined_at) : null;
+        const end = interval?.left_at ? new Date(interval.left_at) : selectedSessionWindow.end;
+        if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
+        if (end <= selectedSessionWindow.start || start >= selectedSessionWindow.end) return;
+
+        const clippedStart = new Date(Math.max(start.getTime(), selectedSessionWindow.start.getTime()));
+        const clippedEnd = new Date(Math.min(end.getTime(), selectedSessionWindow.end.getTime()));
+        if (clippedEnd <= clippedStart) return;
+
+        current.intervals.push({
+          start: clippedStart,
+          end: clippedEnd,
+        });
+      });
+    });
+
+    return [...merged.values()]
+      .map((row) => {
+        const sortedIntervals = [...row.intervals].sort((left, right) => left.start.getTime() - right.start.getTime());
+        const attendanceMinutes = sortedIntervals.reduce((sum, interval) => sum + diffMinutes(interval.end, interval.start), 0);
+        const deductedBreakMinutes = selectedSessionWindow.breakSegments.reduce(
+          (sum, segment) => sum + sortedIntervals.reduce(
+            (inner, interval) => inner + overlapMinutes(interval.start, interval.end, segment.start, segment.end),
+            0
+          ),
+          0
+        );
+        const creditedMinutes = Math.max(0, attendanceMinutes - deductedBreakMinutes);
+
+        const renderedIntervals = sortedIntervals.map((interval) => {
+          const leftPct = ((interval.start.getTime() - selectedSessionWindow.start.getTime()) / (selectedSessionWindow.spanMinutes * 60 * 1000)) * 100;
+          const widthPct = ((interval.end.getTime() - interval.start.getTime()) / (selectedSessionWindow.spanMinutes * 60 * 1000)) * 100;
+
+          return {
+            ...interval,
+            leftPct,
+            widthPct,
+          };
+        });
+
+        return {
+          ...row,
+          intervals: renderedIntervals,
+          attendanceMinutes,
+          creditedMinutes,
+          creditedPct: round((creditedMinutes / selectedSessionWindow.creditMinutes) * 100, 1),
+        };
+      })
+      .sort((left, right) => right.creditedMinutes - left.creditedMinutes);
+  }, [selectedSession, selectedSessionWindow, attendanceBySessionId]);
+
+  const summary = useMemo(() => {
+    if (bundledSessionRows.length === 0) {
+      return {
+        avgAttendanceRate: 0,
+        avgDuration: 0,
+        interactionsPerSession: 0,
+        totalSpeakingMinutes: 0,
+        activeStudentRate: 0,
+      };
+    }
+
+    const totals = bundledSessionRows.reduce(
+      (acc, row) => {
+        acc.attendance += toNumber(row.attendance_rate);
+        acc.duration += toNumber(row.avg_duration_minutes);
+        acc.interactions += toNumber(row.interactions);
+        acc.speaking += toNumber(row.speaking_proxy_minutes);
+        return acc;
+      },
+      { attendance: 0, duration: 0, interactions: 0, speaking: 0 }
+    );
+
+    const activeStudents = studentRows.filter((row) => toNumber(row.total_interactions) > 0).length;
+    const totalStudents = studentRows.length || 1;
+
+    return {
+      avgAttendanceRate: round(totals.attendance / bundledSessionRows.length, 1),
+      avgDuration: round(totals.duration / bundledSessionRows.length, 1),
+      interactionsPerSession: round(totals.interactions / bundledSessionRows.length, 1),
+      totalSpeakingMinutes: round(totals.speaking, 1),
+      activeStudentRate: round((activeStudents / totalStudents) * 100, 1),
+      avgEngagementScore: hasValidNumericValue(analytics?.overallStats?.avgEngagementScore)
+        ? round(toNumber(analytics.overallStats.avgEngagementScore), 1)
+        : round(
+          studentRows.reduce((sum, row) => sum + toNumber(row.engagement_score), 0) / (studentRows.length || 1),
+          1
+        ),
+    };
+  }, [analytics, bundledSessionRows, studentRows]);
+
+  const weeklyTrends = useMemo(() => {
+    const weeklyMap = new Map();
+    const aliasToCanonical = new Map();
+    const rosterCanonicalSet = new Set();
+
+    studentRows.forEach((student) => {
+      const canonical = student?.id
+        ? `student:${String(student.id)}`
+        : `name:${normalizeText(student?.full_name || student?.student_name || student?.participant_name)}`;
+
+      getStudentIdentityKeys(student).forEach((key) => {
+        aliasToCanonical.set(key, canonical);
+      });
+    });
+
+    sessionRows.forEach((row) => {
+      (row.attendanceRows || []).forEach((attendanceRow) => {
+        const attendanceKey = getEntityKey(attendanceRow);
+        if (!attendanceKey) return;
+        const canonicalAttendanceKey = aliasToCanonical.get(attendanceKey) || attendanceKey;
+        aliasToCanonical.set(attendanceKey, canonicalAttendanceKey);
+        rosterCanonicalSet.add(canonicalAttendanceKey);
+      });
+    });
+
+    const classStudentCount = Math.max(1, rosterCanonicalSet.size, studentRows.length);
+
+    sessionRows.forEach((row) => {
+      const rawDate = row.session_date ? new Date(row.session_date) : null;
+      if (!rawDate || Number.isNaN(rawDate.getTime())) return;
+
+      const weekStart = getWeekStart(rawDate);
+      const key = weekStart.toISOString();
+
+      if (!weeklyMap.has(key)) {
+        weeklyMap.set(key, {
+          weekKey: key,
+          week: weekStart.toLocaleDateString(),
+          weekStart,
+          sessions: 0,
+          attendanceTotal: 0,
+          engagementTotal: 0,
+          activeStudentCount: 0,
+          activeRateTotal: 0,
+          activeStudentSet: new Set(),
+          retainedStudents: 0,
+          attendanceRowsTotal: 0,
+          chat: 0,
+          reaction: 0,
+          handRaise: 0,
+          micToggle: 0,
+          eventTags: [],
+        });
+      }
+
+      const bucket = weeklyMap.get(key);
+      bucket.sessions += 1;
+      bucket.attendanceTotal += toNumber(row.attendance_rate);
+      bucket.engagementTotal += toNumber(row.interactions);
+      bucket.chat += toNumber(row.chat);
+      bucket.reaction += toNumber(row.reaction);
+      bucket.handRaise += toNumber(row.hand_raise);
+      bucket.micToggle += toNumber(row.mic_toggle);
+
+      const presentRosterSet = new Set();
+
+      (row.attendanceRows || []).forEach((attendanceRow) => {
+        bucket.attendanceRowsTotal += 1;
+
+        const attendanceKey = getEntityKey(attendanceRow);
+        const canonicalAttendanceKey = attendanceKey
+          ? (aliasToCanonical.get(attendanceKey) || attendanceKey)
+          : null;
+
+        if (
+          canonicalAttendanceKey
+          && (
+            attendanceRow?.status === 'present'
+            || attendanceRow?.status === 'late'
+            || toNumber(attendanceRow?.total_duration_minutes) > 0
+          )
+        ) {
+          presentRosterSet.add(canonicalAttendanceKey);
+        }
+
+        const sessionDuration = row.started_at && row.ended_at
+          ? diffMinutes(new Date(row.ended_at), new Date(row.started_at))
+          : toNumber(row.avg_duration_minutes);
+        if (sessionDuration > 0 && toNumber(attendanceRow?.total_duration_minutes) >= (sessionDuration * 0.9)) {
+          bucket.retainedStudents += 1;
+        }
+      });
+
+      const markerLabel = row.title || row.label || null;
+      if (markerLabel && !bucket.eventTags.includes(markerLabel)) {
+        bucket.eventTags.push(markerLabel);
+      }
+
+      const sessionLogs = getSessionBucket(logsBySessionId, row.id);
+      const sessionActiveSet = new Set();
+      sessionLogs.forEach((log) => {
+        const studentKey = getEntityKey(log);
+        const interaction = log?.interaction_type;
+        if (!studentKey) return;
+        if (!['chat', 'reaction', 'hand_raise', 'mic_toggle'].includes(interaction)) return;
+        const canonical = aliasToCanonical.get(studentKey)
+          || (rosterCanonicalSet.has(studentKey) ? studentKey : null);
+        if (!canonical) return;
+        if (presentRosterSet.size > 0 && !presentRosterSet.has(canonical)) return;
+        sessionActiveSet.add(canonical);
+        bucket.activeStudentSet.add(canonical);
+      });
+
+      const sessionActiveRate = classStudentCount > 0
+        ? round((sessionActiveSet.size / classStudentCount) * 100, 1)
+        : 0;
+      bucket.activeRateTotal += sessionActiveRate;
+      bucket.activeStudentCount = bucket.activeStudentSet.size;
+      bucket.retentionRate = bucket.attendanceRowsTotal > 0 ? round((bucket.retainedStudents / bucket.attendanceRowsTotal) * 100, 1) : 0;
+      bucket.breadthSignals = bucket.activeStudentSet.size;
+    });
+
+    const ordered = [...weeklyMap.values()]
+      .map((bucket) => ({
+        ...bucket,
+        attendanceRate: round(bucket.attendanceTotal / bucket.sessions, 1),
+        activeStudentRate: round(bucket.activeRateTotal / bucket.sessions, 1),
+        interactionsPerSession: round(bucket.engagementTotal / bucket.sessions, 1),
+      }))
+      .map((bucket) => ({
+        ...bucket,
+        activeStudentRate: Number.isFinite(bucket.activeStudentRate) ? bucket.activeStudentRate : 0,
+        retentionRate: Number.isFinite(bucket.retentionRate) ? bucket.retentionRate : 0,
+      }))
+      .sort((left, right) => new Date(left.week).getTime() - new Date(right.week).getTime());
+    const baselines = ordered.length > 0
+      ? ordered.reduce(
+        (acc, row) => {
+          acc.attendance += toNumber(row.attendanceRate);
+          acc.breadth += toNumber(row.activeStudentRate);
+          return acc;
+        },
+        { attendance: 0, breadth: 0 }
+      )
+      : { attendance: 0, breadth: 0 };
+
+    const attendanceBaseline = ordered.length > 0 ? round(baselines.attendance / ordered.length, 1) : 0;
+    const breadthBaseline = ordered.length > 0 ? round(baselines.breadth / ordered.length, 1) : 0;
+
+    return ordered.map((bucket, index) => {
+      const priorWindow = ordered.slice(Math.max(0, index - 4), index);
+      const attendanceBenchmark = priorWindow.length > 0
+        ? round(priorWindow.reduce((sum, row) => sum + toNumber(row.attendanceRate), 0) / priorWindow.length, 1)
+        : attendanceBaseline;
+      const breadthBenchmark = priorWindow.length > 0
+        ? round(priorWindow.reduce((sum, row) => sum + toNumber(row.activeStudentRate), 0) / priorWindow.length, 1)
+        : breadthBaseline;
+      const benchmarkTolerance = 1.5;
+      const attendanceHigh = (bucket.attendanceRate - attendanceBenchmark) >= benchmarkTolerance
+        || bucket.attendanceRate >= 85;
+      const breadthHigh = (bucket.activeStudentRate - breadthBenchmark) >= benchmarkTolerance
+        || bucket.activeStudentRate >= 55;
+      return {
+        ...bucket,
+        attendanceBenchmark,
+        breadthBenchmark,
+        healthQuadrant: attendanceHigh && breadthHigh
+          ? 'Vibrant'
+          : attendanceHigh && !breadthHigh
+            ? 'Spectator'
+            : !attendanceHigh && breadthHigh
+              ? 'Fragmented'
+              : 'Disengaged',
+      };
+    });
+  }, [logsBySessionId, sessionRows, studentRows]);
+
+  const trendEventMarkers = useMemo(() => {
+    return weeklyTrends.flatMap((week) => {
+      const tags = Array.isArray(week.eventTags) ? [...new Set(week.eventTags)] : [];
+      if (tags.length === 0) return [];
+
+      return tags.slice(0, 2).map((tag, index) => ({
+        id: `${week.weekKey}-${index}`,
+        weekLabel: week.week,
+        tag,
       }));
-  }, [enrichedSessions, attendanceBySessionId]);
+    });
+  }, [weeklyTrends]);
 
-  const pulseScore = toNumber(selectedSession?.pulse_engagement_score);
+  useEffect(() => {
+    if (weeklyTrends.length === 0) {
+      setSelectedTrendPulseWeekKey('');
+      return;
+    }
 
-  const pulseBand = pulseScore >= 1.25
-    ? { label: 'Good', tone: 'text-emerald-700 border-emerald-200 bg-emerald-50' }
-    : pulseScore >= 0.8
-      ? { label: 'Average', tone: 'text-amber-700 border-amber-200 bg-amber-50' }
-      : { label: 'Low', tone: 'text-rose-700 border-rose-200 bg-rose-50' };
+    const latestWeekKey = weeklyTrends[weeklyTrends.length - 1]?.weekKey || '';
+    const hasSelection = weeklyTrends.some((week) => week.weekKey === selectedTrendPulseWeekKey);
+    if (!selectedTrendPulseWeekKey || !hasSelection) {
+      setSelectedTrendPulseWeekKey(latestWeekKey);
+    }
+  }, [selectedTrendPulseWeekKey, weeklyTrends]);
 
-  const pulseRingClass = pulseBand.label === 'Good'
-    ? 'border-emerald-500'
-    : pulseBand.label === 'Average'
-      ? 'border-amber-500'
-      : 'border-rose-500';
+  const selectedTrendPulseWeek = useMemo(
+    () => weeklyTrends.find((week) => week.weekKey === selectedTrendPulseWeekKey) || weeklyTrends[weeklyTrends.length - 1] || null,
+    [selectedTrendPulseWeekKey, weeklyTrends]
+  );
 
-  const toggleTimelineSeries = (key) => {
-    setTimelineVisibility((previous) => ({
-      ...previous,
-      [key]: !previous[key],
-    }));
+  const trendPulseData = useMemo(() => {
+    if (weeklyTrends.length === 0) return [];
+
+    const pulseWeekKey = selectedTrendPulseWeek?.weekKey || weeklyTrends[weeklyTrends.length - 1]?.weekKey;
+    if (!pulseWeekKey) return [];
+
+    const bundledSessionsInWeek = bundledSessionRows.filter((row) => {
+      const rawDate = row.session_date ? new Date(row.session_date) : null;
+      if (!rawDate || Number.isNaN(rawDate.getTime())) return false;
+      return getWeekStart(rawDate).toISOString() === pulseWeekKey;
+    });
+    if (bundledSessionsInWeek.length === 0) return [];
+
+    const sessionById = new Map(sessionRows.map((row) => [String(row.id), row]));
+    const bundleWindows = bundledSessionsInWeek
+      .map((bundle) => {
+        const sourceSessionIds = Array.isArray(bundle.source_session_ids)
+          ? bundle.source_session_ids.map((id) => String(id))
+          : [];
+        const matched = sourceSessionIds
+          .map((sessionId) => sessionById.get(sessionId))
+          .filter(Boolean);
+
+        const starts = matched
+          .map((session) => session?.started_at ? new Date(session.started_at) : null)
+          .filter((date) => date && !Number.isNaN(date.getTime()));
+        const ends = matched
+          .map((session) => session?.ended_at ? new Date(session.ended_at) : null)
+          .filter((date) => date && !Number.isNaN(date.getTime()));
+
+        let start = starts.length > 0 ? new Date(Math.min(...starts.map((date) => date.getTime()))) : null;
+        let end = ends.length > 0 ? new Date(Math.max(...ends.map((date) => date.getTime()))) : null;
+
+        if (!start || Number.isNaN(start.getTime())) {
+          const fallback = bundle.session_date ? new Date(bundle.session_date) : null;
+          start = fallback && !Number.isNaN(fallback.getTime()) ? fallback : null;
+        }
+        if ((!end || Number.isNaN(end.getTime())) && start) {
+          end = new Date(start.getTime() + (Math.max(1, toNumber(bundle.avg_duration_minutes)) * 60 * 1000));
+        }
+        if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+
+        return {
+          start,
+          end,
+          sourceSessionIds,
+          spanMinutes: Math.max(1, diffMinutes(end, start)),
+        };
+      })
+      .filter(Boolean);
+    if (bundleWindows.length === 0) return [];
+
+    const longestSpanMinutes = Math.max(...bundleWindows.map((bundle) => bundle.spanMinutes));
+    const bucketSizeMinutes = 5;
+    const totalBuckets = Math.max(1, Math.ceil(longestSpanMinutes / bucketSizeMinutes) + 1);
+
+    const pulseMap = new Map();
+
+    for (let index = 0; index < totalBuckets; index += 1) {
+      const minute = index * bucketSizeMinutes;
+      pulseMap.set(index, {
+        index,
+        minute,
+        label: `${minute}m`,
+        activity: 0,
+        chat: 0,
+        reaction: 0,
+        handRaise: 0,
+        micToggle: 0,
+      });
+    }
+
+    bundleWindows.forEach((bundle) => {
+      bundle.sourceSessionIds.forEach((sessionId) => {
+        const logs = getSessionBucket(logsBySessionId, sessionId);
+        logs.forEach((log) => {
+          const timestamp = log?.timestamp ? new Date(log.timestamp) : null;
+          if (!timestamp || Number.isNaN(timestamp.getTime())) return;
+
+          const minuteOffset = diffMinutes(timestamp, bundle.start);
+          if (minuteOffset < 0) return;
+
+          const index = Math.min(totalBuckets - 1, Math.floor(minuteOffset / bucketSizeMinutes));
+          const bucket = pulseMap.get(index);
+          if (!bucket) return;
+
+          const interaction = log?.interaction_type;
+          if (interaction === 'chat') bucket.chat += 1;
+          if (interaction === 'reaction') bucket.reaction += 1;
+          if (interaction === 'hand_raise') bucket.handRaise += 1;
+          if (interaction === 'mic_toggle') bucket.micToggle += 1;
+          bucket.activity = bucket.chat + bucket.reaction + bucket.handRaise + bucket.micToggle;
+        });
+      });
+    });
+
+    return [...pulseMap.values()].sort((left, right) => left.index - right.index);
+  }, [bundledSessionRows, logsBySessionId, selectedTrendPulseWeek, sessionRows, weeklyTrends]);
+
+  const trendMovers = useMemo(() => {
+    const rows = studentRows.map((student) => {
+      const history = getStudentIdentityKeys(student)
+        .map((key) => studentHistoryMap.get(key))
+        .find(Boolean) || [];
+
+      const lastWindow = history.slice(-7);
+      const priorWindow = history.slice(-14, -7);
+      const lastAverage = lastWindow.length > 0 ? lastWindow.reduce((sum, row) => sum + toNumber(row.heatmapSignals), 0) / lastWindow.length : 0;
+      const priorAverage = priorWindow.length > 0 ? priorWindow.reduce((sum, row) => sum + toNumber(row.heatmapSignals), 0) / priorWindow.length : 0;
+
+      return {
+        id: student.id,
+        name: student.full_name,
+        delta: round(lastAverage - priorAverage, 1),
+        current: round(lastAverage, 1),
+        previous: round(priorAverage, 1),
+      };
+    });
+
+    return {
+      climbers: [...rows].sort((left, right) => right.delta - left.delta).filter((row) => row.delta > 0).slice(0, 3),
+      sliders: [...rows].sort((left, right) => left.delta - right.delta).filter((row) => row.delta < 0).slice(0, 3),
+    };
+  }, [studentHistoryMap, studentRows]);
+
+  const latestTrendWeek = weeklyTrends[weeklyTrends.length - 1] || null;
+
+  const trendSummary = useMemo(() => {
+    if (weeklyTrends.length === 0) {
+      return {
+        retentionRate: 0,
+        activeStudentRate: 0,
+        attendanceRate: 0,
+        classHealth: 'No data',
+        breadthTrend: 0,
+      };
+    }
+
+    const totals = weeklyTrends.reduce(
+      (acc, row) => {
+        const sessionWeight = Math.max(1, toNumber(row.sessions));
+        acc.weight += sessionWeight;
+        acc.retention += toNumber(row.retentionRate) * sessionWeight;
+        acc.active += toNumber(row.activeStudentRate) * sessionWeight;
+        acc.attendance += toNumber(row.attendanceRate) * sessionWeight;
+        if (acc.quadrants[row.healthQuadrant] !== undefined) {
+          acc.quadrants[row.healthQuadrant] += 1;
+        }
+        return acc;
+      },
+      {
+        weight: 0,
+        retention: 0,
+        active: 0,
+        attendance: 0,
+        quadrants: {
+          Vibrant: 0,
+          Spectator: 0,
+          Fragmented: 0,
+          Disengaged: 0,
+        },
+      }
+    );
+
+    const dominantHealth = Object.entries(totals.quadrants)
+      .sort((left, right) => right[1] - left[1])[0]?.[0] || 'No data';
+
+    const firstBreadth = toNumber(weeklyTrends[0]?.activeStudentRate);
+    const lastBreadth = toNumber(weeklyTrends[weeklyTrends.length - 1]?.activeStudentRate);
+
+    return {
+      retentionRate: totals.weight > 0 ? round(totals.retention / totals.weight, 1) : 0,
+      activeStudentRate: totals.weight > 0 ? round(totals.active / totals.weight, 1) : 0,
+      attendanceRate: totals.weight > 0 ? round(totals.attendance / totals.weight, 1) : 0,
+      breadthTrend: weeklyTrends.length > 1 ? round(lastBreadth - firstBreadth, 1) : 0,
+      classHealth: dominantHealth,
+    };
+  }, [weeklyTrends]);
+
+  const trendQuadrants = useMemo(() => {
+    const counts = {
+      Vibrant: 0,
+      Spectator: 0,
+      Fragmented: 0,
+      Disengaged: 0,
+    };
+
+    weeklyTrends.forEach((row) => {
+      if (counts[row.healthQuadrant] !== undefined) {
+        counts[row.healthQuadrant] += 1;
+      }
+    });
+
+    return {
+      counts,
+      latest: latestTrendWeek?.healthQuadrant || 'No data',
+    };
+  }, [latestTrendWeek, weeklyTrends]);
+
+  const atRiskStudents = useMemo(
+    () => studentRows.filter((student) => student.risk !== 'Stable').slice(0, 6),
+    [studentRows]
+  );
+
+  const loading = analyticsLoading || participationLoading || attendanceLoading;
+
+  const onQuickSelect = (start, end) => {
+    setStartDate(start);
+    setEndDate(end);
   };
 
-  const hasData = enrichedSessions.length > 0;
-  const hasBundleData = bundleRows.length > 0;
-  const isBusy = isLoading || participationLoading || attendanceLoading;
-  const showSummaryTab = activeAnalyticsTab === 'summary';
-  const showSessionTab = activeAnalyticsTab === 'session';
-  const showStudentTab = activeAnalyticsTab === 'student';
-  const showTrendsTab = activeAnalyticsTab === 'trends';
-
-  if (!classId) {
+  if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 px-4">
-        <UserGroupIcon className="w-16 h-16 text-gray-400 mb-4" />
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Select a Class</h3>
-        <p className="text-gray-500 text-center max-w-md">
-          Choose a class from the dropdown above to view detailed analytics and insights.
-        </p>
-      </div>
-    );
-  }
-
-  if (isBusy) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-600"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-800">Error loading analytics: {error.message}</p>
-      </div>
-    );
-  }
-
-  if (!analytics) {
-    return null;
-  }
-
-  if (!hasData) {
-    return (
-      <div className="space-y-6">
-        <div className="flex justify-end">
-          <DateRangePicker
-            startDate={startDate}
-            endDate={endDate}
-            onStartDateChange={setStartDate}
-            onEndDateChange={setEndDate}
-            onQuickSelect={handleQuickSelect}
-            variant="compact"
-          />
-        </div>
-
-        <div className="flex flex-col items-center justify-center py-12 px-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-          <AcademicCapIcon className="w-16 h-16 text-gray-400 mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Data Yet</h3>
-          <p className="text-gray-500 text-center max-w-md mb-4">
-            No session fragments were completed in this date range. Start or complete some fragments to see analytics here.
-          </p>
-          <p className="text-sm text-gray-400">
-            Selected range: {startDate.toLocaleDateString()} - {endDate.toLocaleDateString()}
-          </p>
-        </div>
+      <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
+        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-accent-600"></div>
+        <p className="mt-3 text-sm text-slate-600">Loading analytics...</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
-      <div className="rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveAnalyticsTab('summary')}
-            className={`px-3 py-2 rounded-lg text-sm font-medium ${
-              showSummaryTab ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            Summary
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveAnalyticsTab('session')}
-            className={`px-3 py-2 rounded-lg text-sm font-medium ${
-              showSessionTab ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            Per-Session
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveAnalyticsTab('student')}
-            className={`px-3 py-2 rounded-lg text-sm font-medium ${
-              showStudentTab ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            Per-Student
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveAnalyticsTab('trends')}
-            className={`px-3 py-2 rounded-lg text-sm font-medium ${
-              showTrendsTab ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            Trends
-          </button>
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">Professor Analytics</h2>
+            <p className="text-sm text-slate-600">
+              Attendance is the anchor. Engagement signals come from chat activity, reactions, hand raises, and mic toggles.
+            </p>
           </div>
           <DateRangePicker
+            variant="compact"
             startDate={startDate}
             endDate={endDate}
             onStartDateChange={setStartDate}
             onEndDateChange={setEndDate}
-            onQuickSelect={handleQuickSelect}
-            variant="compact"
+            onQuickSelect={onQuickSelect}
           />
         </div>
-      </div>
 
-      {showSummaryTab ? (
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Analytics Summary</p>
+        <div className="mt-5 flex flex-wrap gap-2 rounded-lg bg-slate-100 p-1">
+          {TAB_DEFS.map((tab) => (
             <button
-              type="button"
-              title="Core credit window = session minutes - break gaps. Early arrivals are bonus, dead-time is excluded."
-              className="text-slate-400 hover:text-slate-600"
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+                activeTab === tab.key
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-700 hover:bg-slate-200'
+              }`}
             >
-              <InformationCircleIcon className="w-4 h-4" />
+              {tab.label}
             </button>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          Baseline comparison mode: {baselineModeLabel}
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          {summaryCards.map((card) => {
-            const tone = getDeltaTone(card.delta, card.lowerIsBetter);
-            return (
-              <div key={card.id} className={`rounded-xl border border-slate-200 bg-white p-4 ${card.footprint}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{card.title}</p>
-                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${tone.chip}`}>
-                    {tone.text}
-                  </span>
-                </div>
-                <p className="mt-3 text-2xl font-bold text-slate-900">{card.value}</p>
-                <p className="mt-1 text-xs text-slate-600">{card.subtitle}</p>
-                <p className="mt-2 text-[11px] font-medium text-slate-500">{tone.detail}</p>
-              </div>
-            );
-          })}
-          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 xl:col-span-6">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Presence vs Participation</p>
-              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${engagementEfficiencyBand.tone}`}>
-                {engagementEfficiencyBand.label}
-              </span>
-            </div>
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                <p className="text-xs text-slate-500">Presence</p>
-                <p className="text-lg font-semibold text-slate-900">{currentSummary.presenceRate}%</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                <p className="text-xs text-slate-500">Participation</p>
-                <p className="text-lg font-semibold text-slate-900">{currentSummary.participationRate}%</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                <p className="text-xs text-slate-500">Efficiency Gap</p>
-                <p className="text-lg font-semibold text-slate-900">{currentSummary.efficiencyGap}%</p>
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
       </div>
+
+      {activeTab === 'summary' ? (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <MetricCard label="Attendance Rate" value={`${summary.avgAttendanceRate}%`} hint="Average across sessions in range" />
+            <MetricCard label="Minutes Present" value={formatMinutes(summary.avgDuration)} hint="Average student presence per session" />
+            <MetricCard label="Engagement Signals" value={String(summary.interactionsPerSession)} hint="Avg. logged interactions per session" />
+            <MetricCard label="Speaking Proxy" value={formatMinutes(summary.totalSpeakingMinutes)} hint="Total inferred speaking time in range" />
+            <MetricCard label="Avg Engagement" value={String(summary.avgEngagementScore)} hint="Average student engagement score" />
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">Attendance vs Engagement by Session</h3>
+              <p className="text-xs text-slate-500">Helps answer whether strong attendance also leads to active participation.</p>
+              <div className="mt-4 h-72">
+                <ChartCanvas height={288}>
+                  {(chartWidth, chartHeight) => (
+                  <LineChart width={chartWidth} height={chartHeight} data={bundledSessionRows}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Line yAxisId="left" type="monotone" dataKey="attendance_rate" name="Attendance %" stroke="#0f766e" strokeWidth={2} />
+                    <Line yAxisId="right" type="monotone" dataKey="interactions" name="Interactions" stroke="#1d4ed8" strokeWidth={2} />
+                  </LineChart>
+                  )}
+                </ChartCanvas>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">Students Needing Attention</h3>
+              <p className="text-xs text-slate-500">Flagged when attendance or engagement is consistently low.</p>
+              {atRiskStudents.length === 0 ? (
+                <div className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                  No immediate risk flags in the selected range.
+                </div>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  {atRiskStudents.map((student) => (
+                    <div key={student.id} className="flex items-center justify-between rounded-lg border border-slate-200 p-3">
+                      <div>
+                        <p className="font-medium text-slate-900">{student.full_name}</p>
+                        <p className="text-xs text-slate-600">
+                          Attendance {round(student.attendance_rate, 1)}% · Engagement {round(student.engagement_score, 1)}
+                        </p>
+                      </div>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getRiskTone(student.risk)}`}>
+                        {student.risk}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-base font-semibold text-slate-900">Metric Definitions</h3>
+            <p className="text-xs text-slate-500">Quick reference for how key metrics are calculated.</p>
+            <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+              {METRIC_GLOSSARY.map((item) => (
+                <div key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-sm font-semibold text-slate-800">{item.label}</p>
+                  <p className="mt-1 text-xs text-slate-600">{item.definition}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
       ) : null}
 
-      {showSessionTab ? (
-      <section className="space-y-5 rounded-2xl border border-gray-200 bg-gray-50/40 p-5">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <div>
-            <h3 className="text-xl font-semibold text-gray-900">Per-Session Analytics</h3>
-            <p className="text-sm text-gray-600">Inspect synchronized activity, stitched presence stability, and normalized core credit.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <label htmlFor="session-select" className="text-sm font-medium text-gray-700">Pulse Session</label>
-            <select
-              id="session-select"
-              value={selectedBundleId || ''}
-              onChange={(event) => setSelectedBundleId(event.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            >
-              {effectiveBundleRows.map((bundle) => (
-                <option key={bundle.bundle_id} value={bundle.bundle_id}>
-                  {bundle.date ? new Date(bundle.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unknown'}
-                  {' - '}
-                  {bundle.planned_start_time
-                    ? formatTimeLabel(bundle.planned_start_time)
-                    : formatDateTimeLabel(bundle.planned_start_at || bundle.actual_first_start_at)}
-                  {' to '}
-                  {bundle.planned_end_time
-                    ? formatTimeLabel(bundle.planned_end_time)
-                    : formatDateTimeLabel(bundle.planned_end_at || bundle.actual_last_end_at)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Pulse Engagement Score</p>
-              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${pulseBand.tone}`}>
-                {pulseBand.label}
+      {activeTab === 'student' ? (
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.25fr_1.75fr]">
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Class Student Overview</h3>
+                <p className="text-xs text-slate-500">Tiny sparklines show the last 5 sessions of engagement intensity.</p>
+              </div>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600">
+                Lurker = high attendance, zero signals
               </span>
             </div>
-            <div className="mt-3 flex items-center gap-4 min-h-[84px]">
-              <div className={`h-20 w-20 rounded-full border-4 flex items-center justify-center ${pulseRingClass}`}>
-                <span className="text-2xl font-bold text-gray-900">{pulseScore}</span>
-              </div>
-              <div className="text-sm text-gray-500 flex flex-col justify-center">
-                <p className="text-gray-700 font-medium">Session energy signal</p>
-                <button
-                  type="button"
-                  onClick={() => setShowPulseFormula((previous) => !previous)}
-                  className="mt-1 inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
-                >
-                  <InformationCircleIcon className="w-4 h-4" />
-                  {showPulseFormula ? 'Hide formula' : 'Show formula'}
-                </button>
-              </div>
-            </div>
-            {showPulseFormula ? (
-              <p className="text-xs text-slate-500 mt-3 text-center">
-                E = (Mic x {WEIGHTS.mic} + Reactions x {WEIGHTS.reaction} + Chat x {WEIGHTS.chat}) / Session Minutes
-              </p>
-            ) : null}
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg bg-slate-50 p-3">
-                <p className="text-slate-500">Core Credit</p>
-                <p className="font-semibold text-slate-900">{formatMinutes(selectedSession?.core_credit_minutes)}</p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-3">
-                <div className="flex items-center gap-1">
-                  <p className="text-slate-500">Normalized Attendance</p>
-                  <span
-                    className="text-slate-400"
-                    title="Can exceed 100% when credited minutes are higher than planned core credit window (for example, sustained attendance/overtime beyond planned minutes)."
-                  >
-                    <InformationCircleIcon className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-                <p className="font-semibold text-slate-900">{toNumber(selectedSession?.normalized_attendance_pct)}%</p>
-              </div>
-            </div>
-            <div className="mt-4 rounded-lg bg-amber-50 border border-amber-100 p-3 text-sm text-amber-900 flex items-start gap-2">
-              <BoltIcon className="w-5 h-5 mt-0.5" />
-              <p>
-                {peakMoment
-                  ? `Peak moment: ${peakMoment.label} produced the highest reaction burst.`
-                  : 'Peak moment appears when timestamped reactions are present.'}
-              </p>
-            </div>
-          </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm xl:col-span-2">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-lg font-semibold text-gray-900">Synchronized Timeline</h4>
-              <div className="flex items-center gap-2 flex-wrap justify-end">
-                <button
-                  type="button"
-                  onClick={() => toggleTimelineSeries('total')}
-                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                    timelineVisibility.total ? 'border-gray-300 bg-white text-gray-800' : 'border-gray-200 bg-gray-100 text-gray-400'
-                  }`}
-                >
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TIMELINE_TOTAL_COLOR, opacity: timelineVisibility.total ? 1 : 0.35 }} />
-                  Total
-                </button>
-                {TIMELINE_SERIES.map((series) => {
-                  const active = timelineVisibility[series.key];
-                  return (
-                    <button
-                      key={series.key}
-                      type="button"
-                      onClick={() => toggleTimelineSeries(series.key)}
-                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                        active ? 'border-gray-300 bg-white text-gray-800' : 'border-gray-200 bg-gray-100 text-gray-400'
-                      }`}
-                    >
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: series.color, opacity: active ? 1 : 0.35 }} />
-                      {series.label}
-                    </button>
-                  );
-                })}
-                <BoltIcon className="w-5 h-5 text-amber-500" />
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={synchronizedTimeline}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="label" stroke="#6b7280" style={{ fontSize: '12px' }} />
-                <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-                <Tooltip />
-                <Area
-                  type="monotone"
-                  dataKey="activity"
-                  stroke="none"
-                  fill={TIMELINE_TOTAL_COLOR}
-                  fillOpacity={0.08}
-                  name="Total Envelope"
-                  hide={!timelineVisibility.total}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="activity"
-                  stroke={TIMELINE_TOTAL_COLOR}
-                  strokeWidth={3.25}
-                  dot={false}
-                  name="Total Activity"
-                  hide={!timelineVisibility.total}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="chat"
-                  stroke={TIMELINE_COLORS.chat}
-                  strokeWidth={2}
-                  fill={TIMELINE_COLORS.chat}
-                  fillOpacity={0.2}
-                  name="Chat"
-                  hide={!timelineVisibility.chat}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="reaction"
-                  stroke={TIMELINE_COLORS.reaction}
-                  strokeWidth={2}
-                  fill={TIMELINE_COLORS.reaction}
-                  fillOpacity={0.2}
-                  name="Reactions"
-                  hide={!timelineVisibility.reaction}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="handRaise"
-                  stroke={TIMELINE_COLORS.handRaise}
-                  strokeWidth={2}
-                  fill={TIMELINE_COLORS.handRaise}
-                  fillOpacity={0.2}
-                  name="Hand Raises"
-                  hide={!timelineVisibility.handRaise}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="micToggle"
-                  stroke={TIMELINE_COLORS.micToggle}
-                  strokeWidth={2}
-                  fill={TIMELINE_COLORS.micToggle}
-                  fillOpacity={0.2}
-                  name="Mic Toggles"
-                  hide={!timelineVisibility.micToggle}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Student</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Consistency</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Last Active</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Lurker</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {studentOverviewRows.map((student) => {
+                    const sparklinePath = buildSparklinePath(student.sparklineValues, 88, 24);
 
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-lg font-semibold text-gray-900">Presence Gantt</h4>
-            <ClockIcon className="w-5 h-5 text-slate-500" />
-          </div>
-          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {presenceRows.length === 0 && (
-              <p className="text-sm text-gray-500">No attendance interval data for the selected session.</p>
-            )}
-            {presenceRows.map((row) => (
-              <div key={row.id} className="grid grid-cols-1 md:grid-cols-[180px_1fr_90px] gap-2 md:gap-3 items-center">
-                <div className="text-xs md:text-sm">
-                  <button
-                    type="button"
-                    onClick={() => row.studentId && setProfiledStudentId(row.studentId)}
-                    className="font-medium text-gray-800 hover:text-blue-700 truncate text-left w-full"
-                    title={row.name}
-                  >
-                    {row.name}
-                  </button>
-                </div>
-                <div className="relative h-4 rounded bg-slate-100 overflow-hidden">
-                  {row.intervals.map((segment, index) => (
-                    <span
-                      key={`${row.id}-segment-${index}`}
-                      className="absolute top-0 h-full bg-sky-500/75"
-                      style={{ left: `${segment.leftPct}%`, width: `${segment.widthPct}%` }}
-                    />
-                  ))}
-                  {(pulseWindow?.breakSegments || []).map((segment, index) => {
-                    const left = ((segment.start.getTime() - pulseWindow.start.getTime()) / (pulseWindow.spanMinutes * 60 * 1000)) * 100;
-                    const width = ((segment.end.getTime() - segment.start.getTime()) / (pulseWindow.spanMinutes * 60 * 1000)) * 100;
                     return (
-                      <span
-                        key={`break-${index}`}
-                        className="absolute top-0 h-full bg-rose-200/80"
-                        style={{ left: `${left}%`, width: `${width}%` }}
-                      />
+                      <tr
+                        key={student.id}
+                        className={`cursor-pointer transition hover:bg-slate-50 ${selectedStudent?.id === student.id ? 'bg-blue-50' : ''}`}
+                        onClick={() => setSelectedStudentId(String(student.id))}
+                      >
+                        <td className="px-3 py-3 align-middle text-sm font-medium text-slate-900">{student.full_name}</td>
+                        <td className="px-3 py-3 align-middle">
+                          {sparklinePath ? (
+                            <svg viewBox="0 0 88 24" className="h-6 w-[88px] overflow-visible">
+                              <path d={sparklinePath} fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              {student.sparklineValues.map((value, index) => {
+                                const x = student.sparklineValues.length === 1 ? 44 : (index / (student.sparklineValues.length - 1)) * 88;
+                                const min = Math.min(...student.sparklineValues);
+                                const max = Math.max(...student.sparklineValues);
+                                const range = max - min || 1;
+                                const y = 24 - (((value - min) / range) * 24);
+                                return <circle key={`${student.id}-spark-${index}`} cx={x} cy={y} r="1.8" fill="#2563eb" />;
+                              })}
+                            </svg>
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 align-middle text-sm text-slate-700">{student.lastActiveLabel}</td>
+                        <td className="px-3 py-3 align-middle">
+                          {student.lurker ? (
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">Lurker</span>
+                          ) : (
+                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">OK</span>
+                          )}
+                        </td>
+                      </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            {selectedStudent ? (
+              <>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)] xl:items-start">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Engagement Snapshot</p>
+                      <h3 className="mt-1 text-xl font-semibold text-slate-900">{selectedStudent.full_name}</h3>
+                      <p className="mt-1 text-sm text-slate-600">A quick read on whether this student looks typical, improving, or concerning.</p>
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                        <span className={`rounded-full border px-3 py-1 font-semibold ${selectedStudentBehavior.relativeStanding === 'Concerning' ? 'border-rose-200 bg-rose-50 text-rose-700' : selectedStudentBehavior.relativeStanding === 'Improving' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-700'}`}>
+                          {selectedStudentBehavior.relativeStanding}
+                        </span>
+                        <span className={`rounded-full border px-3 py-1 font-semibold ${selectedStudentBehavior.reliabilityScore >= 80 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : selectedStudentBehavior.reliabilityScore >= 55 ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+                          {selectedStudentBehavior.reliabilityLabel} · {round(selectedStudentBehavior.reliabilityScore, 1)}/100
+                        </span>
+                        <span className={`rounded-full border px-3 py-1 font-semibold ${selectedStudentBehavior.velocityDirection === 'up' ? 'border-blue-200 bg-blue-50 text-blue-700' : selectedStudentBehavior.velocityDirection === 'down' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-700'}`}>
+                          {selectedStudentBehavior.velocityDirection === 'up' ? '▲' : selectedStudentBehavior.velocityDirection === 'down' ? '▼' : '•'} {selectedStudentBehavior.velocityDelta > 0 ? '+' : ''}{selectedStudentBehavior.velocityDelta} this week vs semester avg
+                        </span>
+                        {selectedStudentBehavior.lurker ? (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 font-semibold text-amber-700">Lurker flag</span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <MetricCard compact label="Attendance" value={`${round(selectedStudent.attendance_rate, 1)}%`} hint={`Class average ${selectedStudentClassAverages.attendance}%`} />
+                      <MetricCard compact label="Engagement" value={String(round(selectedStudent.engagement_score, 1))} hint={`Class average ${selectedStudentClassAverages.engagement}`} />
+                      <MetricCard compact label="Reliability" value={`${round(selectedStudentBehavior.reliabilityScore, 0)}/100`} hint={`Join/leave stability across ${selectedStudentBehavior.historyCount} sessions`} />
+                    </div>
+                  </div>
                 </div>
-                <div className="text-xs font-semibold text-slate-700 text-right">
-                  {row.creditedPct}% credit
+
+                <div className="mt-5 space-y-5">
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <h4 className="text-base font-semibold text-slate-900">Activity Heatmap</h4>
+                    <p className="text-xs text-slate-500">Each dot is a session. Darker means more hand raises and reactions.</p>
+
+                    {selectedStudentHistory.length === 0 ? (
+                      <p className="mt-4 text-sm text-slate-600">No session history available for this student.</p>
+                    ) : (
+                      <>
+                        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                          <div className="overflow-x-auto pb-2">
+                            <div className="flex min-w-max items-end gap-2">
+                              {selectedStudentHistory.map((row, index) => {
+                                const intensityRatio = toNumber(row.heatmapSignals) / selectedStudentHeatmapMax;
+                                const opacity = Math.max(0.18, Math.min(1, 0.18 + (intensityRatio * 0.82)));
+                                return (
+                                  <div key={`${row.id || row.date || index}`} className="flex flex-col items-center gap-1">
+                                    <span
+                                      title={`${formatDate(row.date)} · ${row.heatmapSignals} signal(s)`}
+                                      className="h-5 w-5 rounded-full border border-blue-300 shadow-sm"
+                                      style={{ backgroundColor: `rgba(37, 99, 235, ${opacity})` }}
+                                    />
+                                    <span className="text-[10px] text-slate-400">{formatDate(row.date)}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                            <span>Left: early semester</span>
+                            <span>Right: recent sessions</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-700">
+                          <span className="rounded-full border border-slate-200 bg-white px-3 py-1">Sessions tracked: <strong className="text-slate-900">{selectedStudentHeatmapSummary.sessionsTracked}</strong></span>
+                          <span className="rounded-full border border-slate-200 bg-white px-3 py-1">Total signals: <strong className="text-slate-900">{selectedStudentHeatmapSummary.totalSignals}</strong></span>
+                          <span className="rounded-full border border-slate-200 bg-white px-3 py-1">Avg/session: <strong className="text-slate-900">{selectedStudentHeatmapSummary.averageSignals}</strong></span>
+                          <span className="rounded-full border border-slate-200 bg-white px-3 py-1">Peak: <strong className="text-slate-900">{selectedStudentHeatmapSummary.peakSignals}</strong> on {formatDate(selectedStudentHeatmapSummary.peakDate)}</span>
+                        </div>
+                      </>
+                    )}
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <h4 className="text-base font-semibold text-slate-900">Signal Mix</h4>
+                    <p className="text-xs text-slate-500">Direct interaction, expressive interaction, and passive metadata.</p>
+
+                    {selectedStudentHistory.length === 0 ? (
+                      <p className="mt-4 text-sm text-slate-600">No signal data available for this student.</p>
+                    ) : (
+                      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[220px_1fr] sm:items-center">
+                        <div className="h-52">
+                          <ChartCanvas height={208}>
+                            {(chartWidth, chartHeight) => (
+                              <PieChart width={chartWidth} height={chartHeight}>
+                                <Tooltip />
+                                <Pie
+                                  data={selectedStudentSignalMixData}
+                                  dataKey="value"
+                                  nameKey="name"
+                                  innerRadius={52}
+                                  outerRadius={78}
+                                  paddingAngle={3}
+                                >
+                                  {selectedStudentSignalMixData.map((entry) => (
+                                    <Cell key={entry.name} fill={entry.color} />
+                                  ))}
+                                </Pie>
+                                <Legend />
+                              </PieChart>
+                            )}
+                          </ChartCanvas>
+                        </div>
+
+                        <div className="space-y-3 text-sm text-slate-700">
+                          {selectedStudentSignalMixData.map((entry) => (
+                            <div key={entry.name} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <span className="h-3 w-3 rounded-full" style={{ backgroundColor: entry.color }} />
+                                <span>{entry.name}</span>
+                              </div>
+                              <span className="font-semibold text-slate-900">{toNumber(entry.value)}</span>
+                            </div>
+                          ))}
+                          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                            Direct interaction means hand raises. Expressive interaction means reactions. Passive metadata combines chat and mic toggles.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </section>
                 </div>
-              </div>
-            ))}
-          </div>
+
+                <section className="mt-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-base font-semibold text-slate-900">Diagnostic Attendance Log</h4>
+                      <p className="text-xs text-slate-500">Tracks punctuality, stability, and whether the student may have been fighting the connection.</p>
+                    </div>
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600">
+                      5+ joins in a session = unstable
+                    </span>
+                  </div>
+
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Date</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Duration</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Punctuality</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Stability</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {selectedStudentHistory.length === 0 ? (
+                          <tr>
+                            <td colSpan="5" className="px-3 py-4 text-sm text-slate-600">No attendance records found for this student.</td>
+                          </tr>
+                        ) : selectedStudentHistory.map((row) => (
+                          <tr key={`${row.id}-${row.date}`} className={row.isLurker ? 'bg-amber-50/50' : ''}>
+                            <td className="px-3 py-2 text-sm text-slate-900">{formatDate(row.date)}</td>
+                            <td className="px-3 py-2 text-sm text-slate-700">{row.status}</td>
+                            <td className="px-3 py-2 text-sm text-slate-700">{row.durationMinutes > 0 ? `${formatMinutes(row.durationMinutes)} / ${formatMinutes(row.sessionSpanMinutes)}` : '0m'}</td>
+                            <td className="px-3 py-2 text-sm text-slate-700">{row.punctuality}</td>
+                            <td className="px-3 py-2 text-sm text-slate-700">
+                              <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${row.stabilityLabel === 'Unstable' ? 'border border-amber-200 bg-amber-50 text-amber-700' : row.stabilityLabel === 'No joins' ? 'border border-slate-200 bg-slate-50 text-slate-700' : 'border border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                                {row.stabilityText}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <p className="text-sm text-slate-600">No student data in this range.</p>
+            )}
+          </section>
         </div>
-      </section>
       ) : null}
 
-      {showStudentTab ? (
-      <section className="space-y-5 rounded-2xl border border-gray-200 bg-gray-50/40 p-5">
-        <h3 className="text-xl font-semibold text-gray-900">Per-Student Analytics</h3>
-        <div className="rounded-xl border border-slate-200 bg-white p-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Student Scope</span>
-          <button
-            type="button"
-            onClick={() => setStudentScope('date-range')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
-              studentScope === 'date-range'
-                ? 'bg-slate-900 text-white border-slate-900'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            Date Range
-          </button>
-          <button
-            type="button"
-            onClick={() => setStudentScope('pulse-session')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
-              studentScope === 'pulse-session'
-                ? 'bg-slate-900 text-white border-slate-900'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            Pulse Session
-          </button>
-          <span className="text-xs text-slate-500">
-            {studentScope === 'pulse-session'
-              ? 'Student metrics are focused on the pulse session selected below (independent from Per-Session tab).'
-              : 'Student metrics reflect the active date range filter.'}
-          </span>
+      {activeTab === 'session' ? (
+        <div className="space-y-5">
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Session</label>
+                <select
+                  value={String(selectedSession?.id || '')}
+                  onChange={(event) => setSelectedSessionId(String(event.target.value))}
+                  className="mt-1 block rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  {bundledSessionRows.map((session) => (
+                    <option key={session.id} value={String(session.id)}>
+                      {session.label} ({formatDate(session.session_date)})
+                      {Number.isFinite(toNumber(session.session_count)) && toNumber(session.session_count) > 1
+                        ? ` • ${toNumber(session.session_count)} fragments`
+                        : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-slate-500">Snapshot answers: who attended, for how long, and how engaged they were in this session.</p>
+            </div>
+
+            {selectedSession ? (
+              <div className="mt-4 grid grid-cols-7 gap-3">
+                <MetricCard compact label="Attendance" value={`${round(selectedSession.attendance_rate, 1)}%`} hint="Present out of participants" />
+                <MetricCard compact label="Participants" value={String(selectedSession.total_participants)} hint="Students with attendance records" />
+                <MetricCard compact label="Avg Minutes" value={formatMinutes(selectedSession.avg_duration_minutes)} hint="Average time present" />
+                <MetricCard compact label="Chat" value={String(selectedSession.chat)} hint="Chat activity count" />
+                <MetricCard compact label="Reactions" value={String(selectedSession.reaction)} hint="Reaction activity count" />
+                <MetricCard compact label="Hands" value={String(selectedSession.hand_raise)} hint="Hand raise events" />
+                <MetricCard compact label="Speaking" value={formatMinutes(selectedSession.speaking_proxy_minutes)} hint="Mic-toggle speaking proxy" />
+              </div>
+            ) : null}
+          </section>
+
+          {selectedSession ? (
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h3 className="text-base font-semibold text-slate-900">Synchronized Timeline</h3>
+                <p className="text-xs text-slate-500">Engagement spikes throughout the session - how interactions clustered over time.</p>
+                {synchronizedTimeline.length === 0 ? (
+                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                    No participation logs available for this session.
+                  </div>
+                ) : (
+                  <div className="mt-4 h-72">
+                    <ChartCanvas height={288}>
+                      {(chartWidth, chartHeight) => (
+                      <ComposedChart width={chartWidth} height={chartHeight} data={synchronizedTimeline}>
+                        <defs>
+                          <linearGradient id="timelineActivityShade" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={TIMELINE_COLORS.activity} stopOpacity={0.26} />
+                            <stop offset="95%" stopColor={TIMELINE_COLORS.activity} stopOpacity={0.04} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis dataKey="label" stroke="#6b7280" style={{ fontSize: '12px' }} />
+                        <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+                        <Tooltip content={<TimelineTooltip />} />
+                        <Legend />
+                        <Area
+                          type="monotone"
+                          dataKey="activityShade"
+                          name="Total Activity Shade"
+                          stroke="none"
+                          fill="url(#timelineActivityShade)"
+                          isAnimationActive={false}
+                          legendType="none"
+                        />
+                        <Line type="monotone" dataKey="activity" stroke={TIMELINE_COLORS.activity} strokeWidth={3} name="Total Activity" isAnimationActive={false} />
+                        <Line type="monotone" dataKey="chat" stroke={TIMELINE_COLORS.chat} strokeWidth={2} name="Chat" isAnimationActive={false} />
+                        <Line type="monotone" dataKey="reaction" stroke={TIMELINE_COLORS.reaction} strokeWidth={2} name="Reactions" isAnimationActive={false} />
+                        <Line type="monotone" dataKey="handRaise" stroke={TIMELINE_COLORS.handRaise} strokeWidth={2} name="Hand Raises" isAnimationActive={false} />
+                        <Line type="monotone" dataKey="micToggle" stroke={TIMELINE_COLORS.micToggle} strokeWidth={2} name="Mic Toggles" isAnimationActive={false} />
+                      </ComposedChart>
+                      )}
+                    </ChartCanvas>
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h3 className="text-base font-semibold text-slate-900">Attendance Roster Snapshot</h3>
+                <p className="text-xs text-slate-500">Duration is total recorded minutes for this session.</p>
+                <div className="mt-3 max-h-72 overflow-auto">
+                  <table className="min-w-full divide-y divide-slate-200">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Name</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Status</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Minutes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {selectedSession.attendanceRows.map((row) => (
+                        <tr key={row.id || `${row.participant_name}-${row.student_id || 'na'}`}>
+                          <td className="px-3 py-2 text-sm text-slate-800">{row.student_name || row.participant_name || 'Unknown'}</td>
+                          <td className="px-3 py-2 text-sm text-slate-700">{row.status || 'unknown'}</td>
+                          <td className="px-3 py-2 text-sm text-slate-700">{formatMinutes(toNumber(row.total_duration_minutes))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          ) : null}
+
+          {selectedSession ? (
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">Presence Gantt</h3>
+              <p className="text-xs text-slate-500">Join and leave intervals per student across the selected bundled session.</p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                <span className="inline-flex items-center gap-2"><span className="h-2 w-6 rounded" style={{ backgroundColor: '#0284c7' }}></span>Present</span>
+                {selectedSessionWindow && selectedSessionWindow.breakSegments.length > 0 ? (
+                  <span className="inline-flex items-center gap-2"><span className="h-2 w-6 rounded" style={{ backgroundColor: '#cbd5e1' }}></span>Breaktime</span>
+                ) : null}
+              </div>
+
+              {!selectedSessionWindow || presenceRows.length === 0 ? (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                  No interval-based attendance data available for this session.
+                </div>
+              ) : (
+                <div className="mt-4 max-h-96 space-y-3 overflow-auto pr-1">
+                  {presenceRows.map((row) => (
+                    <div key={row.key} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-slate-800">{row.name}</span>
+                        <span className="text-slate-600">{formatMinutes(row.creditedMinutes)} ({row.creditedPct}%)</span>
+                      </div>
+
+                      <div className="relative h-6 overflow-hidden rounded-md border border-slate-200" style={{ backgroundColor: '#f8fafc' }}>
+                        {selectedSessionWindow.breakSegments.map((segment, index) => {
+                          const leftPct = ((segment.start.getTime() - selectedSessionWindow.start.getTime()) / (selectedSessionWindow.spanMinutes * 60 * 1000)) * 100;
+                          const widthPct = ((segment.end.getTime() - segment.start.getTime()) / (selectedSessionWindow.spanMinutes * 60 * 1000)) * 100;
+                          return (
+                            <div
+                              key={`${row.key}-break-${index}`}
+                              className="absolute inset-y-0"
+                              style={{ left: `${leftPct}%`, width: `${widthPct}%`, backgroundColor: '#cbd5e1', zIndex: 1 }}
+                            />
+                          );
+                        })}
+
+                        {row.intervals.map((interval, index) => (
+                          <div
+                            key={`${row.key}-interval-${index}`}
+                            className="absolute inset-y-0 rounded"
+                            style={{ left: `${interval.leftPct}%`, width: `${Math.max(interval.widthPct, 0.8)}%`, backgroundColor: '#0284c7', zIndex: 2 }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
         </div>
-        {studentScope === 'pulse-session' ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            <label htmlFor="student-pulse-session-select" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Student Pulse Session
-            </label>
-            <select
-              id="student-pulse-session-select"
-              value={selectedStudentBundleId || ''}
-              onChange={(event) => setSelectedStudentBundleId(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            >
-              {effectiveBundleRows.map((bundle) => (
-                <option key={bundle.bundle_id} value={bundle.bundle_id}>
-                  {bundle.date ? new Date(bundle.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Unknown'}
-                  {' - '}
-                  {bundle.planned_start_time
-                    ? formatTimeLabel(bundle.planned_start_time)
-                    : formatDateTimeLabel(bundle.planned_start_at || bundle.actual_first_start_at)}
-                  {' to '}
-                  {bundle.planned_end_time
-                    ? formatTimeLabel(bundle.planned_end_time)
-                    : formatDateTimeLabel(bundle.planned_end_at || bundle.actual_last_end_at)}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-        {profiledStudent ? (
-          <div className={`rounded-lg border px-3 py-2 text-sm font-medium inline-flex items-center gap-2 ${
-            studentHighlights.resilience === true
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : studentHighlights.resilience === false
-                ? 'border-rose-200 bg-rose-50 text-rose-800'
-                : 'border-slate-200 bg-slate-50 text-slate-700'
-          }`}>
-            {studentHighlights.resilience === true
-              ? 'Resilient'
-              : studentHighlights.resilience === false
-                ? 'Dropout Risk'
-                : 'No Major Gap'}
-            <span className="text-xs font-semibold opacity-80">
-              {studentHighlights.resilience === true
-                ? 'Returned after major gaps'
-                : studentHighlights.resilience === false
-                  ? 'Did not return after a major gap'
-                  : 'No 20+ minute break in selected pulse session'}
-            </span>
-          </div>
-        ) : null}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-lg font-semibold text-gray-900">Participation Radar</h4>
-              <SparklesIcon className="w-5 h-5 text-blue-500" />
+      ) : null}
+
+      {activeTab === 'trends' ? (
+        <div className="grid grid-cols-1 gap-5">
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-base font-semibold text-slate-900">Trend Snapshot</h3>
+            <p className="text-xs text-slate-500">Class health favors breadth and consistency over raw totals.</p>
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <MetricCard compact label="Retention Rate" value={`${trendSummary.retentionRate}%`} hint="Timespan average of students who stayed for more than 90% of each session" />
+              <MetricCard compact label="Active Student %" value={`${trendSummary.activeStudentRate}%`} hint="Timespan average of per-session students who sent at least one signal" />
+              <MetricCard compact label="Attendance" value={`${trendSummary.attendanceRate}%`} hint="Timespan average attendance" />
+              <MetricCard compact label="Class Health" value={trendSummary.classHealth} hint="Most frequent quadrant across the selected timespan" />
             </div>
-            <div className="mb-3">
-              <label htmlFor="student-select" className="text-xs uppercase tracking-wide text-gray-500">Profiled Student</label>
-              <select
-                id="student-select"
-                value={profiledStudentId || ''}
-                onChange={(event) => setProfiledStudentId(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              >
-                {studentsForProfile.map((student) => (
-                  <option key={student.id} value={student.id}>{student.full_name}</option>
-                ))}
-              </select>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Weekly Attendance, Breadth, and Baseline</h3>
+                <p className="text-xs text-slate-500">Breadth is the average per-session percent of students who sent at least one signal. Dashed lines show the recent benchmark.</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">Most recent calendar week: {latestTrendWeek?.week || 'n/a'}</span>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">Breadth trend: {trendSummary.breadthTrend > 0 ? '+' : ''}{trendSummary.breadthTrend}%</span>
+              </div>
             </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <RadarChart data={profileRadarComparisonData}>
-                <PolarGrid />
-                <PolarAngleAxis dataKey="axis" tick={{ fontSize: 11 }} />
-                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} />
-                <Radar dataKey="classAvg" stroke="#94a3b8" fill="#cbd5e1" fillOpacity={0.25} name="Class Average" />
-                <Radar dataKey="student" stroke="#2563eb" fill="#2563eb" fillOpacity={0.45} name="Student" />
-                <Tooltip />
-              </RadarChart>
-            </ResponsiveContainer>
-            {profiledStudent && (
-              <div className="text-sm text-gray-600 mt-2">
-                {profiledStudent.full_name} - engagement score {profiledStudent.engagement_score} • {studentPersona}
+
+            <div className="mt-4 h-80">
+              <ChartCanvas height={320}>
+                {(chartWidth, chartHeight) => (
+                  <ComposedChart width={chartWidth} height={chartHeight} data={weeklyTrends}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Line yAxisId="left" type="monotone" dataKey="attendanceRate" name="Attendance %" stroke="#0f766e" strokeWidth={2} dot={{ r: 2 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="activeStudentRate" name="Active Student %" stroke="#2563eb" strokeWidth={2} dot={{ r: 2 }} />
+                    <Line yAxisId="left" type="monotone" dataKey="attendanceBenchmark" name="Attendance Benchmark" stroke="#94a3b8" strokeDasharray="5 5" strokeOpacity={0.55} strokeWidth={2} dot={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="breadthBenchmark" name="Breadth Benchmark" stroke="#cbd5e1" strokeDasharray="5 5" strokeOpacity={0.75} strokeWidth={2} dot={false} />
+                    {weeklyTrends.map((week) => {
+                      const markerText = Array.isArray(week.eventTags) ? week.eventTags.slice(0, 2).join(' / ') : '';
+                      if (!markerText) return null;
+                      return (
+                        <ReferenceLine
+                          key={week.weekKey}
+                          x={week.week}
+                          stroke="#cbd5e1"
+                          strokeDasharray="3 3"
+                          ifOverflow="extendDomain"
+                          label={{ value: markerText, position: 'top', fill: '#64748b', fontSize: 10 }}
+                        />
+                      );
+                    })}
+                  </ComposedChart>
+                )}
+              </ChartCanvas>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Signal Pulse</h3>
+                <p className="text-xs text-slate-500">Shows when interactions happen in the selected calendar week bucket, scaled to that week's longest bundled session timeline.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-600">
+                {weeklyTrends.length > 1 ? (
+                  <select
+                    value={selectedTrendPulseWeek?.weekKey || ''}
+                    onChange={(event) => setSelectedTrendPulseWeekKey(event.target.value)}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                    aria-label="Signal pulse week selector"
+                  >
+                    {weeklyTrends.map((week) => (
+                      <option key={week.weekKey} value={week.weekKey}>
+                        Week of {week.week}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">{selectedTrendPulseWeek?.week || 'n/a'}</span>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">5-minute bins</span>
+              </div>
+            </div>
+
+            {trendPulseData.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-600">No pulse data in the selected range.</p>
+            ) : (
+              <div className="mt-4 h-64">
+                <ChartCanvas height={256}>
+                  {(chartWidth, chartHeight) => (
+                    <AreaChart width={chartWidth} height={chartHeight} data={trendPulseData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Area type="monotone" dataKey="activity" name="Activity Pulse" stroke="#2563eb" fill="#dbeafe" fillOpacity={0.7} />
+                      <Line type="monotone" dataKey="chat" name="Chat" stroke="#2563eb" strokeWidth={1.5} dot={false} />
+                      <Line type="monotone" dataKey="reaction" name="Reactions" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
+                      <Line type="monotone" dataKey="handRaise" name="Hand Raises" stroke="#16a34a" strokeWidth={1.5} dot={false} />
+                      <Line type="monotone" dataKey="micToggle" name="Mic Toggles" stroke="#7c3aed" strokeWidth={1.5} dot={false} />
+                    </AreaChart>
+                  )}
+                </ChartCanvas>
               </div>
             )}
-          </div>
+          </section>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm xl:col-span-2">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-lg font-semibold text-gray-900">Highs & Lows</h4>
-              <HeartIcon className="w-5 h-5 text-rose-500" />
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-base font-semibold text-slate-900">Engagement Quadrant</h3>
+            <p className="text-xs text-slate-500">Weekly states are based on attendance versus active breadth in the selected range.</p>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.35fr]">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { key: 'Vibrant', title: 'Vibrant', hint: 'High Attendance + High Breadth', tone: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+                  { key: 'Spectator', title: 'Spectator', hint: 'High Attendance + Low Breadth', tone: 'border-amber-200 bg-amber-50 text-amber-700' },
+                  { key: 'Fragmented', title: 'Fragmented', hint: 'Low Attendance + High Breadth', tone: 'border-blue-200 bg-blue-50 text-blue-700' },
+                  { key: 'Disengaged', title: 'Disengaged', hint: 'Low Attendance + Low Breadth', tone: 'border-rose-200 bg-rose-50 text-rose-700' },
+                ].map((cell) => (
+                  <div
+                    key={cell.key}
+                    className={`rounded-xl border p-3 ${cell.tone} ${trendQuadrants.latest === cell.key ? 'ring-2 ring-slate-900/10' : ''}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold">{cell.title}</p>
+                      <span className="text-xs font-bold">{trendQuadrants.counts[cell.key]}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] opacity-80">{cell.hint}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">Most Recent Week Health</p>
+                <p className="mt-1 text-xs text-slate-500">{latestTrendWeek?.week || 'No week selected'} · {trendQuadrants.latest}</p>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm text-slate-700">
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-xs text-slate-500">Attendance</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">{latestTrendWeek ? `${latestTrendWeek.attendanceRate}%` : '-'}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-xs text-slate-500">Breadth</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">{latestTrendWeek ? `${latestTrendWeek.activeStudentRate}%` : '-'}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-slate-500">Breadth reflects the percentage of students who sent at least one signal in the week.</p>
+              </div>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">The Climbers & Sliders</h3>
+                <p className="text-xs text-slate-500">Students with the biggest week-over-week change in signal intensity.</p>
+              </div>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600">
+                Based on the last 7 days vs the previous 7 days
+              </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <p className="text-xs uppercase tracking-wide font-semibold text-emerald-800">Strengths</p>
-                <div className="mt-2 space-y-2">
-                  {studentHighlights.strengths.length === 0 ? (
-                    <p className="text-sm text-emerald-900">
-                      {studentScope === 'pulse-session'
-                        ? 'No clear outlier strengths in this pulse session yet.'
-                        : 'No clear outlier strengths yet for this date range.'}
-                    </p>
-                  ) : studentHighlights.strengths.map((line) => (
-                    <p key={line} className="text-sm text-emerald-900">{line}</p>
+                <h4 className="text-sm font-semibold text-emerald-800">Climbers</h4>
+                <div className="mt-3 space-y-2">
+                  {trendMovers.climbers.length === 0 ? (
+                    <p className="text-sm text-emerald-700/80">No clear improvers in this range.</p>
+                  ) : trendMovers.climbers.map((student) => (
+                    <div key={student.id} className="flex items-center justify-between rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm">
+                      <span className="font-medium text-slate-900">{student.name}</span>
+                      <span className="font-semibold text-emerald-700">+{student.delta}</span>
+                    </div>
                   ))}
                 </div>
               </div>
 
               <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                <p className="text-xs uppercase tracking-wide font-semibold text-rose-800">Concerns</p>
-                <div className="mt-2 space-y-2">
-                  {studentHighlights.concerns.length === 0 ? (
-                    <p className="text-sm text-rose-900">No critical concerns detected for this student in the selected range.</p>
-                  ) : studentHighlights.concerns.map((line) => (
-                    <p key={line} className="text-sm text-rose-900">{line}</p>
+                <h4 className="text-sm font-semibold text-rose-800">Sliders</h4>
+                <div className="mt-3 space-y-2">
+                  {trendMovers.sliders.length === 0 ? (
+                    <p className="text-sm text-rose-700/80">No clear declines in this range.</p>
+                  ) : trendMovers.sliders.map((student) => (
+                    <div key={student.id} className="flex items-center justify-between rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm">
+                      <span className="font-medium text-slate-900">{student.name}</span>
+                      <span className="font-semibold text-rose-700">{student.delta}</span>
+                    </div>
                   ))}
                 </div>
               </div>
             </div>
-
-            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 flex items-start gap-2">
-              <ExclamationTriangleIcon className="w-5 h-5 mt-0.5 text-slate-500" />
-              <p>
-                Response latency compares this student against class late-join baseline.
-                Resilience checks whether the student returns after 20+ minute session gaps.
-              </p>
-            </div>
-          </div>
+          </section>
         </div>
-      </section>
       ) : null}
 
-      {showTrendsTab ? (
-      <section className="space-y-5 rounded-2xl border border-gray-200 bg-gray-50/40 p-5">
-        <h3 className="text-xl font-semibold text-gray-900">Trends</h3>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <h4 className="text-lg font-semibold text-gray-900 mb-3">Attendance Decay Line</h4>
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={longitudinalAttendanceData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="date" stroke="#6b7280" style={{ fontSize: '12px' }} />
-                <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="minutesAttended" stroke="#2563eb" strokeWidth={3} name="Minutes Attended" />
-                <Line type="monotone" dataKey="normalizedAttendance" stroke="#16a34a" strokeWidth={2} name="Normalized Attendance %" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <h4 className="text-lg font-semibold text-gray-900 mb-3">Late-Joiner Trend</h4>
-            <ResponsiveContainer width="100%" height={280}>
-              <ScatterChart>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" dataKey="sessions" name="Fragments Observed" stroke="#6b7280" />
-                <YAxis type="number" dataKey="avgLateMinutes" name="Avg Late Minutes" stroke="#6b7280" />
-                <Tooltip
-                  cursor={{ strokeDasharray: '3 3' }}
-                  formatter={(value, name) => [value, name]}
-                  labelFormatter={(_, payload) => payload?.[0]?.payload?.name || ''}
-                />
-                <Scatter name="Students" data={lateJoinerData} fill="#f97316">
-                  {lateJoinerData.map((entry) => (
-                    <Cell key={entry.studentId} fill="#f97316" />
-                  ))}
-                </Scatter>
-              </ScatterChart>
-            </ResponsiveContainer>
-          </div>
+      {bundledSessionRows.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+          <p className="text-base font-semibold text-slate-900">No analytics data in this range</p>
+          <p className="mt-2 text-sm text-slate-600">Try widening the date range or ensure sessions have ended with saved attendance.</p>
         </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-          <h4 className="text-lg font-semibold text-gray-900 mb-3">Active vs Passive Ratio by Week</h4>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={weeklyActivePassiveData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="week" stroke="#6b7280" style={{ fontSize: '12px' }} />
-              <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="active" stackId="a" fill="#10b981" name="Active" />
-              <Bar dataKey="passive" stackId="a" fill="#94a3b8" name="Passive" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
-      ) : null}
-
-      {showStudentTab ? (
-      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Students Overview</h3>
-          <UserGroupIcon className="w-5 h-5 text-slate-600" />
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Attendance</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Interactions</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Speaking</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Engagement</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {[...studentsForProfile]
-                .sort((left, right) => toNumber(right.engagement_score) - toNumber(left.engagement_score))
-                .map((student) => (
-                  <tr key={student.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{student.full_name}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{toNumber(student.attendance_rate)}%</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{toNumber(student.total_interactions)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{formatMinutes(student.speaking_proxy_minutes)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm font-semibold text-gray-900">{student.engagement_score}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">
-                      <div className="flex justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setProfiledStudentId(student.id)}
-                          className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-                        >
-                          Profile
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onSelectStudent && onSelectStudent(student.id)}
-                          className="px-2.5 py-1 rounded bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100"
-                        >
-                          Open
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      ) : null}
-
-      {showSessionTab && hasBundleData && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Core Credit Window Reporting</h3>
-              <p className="text-sm text-gray-500">Session windows, breaks, and overtime separated for fair normalization.</p>
-            </div>
-            <CalendarDaysIcon className="w-6 h-6 text-indigo-600" />
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session Day</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Planned Window</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actual Window</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Core Credit</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Early</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Break</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Overtime</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Interactions</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Speaking Proxy</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {bundleRows.map((bundle) => (
-                  <tr key={bundle.bundle_id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">
-                        {new Date(bundle.date).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
-                      </div>
-                      <div className="text-xs text-gray-500 capitalize">{bundle.day_name || 'unspecified'}</div>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">
-                      {formatTimeLabel(bundle.planned_start_time)} - {formatTimeLabel(bundle.planned_end_time)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">
-                      {formatDateTimeLabel(bundle.actual_first_start_at)} - {formatDateTimeLabel(bundle.actual_last_end_at)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{formatMinutes(bundle.core_credit_minutes)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{formatMinutes(bundle.early_start_minutes)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{formatMinutes(bundle.break_minutes)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{formatMinutes(bundle.overtime_minutes)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{toNumber(bundle.participationTotals.totalInteractions)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-900">{formatMinutes(bundle.participationTotals.speakingProxyMinutes)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {showSessionTab ? (
-      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-        <div className="flex flex-col gap-2 mb-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">Sessions Drilldown</h3>
-            <p className="text-sm text-gray-500">
-              {drilldownMode === 'session'
-                ? 'Per-session points are shown for short windows.'
-                : 'Data is automatically bucketed by week to keep long-range trends readable.'}
-            </p>
-          </div>
-          <HandRaisedIcon className="w-5 h-5 text-sky-600" />
-        </div>
-        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Legend Guide</p>
-          <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-slate-700 md:grid-cols-2">
-            <p><span className="font-semibold text-sky-700">Interactions / Hour</span>: event density normalized by session length.</p>
-            <p><span className="font-semibold text-emerald-700">Presence %</span>: students present out of rostered students.</p>
-            <p><span className="font-semibold text-amber-700">Participation %</span>: active participants out of present students.</p>
-            <p><span className="font-semibold text-rose-700">Gap (pp)</span>: Presence % minus Participation % (lower is better).</p>
-          </div>
-        </div>
-        <ResponsiveContainer width="100%" height={280}>
-          <LineChart data={fragmentDrilldownData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="label" stroke="#6b7280" style={{ fontSize: '12px' }} />
-            <YAxis yAxisId="percent" domain={[0, 100]} stroke="#6b7280" style={{ fontSize: '12px' }} />
-            <YAxis yAxisId="intensity" orientation="right" stroke="#6b7280" style={{ fontSize: '12px' }} />
-            <Tooltip
-              formatter={(value, seriesName, context) => {
-                if (seriesName === 'Gap (pp)' || seriesName === 'Presence %' || seriesName === 'Participation %') {
-                  return [`${value}%`, seriesName];
-                }
-
-                if (seriesName === 'Interactions / Hour') {
-                  const bucketSize = context?.payload?.bucketSize || 1;
-                  const suffix = drilldownMode === 'weekly' ? ` (${bucketSize} sessions)` : '';
-                  return [value, `${seriesName}${suffix}`];
-                }
-
-                return [value, seriesName];
-              }}
-            />
-            <Legend />
-            <Line
-              type="monotone"
-              dataKey="interactionsPerHour"
-              yAxisId="intensity"
-              stroke="#0284c7"
-              strokeWidth={2.5}
-              name="Interactions / Hour"
-              dot={drilldownMode === 'session' ? { r: 3 } : false}
-            />
-            <Line
-              type="monotone"
-              dataKey="presenceRate"
-              yAxisId="percent"
-              stroke="#059669"
-              strokeWidth={2}
-              name="Presence %"
-              dot={drilldownMode === 'session' ? { r: 2.5 } : false}
-            />
-            <Line
-              type="monotone"
-              dataKey="participationRate"
-              yAxisId="percent"
-              stroke="#d97706"
-              strokeWidth={2}
-              name="Participation %"
-              dot={drilldownMode === 'session' ? { r: 2.5 } : false}
-            />
-            <Line
-              type="monotone"
-              dataKey="efficiencyGap"
-              yAxisId="percent"
-              stroke="#e11d48"
-              strokeWidth={2}
-              name="Gap (pp)"
-              dot={drilldownMode === 'session' ? { r: 2.5 } : false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
       ) : null}
     </div>
   );
