@@ -12,6 +12,24 @@ import {
   EyeSlashIcon
 } from '@heroicons/react/24/outline';
 
+const EXTENSION_TOKEN_VAULT_KEY = 'engagium.extensionTokenVault';
+
+const loadTokenVault = () => {
+  if (typeof window === 'undefined') return {};
+
+  try {
+    const raw = window.localStorage.getItem(EXTENSION_TOKEN_VAULT_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+    return parsed;
+  } catch {
+    return {};
+  }
+};
+
 const Settings = () => {
   const { user } = useAuth();
   
@@ -51,6 +69,31 @@ const Settings = () => {
   // Active tokens state
   const [activeTokens, setActiveTokens] = useState([]);
   const [loadingTokens, setLoadingTokens] = useState(true);
+  const [tokenVault, setTokenVault] = useState(() => loadTokenVault());
+  const [revealedTokenIds, setRevealedTokenIds] = useState({});
+
+  const persistTokenVault = (vault) => {
+    setTokenVault(vault);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(EXTENSION_TOKEN_VAULT_KEY, JSON.stringify(vault));
+    }
+  };
+
+  const storeTokenInVault = ({ token, tokenPreview, expiresAt }) => {
+    if (!token || !tokenPreview) return;
+
+    const nextVault = {
+      ...tokenVault,
+      [tokenPreview]: {
+        token,
+        tokenPreview,
+        expiresAt: expiresAt || null,
+        storedAt: new Date().toISOString(),
+      },
+    };
+
+    persistTokenVault(nextVault);
+  };
 
   // Initialize profile data
   useEffect(() => {
@@ -67,6 +110,27 @@ const Settings = () => {
   useEffect(() => {
     loadActiveTokens();
   }, []);
+
+  useEffect(() => {
+    if (activeTokens.length === 0) return;
+
+    const now = new Date();
+    let hasChanges = false;
+    const nextVault = { ...tokenVault };
+
+    Object.entries(nextVault).forEach(([preview, item]) => {
+      const expiryText = item?.expiresAt;
+      const expiresAt = expiryText ? new Date(expiryText) : null;
+      if (expiresAt && !Number.isNaN(expiresAt.getTime()) && expiresAt <= now) {
+        delete nextVault[preview];
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      persistTokenVault(nextVault);
+    }
+  }, [activeTokens]);
 
   const loadActiveTokens = async () => {
     try {
@@ -160,6 +224,11 @@ const Settings = () => {
         setExtensionToken(response.data.token);
         setShowToken(true);
         setTokenSuccess(response.message || 'Token generated successfully!');
+        storeTokenInVault({
+          token: response.data.token,
+          tokenPreview: response.data.token_preview,
+          expiresAt: response.data.expires_at,
+        });
         await loadActiveTokens(); // Reload tokens list
       } else {
         setTokenError(response.error || 'Failed to generate token');
@@ -227,8 +296,15 @@ const Settings = () => {
     return { text: 'Active', color: 'text-green-600', bg: 'bg-green-100' };
   };
 
+  const toggleRevealToken = (tokenId) => {
+    setRevealedTokenIds((previous) => ({
+      ...previous,
+      [tokenId]: !previous[tokenId],
+    }));
+  };
+
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="w-full space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
 
       {/* Profile Information */}
@@ -516,7 +592,7 @@ const Settings = () => {
                 >
                   Generate New Token
                 </button>
-                <span className="text-xs text-gray-500">Token expires in 30 days</span>
+                <span className="text-xs text-gray-500">Token expires in 30 days and can be revealed later on this browser.</span>
               </div>
             </div>
           )}
@@ -546,6 +622,9 @@ const Settings = () => {
             <div className="space-y-3">
               {activeTokens.map((token) => {
                 const status = getTokenStatus(token);
+                const vaultEntry = tokenVault[token.token_preview];
+                const canReveal = Boolean(vaultEntry?.token);
+                const isRevealed = Boolean(revealedTokenIds[token.id]) && canReveal;
                 return (
                   <div 
                     key={token.id} 
@@ -554,16 +633,29 @@ const Settings = () => {
                     <div className="flex-1">
                       <div className="flex items-center gap-3">
                         <span className="font-mono text-sm font-medium text-gray-900">
-                          {token.token_preview}...
+                          {isRevealed ? vaultEntry.token : `${token.token_preview}...`}
                         </span>
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${status.bg} ${status.color}`}>
                           {status.text}
                         </span>
+                        {canReveal && (
+                          <button
+                            onClick={() => toggleRevealToken(token.id)}
+                            className="ml-1 p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition"
+                            title={isRevealed ? 'Hide token' : 'Reveal token'}
+                            aria-label={isRevealed ? 'Hide token' : 'Reveal token'}
+                          >
+                            {isRevealed ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+                          </button>
+                        )}
                       </div>
                       <div className="mt-1 text-xs text-gray-500 space-y-0.5">
                         <div>Created: {formatDate(token.created_at)}</div>
                         <div>Last used: {formatDate(token.last_used_at)}</div>
                         <div>Expires: {formatDate(token.expires_at)}</div>
+                        {!canReveal && (
+                          <div className="text-amber-700">Full token not available in this browser vault.</div>
+                        )}
                       </div>
                     </div>
                     {!token.revoked && new Date(token.expires_at) > new Date() && (

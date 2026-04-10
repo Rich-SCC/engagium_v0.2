@@ -29,9 +29,6 @@ const Analytics = () => {
               Back to classes
             </button>
             <h1 className="mt-3 text-3xl font-bold text-gray-900">{formatClassDisplay(selectedClass)}</h1>
-            <p className="mt-2 text-sm text-gray-500">
-              Attendance grouped into sessions (from schedule windows), with each session composed of one or more session fragments.
-            </p>
           </div>
         </div>
 
@@ -44,9 +41,6 @@ const Analytics = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Analytics</h1>
-        <p className="mt-2 text-sm text-gray-500">
-          Choose a class to view attendance by sessions and session fragments.
-        </p>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">

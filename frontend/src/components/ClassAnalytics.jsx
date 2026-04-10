@@ -29,25 +29,6 @@ const TAB_DEFS = [
   { key: 'trends', label: 'Trends' },
 ];
 
-const METRIC_GLOSSARY = [
-  {
-    label: 'Attendance Rate',
-    definition: 'Percent of sessions where the student was marked present or late.',
-  },
-  {
-    label: 'Engagement Score',
-    definition: '60% attendance + 40% participation signals (speaking 40%, chat 25%, hand raises 20%, reactions 15%).',
-  },
-  {
-    label: 'Speaking Proxy Minutes',
-    definition: 'Estimated speaking time inferred from mic-toggle intervals; not voice transcription.',
-  },
-  {
-    label: 'Participation Rate',
-    definition: 'Percent of attended sessions with at least one engagement signal logged.',
-  },
-];
-
 const formatDate = (value) => {
   if (!value) return '-';
   const date = new Date(value);
@@ -74,10 +55,10 @@ const EARLY_BUFFER_MINUTES = 30;
 const OVERTIME_BUFFER_MINUTES = 90;
 
 const TIMELINE_COLORS = {
-  chat: '#2563eb',
+  chat: '#557170',
   reaction: '#f59e0b',
   handRaise: '#22c55e',
-  micToggle: '#7c3aed',
+  micToggle: '#3a5050',
   activity: '#64748b',
 };
 
@@ -1086,7 +1067,7 @@ const ClassAnalytics = ({ classId }) => {
   }, [studentRows, studentHistoryMap]);
 
   const selectedStudentSignalMixData = useMemo(() => ([
-    { name: 'Direct Interaction', value: selectedStudentBehavior.signalMix.direct, color: '#2563eb' },
+    { name: 'Direct Interaction', value: selectedStudentBehavior.signalMix.direct, color: '#557170' },
     { name: 'Expressive Interaction', value: selectedStudentBehavior.signalMix.expressive, color: '#f59e0b' },
     { name: 'Passive Metadata', value: selectedStudentBehavior.signalMix.passive, color: '#64748b' },
   ]), [selectedStudentBehavior]);
@@ -1330,7 +1311,7 @@ const ClassAnalytics = ({ classId }) => {
         avgDuration: 0,
         interactionsPerSession: 0,
         totalSpeakingMinutes: 0,
-        activeStudentRate: 0,
+        signalsPerPresentStudent: 0,
       };
     }
 
@@ -1345,15 +1326,14 @@ const ClassAnalytics = ({ classId }) => {
       { attendance: 0, duration: 0, interactions: 0, speaking: 0 }
     );
 
-    const activeStudents = studentRows.filter((row) => toNumber(row.total_interactions) > 0).length;
-    const totalStudents = studentRows.length || 1;
+    const totalPresent = bundledSessionRows.reduce((sum, row) => sum + toNumber(row.present_count), 0);
 
     return {
       avgAttendanceRate: round(totals.attendance / bundledSessionRows.length, 1),
       avgDuration: round(totals.duration / bundledSessionRows.length, 1),
       interactionsPerSession: round(totals.interactions / bundledSessionRows.length, 1),
       totalSpeakingMinutes: round(totals.speaking, 1),
-      activeStudentRate: round((activeStudents / totalStudents) * 100, 1),
+      signalsPerPresentStudent: totalPresent > 0 ? round(totals.interactions / totalPresent, 2) : 0,
       avgEngagementScore: hasValidNumericValue(analytics?.overallStats?.avgEngagementScore)
         ? round(toNumber(analytics.overallStats.avgEngagementScore), 1)
         : round(
@@ -1793,14 +1773,24 @@ const ClassAnalytics = ({ classId }) => {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-900">Professor Analytics</h2>
-            <p className="text-sm text-slate-600">
-              Attendance is the anchor. Engagement signals come from chat activity, reactions, hand raises, and mic toggles.
-            </p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2 rounded-lg bg-slate-100 p-1">
+            {TAB_DEFS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+                  activeTab === tab.key
+                    ? 'bg-accent-700 text-white'
+                    : 'text-slate-700 hover:bg-accent-100 hover:text-accent-800'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
+
           <DateRangePicker
             variant="compact"
             startDate={startDate}
@@ -1810,22 +1800,6 @@ const ClassAnalytics = ({ classId }) => {
             onQuickSelect={onQuickSelect}
           />
         </div>
-
-        <div className="mt-5 flex flex-wrap gap-2 rounded-lg bg-slate-100 p-1">
-          {TAB_DEFS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-                activeTab === tab.key
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
       </div>
 
       {activeTab === 'summary' ? (
@@ -1834,7 +1808,7 @@ const ClassAnalytics = ({ classId }) => {
             <MetricCard label="Attendance Rate" value={`${summary.avgAttendanceRate}%`} hint="Average across sessions in range" />
             <MetricCard label="Minutes Present" value={formatMinutes(summary.avgDuration)} hint="Average student presence per session" />
             <MetricCard label="Engagement Signals" value={String(summary.interactionsPerSession)} hint="Avg. logged interactions per session" />
-            <MetricCard label="Speaking Proxy" value={formatMinutes(summary.totalSpeakingMinutes)} hint="Total inferred speaking time in range" />
+            <MetricCard label="Signals / Present Student" value={String(summary.signalsPerPresentStudent)} hint="Total interactions divided by total present students across sessions" />
             <MetricCard label="Avg Engagement" value={String(summary.avgEngagementScore)} hint="Average student engagement score" />
           </div>
 
@@ -1887,23 +1861,11 @@ const ClassAnalytics = ({ classId }) => {
             </section>
           </div>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="text-base font-semibold text-slate-900">Metric Definitions</h3>
-            <p className="text-xs text-slate-500">Quick reference for how key metrics are calculated.</p>
-            <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
-              {METRIC_GLOSSARY.map((item) => (
-                <div key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-semibold text-slate-800">{item.label}</p>
-                  <p className="mt-1 text-xs text-slate-600">{item.definition}</p>
-                </div>
-              ))}
-            </div>
-          </section>
         </div>
       ) : null}
 
       {activeTab === 'student' ? (
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.25fr_1.75fr]">
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1.75fr)]">
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1932,21 +1894,21 @@ const ClassAnalytics = ({ classId }) => {
                     return (
                       <tr
                         key={student.id}
-                        className={`cursor-pointer transition hover:bg-slate-50 ${selectedStudent?.id === student.id ? 'bg-blue-50' : ''}`}
+                        className={`cursor-pointer transition hover:bg-slate-50 ${selectedStudent?.id === student.id ? 'bg-accent-50' : ''}`}
                         onClick={() => setSelectedStudentId(String(student.id))}
                       >
                         <td className="px-3 py-3 align-middle text-sm font-medium text-slate-900">{student.full_name}</td>
                         <td className="px-3 py-3 align-middle">
                           {sparklinePath ? (
                             <svg viewBox="0 0 88 24" className="h-6 w-[88px] overflow-visible">
-                              <path d={sparklinePath} fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              <path d={sparklinePath} fill="none" stroke="#557170" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                               {student.sparklineValues.map((value, index) => {
                                 const x = student.sparklineValues.length === 1 ? 44 : (index / (student.sparklineValues.length - 1)) * 88;
                                 const min = Math.min(...student.sparklineValues);
                                 const max = Math.max(...student.sparklineValues);
                                 const range = max - min || 1;
                                 const y = 24 - (((value - min) / range) * 24);
-                                return <circle key={`${student.id}-spark-${index}`} cx={x} cy={y} r="1.8" fill="#2563eb" />;
+                                return <circle key={`${student.id}-spark-${index}`} cx={x} cy={y} r="1.8" fill="#557170" />;
                               })}
                             </svg>
                           ) : (
@@ -1973,8 +1935,8 @@ const ClassAnalytics = ({ classId }) => {
             {selectedStudent ? (
               <>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)] xl:items-start">
-                    <div>
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)] xl:items-start">
+                    <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Engagement Snapshot</p>
                       <h3 className="mt-1 text-xl font-semibold text-slate-900">{selectedStudent.full_name}</h3>
                       <p className="mt-1 text-sm text-slate-600">A quick read on whether this student looks typical, improving, or concerning.</p>
@@ -1985,7 +1947,7 @@ const ClassAnalytics = ({ classId }) => {
                         <span className={`rounded-full border px-3 py-1 font-semibold ${selectedStudentBehavior.reliabilityScore >= 80 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : selectedStudentBehavior.reliabilityScore >= 55 ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
                           {selectedStudentBehavior.reliabilityLabel} · {round(selectedStudentBehavior.reliabilityScore, 1)}/100
                         </span>
-                        <span className={`rounded-full border px-3 py-1 font-semibold ${selectedStudentBehavior.velocityDirection === 'up' ? 'border-blue-200 bg-blue-50 text-blue-700' : selectedStudentBehavior.velocityDirection === 'down' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-700'}`}>
+                        <span className={`rounded-full border px-3 py-1 font-semibold ${selectedStudentBehavior.velocityDirection === 'up' ? 'border-accent-200 bg-accent-50 text-accent-700' : selectedStudentBehavior.velocityDirection === 'down' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-700'}`}>
                           {selectedStudentBehavior.velocityDirection === 'up' ? '▲' : selectedStudentBehavior.velocityDirection === 'down' ? '▼' : '•'} {selectedStudentBehavior.velocityDelta > 0 ? '+' : ''}{selectedStudentBehavior.velocityDelta} this week vs semester avg
                         </span>
                         {selectedStudentBehavior.lurker ? (
@@ -1994,7 +1956,7 @@ const ClassAnalytics = ({ classId }) => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       <MetricCard compact label="Attendance" value={`${round(selectedStudent.attendance_rate, 1)}%`} hint={`Class average ${selectedStudentClassAverages.attendance}%`} />
                       <MetricCard compact label="Engagement" value={String(round(selectedStudent.engagement_score, 1))} hint={`Class average ${selectedStudentClassAverages.engagement}`} />
                       <MetricCard compact label="Reliability" value={`${round(selectedStudentBehavior.reliabilityScore, 0)}/100`} hint={`Join/leave stability across ${selectedStudentBehavior.historyCount} sessions`} />
@@ -2021,8 +1983,8 @@ const ClassAnalytics = ({ classId }) => {
                                   <div key={`${row.id || row.date || index}`} className="flex flex-col items-center gap-1">
                                     <span
                                       title={`${formatDate(row.date)} · ${row.heatmapSignals} signal(s)`}
-                                      className="h-5 w-5 rounded-full border border-blue-300 shadow-sm"
-                                      style={{ backgroundColor: `rgba(37, 99, 235, ${opacity})` }}
+                                      className="h-5 w-5 rounded-full border border-accent-300 shadow-sm"
+                                      style={{ backgroundColor: `rgba(85, 113, 112, ${opacity})` }}
                                     />
                                     <span className="text-[10px] text-slate-400">{formatDate(row.date)}</span>
                                   </div>
@@ -2047,16 +2009,16 @@ const ClassAnalytics = ({ classId }) => {
                     )}
                   </section>
 
-                  <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <h4 className="text-base font-semibold text-slate-900">Signal Mix</h4>
                     <p className="text-xs text-slate-500">Direct interaction, expressive interaction, and passive metadata.</p>
 
                     {selectedStudentHistory.length === 0 ? (
                       <p className="mt-4 text-sm text-slate-600">No signal data available for this student.</p>
                     ) : (
-                      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[220px_1fr] sm:items-center">
-                        <div className="h-52">
-                          <ChartCanvas height={208}>
+                      <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-[260px_1fr] sm:items-center">
+                        <div className="h-64">
+                          <ChartCanvas height={256}>
                             {(chartWidth, chartHeight) => (
                               <PieChart width={chartWidth} height={chartHeight}>
                                 <Tooltip />
@@ -2064,8 +2026,8 @@ const ClassAnalytics = ({ classId }) => {
                                   data={selectedStudentSignalMixData}
                                   dataKey="value"
                                   nameKey="name"
-                                  innerRadius={52}
-                                  outerRadius={78}
+                                  innerRadius={54}
+                                  outerRadius={82}
                                   paddingAngle={3}
                                 >
                                   {selectedStudentSignalMixData.map((entry) => (
@@ -2350,7 +2312,7 @@ const ClassAnalytics = ({ classId }) => {
                     <Tooltip />
                     <Legend />
                     <Line yAxisId="left" type="monotone" dataKey="attendanceRate" name="Attendance %" stroke="#0f766e" strokeWidth={2} dot={{ r: 2 }} />
-                    <Line yAxisId="right" type="monotone" dataKey="activeStudentRate" name="Active Student %" stroke="#2563eb" strokeWidth={2} dot={{ r: 2 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="activeStudentRate" name="Active Student %" stroke="#557170" strokeWidth={2} dot={{ r: 2 }} />
                     <Line yAxisId="left" type="monotone" dataKey="attendanceBenchmark" name="Attendance Benchmark" stroke="#94a3b8" strokeDasharray="5 5" strokeOpacity={0.55} strokeWidth={2} dot={false} />
                     <Line yAxisId="right" type="monotone" dataKey="breadthBenchmark" name="Breadth Benchmark" stroke="#cbd5e1" strokeDasharray="5 5" strokeOpacity={0.75} strokeWidth={2} dot={false} />
                     {weeklyTrends.map((week) => {
@@ -2411,11 +2373,11 @@ const ClassAnalytics = ({ classId }) => {
                       <YAxis tick={{ fontSize: 12 }} />
                       <Tooltip />
                       <Legend />
-                      <Area type="monotone" dataKey="activity" name="Activity Pulse" stroke="#2563eb" fill="#dbeafe" fillOpacity={0.7} />
-                      <Line type="monotone" dataKey="chat" name="Chat" stroke="#2563eb" strokeWidth={1.5} dot={false} />
+                      <Area type="monotone" dataKey="activity" name="Activity Pulse" stroke="#557170" fill="#dce7e6" fillOpacity={0.7} />
+                      <Line type="monotone" dataKey="chat" name="Chat" stroke="#557170" strokeWidth={1.5} dot={false} />
                       <Line type="monotone" dataKey="reaction" name="Reactions" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
                       <Line type="monotone" dataKey="handRaise" name="Hand Raises" stroke="#16a34a" strokeWidth={1.5} dot={false} />
-                      <Line type="monotone" dataKey="micToggle" name="Mic Toggles" stroke="#7c3aed" strokeWidth={1.5} dot={false} />
+                      <Line type="monotone" dataKey="micToggle" name="Mic Toggles" stroke="#3a5050" strokeWidth={1.5} dot={false} />
                     </AreaChart>
                   )}
                 </ChartCanvas>
@@ -2432,7 +2394,7 @@ const ClassAnalytics = ({ classId }) => {
                 {[
                   { key: 'Vibrant', title: 'Vibrant', hint: 'High Attendance + High Breadth', tone: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
                   { key: 'Spectator', title: 'Spectator', hint: 'High Attendance + Low Breadth', tone: 'border-amber-200 bg-amber-50 text-amber-700' },
-                  { key: 'Fragmented', title: 'Fragmented', hint: 'Low Attendance + High Breadth', tone: 'border-blue-200 bg-blue-50 text-blue-700' },
+                  { key: 'Fragmented', title: 'Fragmented', hint: 'Low Attendance + High Breadth', tone: 'border-accent-200 bg-accent-50 text-accent-700' },
                   { key: 'Disengaged', title: 'Disengaged', hint: 'Low Attendance + Low Breadth', tone: 'border-rose-200 bg-rose-50 text-rose-700' },
                 ].map((cell) => (
                   <div
