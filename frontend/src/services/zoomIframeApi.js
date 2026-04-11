@@ -54,6 +54,13 @@ export const zoomIframeAPI = {
 
   getClasses: (token) => request('/classes', { token }),
 
+  addClassLink: (token, classId, linkData) =>
+    request(`/classes/${classId}/links`, {
+      method: 'POST',
+      token,
+      body: linkData,
+    }),
+
   getActiveSessions: (token) => request('/sessions/active', { token }),
 
   getSessionAttendanceWithIntervals: (token, sessionId) =>

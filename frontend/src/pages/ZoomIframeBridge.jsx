@@ -6,6 +6,7 @@ import heroLogo from '@/assets/images/hero-logo.png';
 import {
   ArrowPathIcon,
   CheckCircleIcon,
+  Cog6ToothIcon,
   ExclamationCircleIcon,
   PlayCircleIcon,
   SignalIcon,
@@ -14,7 +15,6 @@ import {
 
 const TOKEN_STORAGE_KEY = 'engagium_zoom_bridge_token';
 const CLASS_ID_STORAGE_KEY = 'engagium_zoom_bridge_class_id';
-const MEETING_LINK_STORAGE_KEY = 'engagium_zoom_bridge_meeting_link';
 const TOKEN_REQUEST_RETRY_DELAYS_MS = [0, 800, 2000];
 
 const getTokenFromUrl = () => {
@@ -87,7 +87,7 @@ const getInitialClassId = () => {
 
 const getInitialMeetingLink = () => {
   const params = new URLSearchParams(window.location.search);
-  return params.get('meetingLink') || getPersistedValue(MEETING_LINK_STORAGE_KEY);
+  return params.get('meetingLink') || '';
 };
 
 const getAutoStart = () => {
@@ -347,6 +347,26 @@ const getMeetingLinkFromZoomInit = (zoomInitResult) => {
   return '';
 };
 
+const buildClassLinkLabel = (selectedClass = {}, meetingLink = '') => {
+  const classSection = String(selectedClass?.section || '').trim();
+  const compactMeetingId = String(meetingLink || '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/$/, '')
+    .split('/')
+    .filter(Boolean)
+    .pop();
+
+  if (classSection && compactMeetingId) {
+    return `${classSection} - ${compactMeetingId} (zoom)`;
+  }
+
+  if (classSection) {
+    return `${classSection} (zoom)`;
+  }
+
+  return 'Saved from Zoom bridge';
+};
+
 const normalizeIdentityValue = (value) => {
   if (value === undefined || value === null) return '';
   return String(value).trim().toLowerCase();
@@ -504,6 +524,7 @@ function ZoomIframeBridge() {
   const [zoomState, setZoomState] = useState({ initialized: false, data: null });
   const [showTokenEditor, setShowTokenEditor] = useState(!getInitialToken());
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [rememberMeetingLink, setRememberMeetingLink] = useState(true);
   const tokenRef = useRef(token);
   const sessionRef = useRef(session);
   const hydratedSessionIdRef = useRef(null);
@@ -543,10 +564,6 @@ function ZoomIframeBridge() {
   useEffect(() => {
     setPersistedValue(CLASS_ID_STORAGE_KEY, selectedClassId?.trim() || '');
   }, [selectedClassId]);
-
-  useEffect(() => {
-    setPersistedValue(MEETING_LINK_STORAGE_KEY, meetingLinkOverride?.trim() || '');
-  }, [meetingLinkOverride]);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -1076,6 +1093,7 @@ function ZoomIframeBridge() {
 
     try {
       const meetingLink = await resolveMeetingLink(zoomState.data);
+      const selectedClass = classes.find((cls) => cls.id === selectedClassId) || null;
 
       const response = await zoomIframeAPI.startSessionFromMeeting(token, {
         class_id: selectedClassId,
@@ -1088,6 +1106,26 @@ function ZoomIframeBridge() {
       const createdSession = response?.data;
       if (!createdSession?.id) {
         throw new Error('Failed to create session');
+      }
+
+      if (rememberMeetingLink) {
+        try {
+          await zoomIframeAPI.addClassLink(token, selectedClassId, {
+            link_url: meetingLink,
+            link_type: 'zoom',
+            label: buildClassLinkLabel(selectedClass, meetingLink),
+            is_primary: true,
+          });
+          appendEvent('Meeting link saved to class', {
+            classId: selectedClassId,
+            meetingLink,
+          });
+        } catch (linkSaveError) {
+          appendEvent('Meeting link save failed', {
+            classId: selectedClassId,
+            reason: linkSaveError?.message || 'Unknown error',
+          });
+        }
       }
 
       setSession(createdSession);
@@ -1536,15 +1574,13 @@ function ZoomIframeBridge() {
   );
 
   const hasToken = Boolean(token?.trim());
-  const tokenPreview = hasToken
-    ? `${token.trim().slice(0, 8)}...${token.trim().slice(-4)}`
-    : '';
   const tokenAccountLabel = tokenAccount
     ? getAccountDisplayName(tokenAccount)
     : '';
   const tokenAccountSummary = tokenAccount?.email
     ? `${tokenAccountLabel} (${tokenAccount.email})`
     : tokenAccountLabel;
+  const tokenAccountEmail = tokenAccount?.email || '';
   const compactEvents = useMemo(() => events.slice(0, 30), [events]);
   const sdkReady = zoomState.initialized;
   const trackingActive = Boolean(session?.id);
@@ -1577,15 +1613,14 @@ function ZoomIframeBridge() {
       : 'Meeting detected. Select your class and start tracking.';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-accent-50/40 text-gray-900 p-3 md:p-4">
-      <div className="max-w-3xl mx-auto space-y-3">
-        <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-          <div className="px-3 py-3 border-b border-gray-200 flex items-center justify-between">
+    <div className="min-h-screen bg-gray-50 text-gray-900 p-4">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <img src={heroLogo} alt="Engagium Logo" className="h-8 w-auto" />
               <div>
-                <h1 className="text-base font-bold text-accent-600 tracking-tight leading-none">engagium</h1>
-                <p className="text-[11px] text-gray-500 mt-0.5">Zoom Live Bridge</p>
+                <h1 className="text-lg font-semibold text-gray-900 tracking-tight leading-none">Engagium</h1>
               </div>
             </div>
 
@@ -1593,10 +1628,19 @@ function ZoomIframeBridge() {
               {hasToken && (
                 <div className="hidden sm:block text-[11px] text-gray-500 max-w-[220px] truncate">
                   {isResolvingTokenAccount
-                    ? `Verifying (${tokenPreview})`
-                    : tokenAccountSummary || `Token: ${tokenPreview}`}
+                    ? 'Verifying account...'
+                    : tokenAccountEmail || tokenAccountSummary || 'Account unavailable'}
                 </div>
               )}
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((prev) => !prev)}
+                className={`inline-flex items-center justify-center h-8 w-8 rounded-lg transition focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1 ${showAdvanced ? 'text-accent-700 bg-accent-100' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'}`}
+                aria-label="Toggle advanced options"
+                title={showAdvanced ? 'Hide Advanced Options' : 'Show Advanced Options'}
+              >
+                <Cog6ToothIcon className="w-4 h-4" />
+              </button>
               <button
                 type="button"
                 onClick={handleRetryInit}
@@ -1609,18 +1653,18 @@ function ZoomIframeBridge() {
             </div>
           </div>
 
-          <div className="p-3 space-y-3">
+          <div className="p-4 space-y-4">
             {(!hasToken || showTokenEditor) && (
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
-                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
                     value={tokenInput}
                     onChange={(e) => setTokenInput(e.target.value)}
                     placeholder="Paste extension token"
                   />
                   <button
-                    className="rounded-lg bg-accent-500 hover:bg-accent-600 text-white px-3 py-2 text-sm font-medium disabled:opacity-60"
+                    className="rounded-lg bg-accent-500 hover:bg-accent-600 text-white px-3 py-2 text-sm font-medium disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
                     onClick={handleApplyToken}
                     disabled={isLoading}
                   >
@@ -1631,7 +1675,7 @@ function ZoomIframeBridge() {
                   <button
                     type="button"
                     onClick={() => setShowTokenEditor(false)}
-                    className="mt-2 text-[11px] text-gray-500 hover:text-gray-700"
+                    className="mt-2 text-[11px] text-gray-500 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1 rounded"
                   >
                     Cancel
                   </button>
@@ -1639,7 +1683,7 @@ function ZoomIframeBridge() {
               </div>
             )}
 
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span
@@ -1657,7 +1701,7 @@ function ZoomIframeBridge() {
                   <button
                     type="button"
                     onClick={() => setShowTokenEditor(true)}
-                    className="text-[11px] text-accent-600 hover:text-accent-700"
+                    className="text-[11px] text-accent-600 hover:text-accent-700 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1 rounded"
                   >
                     Change Token
                   </button>
@@ -1666,9 +1710,9 @@ function ZoomIframeBridge() {
               <div className="text-[11px] text-gray-600 mt-1">{flowHint}</div>
             </div>
 
-            <div className="rounded-lg border border-gray-200 bg-white p-2.5 space-y-2">
+            <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2.5">
               <select
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white text-sm"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
                 value={selectedClassId}
                 onChange={(e) => setSelectedClassId(e.target.value)}
                 disabled={trackingActive || isLoading || !meetingDetected}
@@ -1681,9 +1725,22 @@ function ZoomIframeBridge() {
                 ))}
               </select>
 
+              {!trackingActive && meetingDetected && selectedClassId && (
+                <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={rememberMeetingLink}
+                    onChange={(event) => setRememberMeetingLink(event.target.checked)}
+                    className="rounded border-gray-300 text-accent-600 focus:ring-accent-500"
+                    disabled={trackingActive || isLoading}
+                  />
+                  Remember this meeting link for future sessions
+                </label>
+              )}
+
               {!trackingActive ? (
                 <button
-                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white px-3 py-2.5 text-sm font-semibold disabled:opacity-60"
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent-600 hover:bg-accent-700 text-white px-3 py-2.5 text-sm font-semibold disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
                   onClick={handleStartSession}
                   disabled={isLoading || !selectedClassId || !token || !meetingDetected}
                 >
@@ -1692,7 +1749,7 @@ function ZoomIframeBridge() {
                 </button>
               ) : (
                 <button
-                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white px-3 py-2.5 text-sm font-semibold disabled:opacity-60"
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white px-3 py-2.5 text-sm font-semibold disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
                   onClick={handleEndSession}
                   disabled={isLoading}
                 >
@@ -1702,26 +1759,18 @@ function ZoomIframeBridge() {
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((prev) => !prev)}
-              className="text-[11px] text-accent-600 hover:text-accent-700 font-medium"
-            >
-              {showAdvanced ? 'Hide Advanced Options' : 'Show Advanced Options'}
-            </button>
-
             {showAdvanced && (
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 space-y-2">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
-                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
                     placeholder="Meeting link override"
                     value={meetingLinkOverride}
                     onChange={(e) => setMeetingLinkOverride(e.target.value)}
                     disabled={trackingActive || isLoading}
                   />
                   <button
-                    className="rounded-lg bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 text-sm font-medium disabled:opacity-60"
+                    className="rounded-lg border border-accent-300 bg-accent-50 hover:bg-accent-100 text-accent-800 px-3 py-2 text-sm font-medium disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-1"
                     onClick={handleRefreshClasses}
                     disabled={isLoading || !token}
                   >
@@ -1732,7 +1781,7 @@ function ZoomIframeBridge() {
             )}
 
             {(error || trackingActive) && (
-              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
                 <div className="flex items-start gap-2">
                   {error ? (
                     <ExclamationCircleIcon className="w-4 h-4 text-red-600 mt-0.5" />
@@ -1752,20 +1801,19 @@ function ZoomIframeBridge() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-          <div className="px-3 py-2.5 border-b border-gray-200 flex items-center justify-between">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="p-1.5 bg-accent-100 rounded-lg">
                 <SignalIcon className="w-4 h-4 text-accent-600" />
               </div>
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">Activity Log</h2>
-                <p className="text-[11px] text-gray-500">Recent bridge events for this meeting</p>
               </div>
             </div>
             <span className="text-[11px] text-gray-500">{events.length} events</span>
           </div>
-          <div className="max-h-72 overflow-auto divide-y divide-gray-100 px-3 py-1">
+          <div className="max-h-72 overflow-auto divide-y divide-gray-100 px-4 py-1">
             {compactEvents.length === 0 ? (
               <div className="text-sm text-gray-500 py-8 text-center">No events yet.</div>
             ) : (
