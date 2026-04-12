@@ -6,7 +6,6 @@ const {
   getActiveSessions,
   getSession,
   updateSession,
-  endSession,
   deleteSession,
   getSessionStats,
   getSessionStudents,
@@ -66,9 +65,6 @@ router.post('/attendance/full/bulk', getBulkSessionAttendanceWithIntervals);
 router.get('/:id/full', getSessionWithAttendance);
 router.put('/:id', updateSession); // Only allows title updates post-session
 router.delete('/:id', deleteSession);
-
-// Session lifecycle management
-router.put('/:id/end', endSession); // Manual end (legacy)
 
 // Attendance routes (web app)
 router.get('/:id/attendance', getSessionAttendance);

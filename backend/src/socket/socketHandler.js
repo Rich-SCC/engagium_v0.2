@@ -1,11 +1,40 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Session = require('../models/Session');
+const { getJwtSecret } = require('../config/jwt');
 
 // Store for active sessions and connections
 const activeSessions = new Map(); // sessionId -> Set of socket ids
 const socketSessions = new Map(); // socketId -> session data
 
+const userCanAccessSession = async (user, sessionId) => {
+  const session = await Session.findById(sessionId);
+  if (!session) {
+    return { allowed: false, reason: 'Session not found' };
+  }
+
+  if (user.role === 'admin') {
+    return { allowed: true };
+  }
+
+  if (String(session.instructor_id) !== String(user.id)) {
+    return { allowed: false, reason: 'Access denied to this session' };
+  }
+
+  return { allowed: true };
+};
+
 const socketHandler = (io) => {
+  const logSocketError = (context, error) => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error(`${context}:`, error);
+      return;
+    }
+
+    const message = error?.message || 'Unknown socket error';
+    console.error(`${context}: ${message}`);
+  };
+
   // Store io instance globally and on app for controllers to access
   global.io = io;
   if (global.app) {
@@ -21,7 +50,7 @@ const socketHandler = (io) => {
         return next(new Error('Authentication token required'));
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, getJwtSecret());
       const user = await User.findById(decoded.id);
 
       if (!user) {
@@ -36,20 +65,24 @@ const socketHandler = (io) => {
   });
 
   io.on('connection', (socket) => {
-    console.log(`\n🔌 ========================================`);
-    console.log(`🔌 User connected: ${socket.user.email}`);
-    console.log(`🔌 Socket ID: ${socket.id}`);
-    console.log(`🔌 ========================================\n`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`\n🔌 ========================================`);
+      console.log(`🔌 User connected: ${socket.user.email}`);
+      console.log(`🔌 Socket ID: ${socket.id}`);
+      console.log(`🔌 ========================================\n`);
+    }
 
     // Join instructor-specific room (for receiving events from extension)
     socket.on('join_instructor_room', (data) => {
       const roomName = `instructor_${socket.user.id}`;
       socket.join(roomName);
-      console.log(`📱 ========================================`);
-      console.log(`📱 User ${socket.user.email} joined instructor room`);
-      console.log(`📱 Room Name: ${roomName}`);
-      console.log(`📱 Room Members: ${io.sockets.adapter.rooms.get(roomName)?.size || 0}`);
-      console.log(`📱 ========================================\n`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`📱 ========================================`);
+        console.log(`📱 User ${socket.user.email} joined instructor room`);
+        console.log(`📱 Room Name: ${roomName}`);
+        console.log(`📱 Room Members: ${io.sockets.adapter.rooms.get(roomName)?.size || 0}`);
+        console.log(`📱 ========================================\n`);
+      }
     });
 
     // Join session room
@@ -62,10 +95,11 @@ const socketHandler = (io) => {
           return;
         }
 
-        // Verify user has access to this session
-        // This would require checking session ownership, but we'll keep it simple for now
-        // In a more complete implementation, you'd want to verify the session exists
-        // and the user is the instructor or has proper permissions
+        const access = await userCanAccessSession(socket.user, sessionId);
+        if (!access.allowed) {
+          socket.emit('error', { message: access.reason });
+          return;
+        }
 
         // Join the session room
         socket.join(`session:${sessionId}`);
@@ -83,7 +117,9 @@ const socketHandler = (io) => {
         });
 
         socket.emit('session:joined', { sessionId });
-        console.log(`📱 User ${socket.user.email} joined session ${sessionId}`);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`📱 User ${socket.user.email} joined session ${sessionId}`);
+        }
 
         // Notify others in the session about the new participant
         socket.to(`session:${sessionId}`).emit('user:joined', {
@@ -96,7 +132,7 @@ const socketHandler = (io) => {
         });
 
       } catch (error) {
-        console.error('Join session error:', error);
+        logSocketError('Join session error', error);
         socket.emit('error', { message: 'Failed to join session' });
       }
     });
@@ -114,7 +150,7 @@ const socketHandler = (io) => {
         leaveSession(socket, sessionId);
 
       } catch (error) {
-        console.error('Leave session error:', error);
+        logSocketError('Leave session error', error);
         socket.emit('error', { message: 'Failed to leave session' });
       }
     });
@@ -139,7 +175,7 @@ const socketHandler = (io) => {
         });
 
       } catch (error) {
-        console.error('Participation update error:', error);
+        logSocketError('Participation update error', error);
         socket.emit('error', { message: 'Failed to send update' });
       }
     });
@@ -164,14 +200,16 @@ const socketHandler = (io) => {
         });
 
       } catch (error) {
-        console.error('Session status error:', error);
+        logSocketError('Session status error', error);
         socket.emit('error', { message: 'Failed to get session status' });
       }
     });
 
     // Handle disconnection
     socket.on('disconnect', () => {
-      console.log(`🔌 User disconnected: ${socket.user.email} (${socket.id})`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`🔌 User disconnected: ${socket.user.email} (${socket.id})`);
+      }
 
       const sessionData = socketSessions.get(socket.id);
       if (sessionData) {
@@ -191,7 +229,7 @@ const socketHandler = (io) => {
 
     // Error handling
     socket.on('error', (error) => {
-      console.error(`Socket error for ${socket.user.email}:`, error);
+      logSocketError(`Socket error for ${socket.user.email}`, error);
     });
   });
 
@@ -210,14 +248,18 @@ const socketHandler = (io) => {
     socketSessions.delete(socket.id);
 
     socket.emit('session:left', { sessionId });
-    console.log(`📱 User ${socket.user.email} left session ${sessionId}`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`📱 User ${socket.user.email} left session ${sessionId}`);
+    }
   }
 
   // Make helper functions available for external use
   io.getActiveSessions = () => activeSessions;
   io.getSessionConnections = (sessionId) => activeSessions.get(sessionId)?.size || 0;
 
-  console.log('🔌 Socket.io handler initialized');
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('🔌 Socket.io handler initialized');
+  }
 };
 
 module.exports = socketHandler;

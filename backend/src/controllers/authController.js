@@ -2,12 +2,13 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
 const emailService = require('../services/emailService');
+const { getJwtRefreshSecret, getJwtSecret } = require('../config/jwt');
 
 // Generate JWT access token
 const generateAccessToken = (userId) => {
   return jwt.sign(
     { id: userId },
-    process.env.JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '15m' } // Short-lived access token
   );
 };
@@ -16,7 +17,7 @@ const generateAccessToken = (userId) => {
 const generateRefreshToken = (userId) => {
   return jwt.sign(
     { id: userId, type: 'refresh' },
-    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+    getJwtRefreshSecret(),
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' } // Long-lived refresh token
   );
 };
@@ -277,7 +278,7 @@ const refreshToken = async (req, res) => {
     try {
       decoded = jwt.verify(
         refreshToken,
-        process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+        getJwtRefreshSecret()
       );
     } catch (error) {
       return res.status(401).json({

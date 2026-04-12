@@ -8,6 +8,19 @@
 
 (async function handleCallback() {
   const messageEl = document.getElementById('message');
+  const isDevBuild = () => {
+    try {
+      return !('update_url' in chrome.runtime.getManifest());
+    } catch {
+      return false;
+    }
+  };
+
+  const debugLog = (...args) => {
+    if (isDevBuild()) {
+      console.log(...args);
+    }
+  };
 
   try {
     // Extract token and user data from URL parameters
@@ -36,7 +49,7 @@
       auth_timestamp: Date.now()
     });
 
-    console.log('[Callback] Token stored successfully');
+    debugLog('[Callback] Token stored successfully');
 
     // Notify the options page that authentication succeeded
     // This will trigger the options page to update its UI
@@ -45,7 +58,7 @@
       token,
       user: userData
     }).catch(err => {
-      console.log('[Callback] Options page not open, will update on next open');
+      debugLog('[Callback] Options page not open, will update on next open');
     });
 
     // Show success message

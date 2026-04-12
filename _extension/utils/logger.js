@@ -10,13 +10,22 @@
  */
 export function createLogger(moduleName) {
   const prefix = `[${moduleName}]`;
+  const isDevBuild = () => {
+    try {
+      return !('update_url' in chrome.runtime.getManifest());
+    } catch {
+      return false;
+    }
+  };
   
   return {
     /**
      * Log informational message
      */
     log: (...args) => {
-      console.log(prefix, ...args);
+      if (isDevBuild()) {
+        console.log(prefix, ...args);
+      }
     },
     
     /**
@@ -37,7 +46,9 @@ export function createLogger(moduleName) {
      * Log success message (with green styling in supported consoles)
      */
     success: (...args) => {
-      console.log(`%c${prefix}`, 'color: green; font-weight: bold', ...args);
+      if (isDevBuild()) {
+        console.log(`%c${prefix}`, 'color: green; font-weight: bold', ...args);
+      }
     },
     
     /**
@@ -53,6 +64,7 @@ export function createLogger(moduleName) {
      * Create a grouped log section
      */
     group: (label, callback) => {
+      if (!isDevBuild()) return;
       console.group(prefix, label);
       callback && callback();
       console.groupEnd();
@@ -62,6 +74,7 @@ export function createLogger(moduleName) {
      * Create a collapsed grouped log section
      */
     groupCollapsed: (label, callback) => {
+      if (!isDevBuild()) return;
       console.groupCollapsed(prefix, label);
       callback && callback();
       console.groupEnd();
@@ -89,8 +102,16 @@ export function createScopedLogger(moduleName, scope) {
 export function createTimer(moduleName, operation) {
   const start = performance.now();
   const prefix = `[${moduleName}]`;
+  const isDevBuild = () => {
+    try {
+      return !('update_url' in chrome.runtime.getManifest());
+    } catch {
+      return false;
+    }
+  };
   
   return () => {
+    if (!isDevBuild()) return;
     const duration = (performance.now() - start).toFixed(2);
     console.log(`${prefix} ${operation} completed in ${duration}ms`);
   };

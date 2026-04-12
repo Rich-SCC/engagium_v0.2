@@ -20,6 +20,20 @@ import {
 } from './dom-manager.js';
 import { sleep } from '../core/utils.js';
 
+const isDevBuild = () => {
+  try {
+    return !('update_url' in chrome.runtime.getManifest());
+  } catch {
+    return false;
+  }
+};
+
+const debugLog = (...args) => {
+  if (isDevBuild()) {
+    debugLog(...args);
+  }
+};
+
 const PANEL_SETTLE_DELAY = 200;
 
 // Panel state tracking
@@ -71,7 +85,7 @@ async function activateMeetControl(control) {
 export function initPanelManager() {
   // Set up initial state
   updatePanelState();
-  console.log('[PanelManager] Initialized');
+  debugLog('[PanelManager] Initialized');
 }
 
 /**
@@ -91,7 +105,7 @@ function updatePanelState() {
   // If panel opened and we didn't do it, user must have opened it
   if (panelState.isOpen && !wasOpen && !panelState.isOperationInProgress) {
     panelState.wasOpenedByUser = true;
-    console.log('[PanelManager] Panel opened by user - will not auto-close');
+    debugLog('[PanelManager] Panel opened by user - will not auto-close');
   }
   
   // If panel closed and we didn't do it, user must have closed it
@@ -128,7 +142,7 @@ export async function openPeoplePanel(force = false) {
   
   // Already open - no action needed
   if (panelState.isOpen && !force) {
-    console.log('[PanelManager] Panel already open');
+    debugLog('[PanelManager] Panel already open');
     return true;
   }
   
@@ -144,7 +158,7 @@ export async function openPeoplePanel(force = false) {
     }
     
     const panelBehavior = detectPeoplePanelBehavior();
-    console.log(`[PanelManager] Opening panel (mode: ${panelBehavior})...`);
+    debugLog(`[PanelManager] Opening panel (mode: ${panelBehavior})...`);
 
     await activateMeetControl(peopleButton);
     
@@ -154,7 +168,7 @@ export async function openPeoplePanel(force = false) {
     if (success) {
       panelState.isOpen = true;
       panelState.wasOpenedByUser = false; // We opened it, not the user
-      console.log('[PanelManager] Panel opened successfully');
+      debugLog('[PanelManager] Panel opened successfully');
     } else {
       console.warn('[PanelManager] Failed to open panel (timeout)');
     }
@@ -176,13 +190,13 @@ export async function closePeoplePanel(force = false) {
   
   // Already closed
   if (!panelState.isOpen) {
-    console.log('[PanelManager] Panel already closed');
+    debugLog('[PanelManager] Panel already closed');
     return true;
   }
   
   // Don't close if user opened it (unless forced)
   if (!force && !shouldAutoClose()) {
-    console.log('[PanelManager] Not closing - user opened panel manually');
+    debugLog('[PanelManager] Not closing - user opened panel manually');
     return false;
   }
   
@@ -201,7 +215,7 @@ export async function closePeoplePanel(force = false) {
         return false;
       }
       
-      console.log('[PanelManager] Closing panel (persistent-data mode - using Close button)...');
+      debugLog('[PanelManager] Closing panel (persistent-data mode - using Close button)...');
       closeButton.click();
     } else {
       // Toggle-data mode: close by toggling People button
@@ -212,7 +226,7 @@ export async function closePeoplePanel(force = false) {
         return false;
       }
       
-      console.log('[PanelManager] Closing panel (toggle-data mode - toggling People button)...');
+      debugLog('[PanelManager] Closing panel (toggle-data mode - toggling People button)...');
       await activateMeetControl(peopleButton);
     }
     
@@ -222,7 +236,7 @@ export async function closePeoplePanel(force = false) {
     if (success) {
       panelState.isOpen = false;
       panelState.wasOpenedByUser = false;
-      console.log('[PanelManager] Panel closed successfully');
+      debugLog('[PanelManager] Panel closed successfully');
       await sleep(PANEL_SETTLE_DELAY);
     } else {
       console.warn('[PanelManager] Failed to close panel (timeout)');
@@ -265,7 +279,7 @@ async function waitForPanelState(shouldBeOpen, timeout) {
  * @returns {Promise<any>} Result of operation
  */
 export async function withPanelOpen(operation, reason = 'operation') {
-  console.log(`[PanelManager] Starting operation: ${reason}`);
+  debugLog(`[PanelManager] Starting operation: ${reason}`);
   
   const panelBehavior = detectPeoplePanelBehavior();
   updatePanelState();
@@ -294,7 +308,7 @@ export async function withPanelOpen(operation, reason = 'operation') {
         const closeButton = findCloseButton();
         if (closeButton) {
           await activateMeetControl(closeButton);
-          console.log('[PanelManager] Closed panel visually (persistent-data mode)');
+          debugLog('[PanelManager] Closed panel visually (persistent-data mode)');
           // Update state immediately - don't wait for visual confirmation
           panelState.isOpen = false;
           panelState.wasOpenedByUser = false;
@@ -303,10 +317,10 @@ export async function withPanelOpen(operation, reason = 'operation') {
         // Toggle-data mode: normal close with wait.
         await sleep(300);
         await closePeoplePanel();
-        console.log(`[PanelManager] Closed panel after: ${reason}`);
+        debugLog(`[PanelManager] Closed panel after: ${reason}`);
       }
     } else if (wasAlreadyOpen) {
-      console.log(`[PanelManager] Keeping panel open (was already open)`);
+      debugLog(`[PanelManager] Keeping panel open (was already open)`);
     }
     
     return result;
@@ -338,13 +352,13 @@ export async function withPanelOpen(operation, reason = 'operation') {
 export async function batchOperations(operations) {
   if (operations.length === 0) return [];
   
-  console.log(`[PanelManager] Batching ${operations.length} operations`);
+  debugLog(`[PanelManager] Batching ${operations.length} operations`);
   
   return withPanelOpen(async () => {
     const results = [];
     
     for (const { operation, reason } of operations) {
-      console.log(`[PanelManager] Executing batched: ${reason}`);
+      debugLog(`[PanelManager] Executing batched: ${reason}`);
       try {
         const result = await operation();
         results.push({ success: true, result, reason });
@@ -373,5 +387,5 @@ export function resetPanelState() {
     pendingOperations: [],
     lastStateCheck: 0
   };
-  console.log('[PanelManager] State reset');
+  debugLog('[PanelManager] State reset');
 }

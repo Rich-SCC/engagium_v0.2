@@ -68,7 +68,9 @@ web_modules/
 # dotenv environment variable files
 .env
 .env.*
-!.env.example
+
+# Local Docker secret files
+.secrets/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

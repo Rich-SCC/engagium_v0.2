@@ -491,4 +491,4 @@ CREATE TRIGGER update_attendance_records_updated_at
 
 ---
 
-*This document reflects the database schema as defined in `database/schema.sql` as of December 2025.*
+*This document reflects the database schema as defined in `backend/db/schema.sql` as of December 2025.*

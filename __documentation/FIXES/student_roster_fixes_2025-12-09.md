@@ -56,8 +56,8 @@ Fixed critical bugs in the Student Roster module preventing deletion, renaming, 
 **Problem:** Students with participation logs couldn't be deleted, blocking roster management.
 
 **Files Modified:**
-- `database/schema.sql` (added `deleted_at` column)
-- `database/migrations/add_deleted_at_to_students.sql` (new migration file)
+- `backend/db/schema.sql` (added `deleted_at` column)
+- `backend/db/migrations/add_deleted_at_to_students.sql` (new migration file)
 - `backend/src/models/Student.js` (delete, bulkDelete, all query methods)
 - `backend/src/models/Class.js` (getStudentCount)
 - `backend/src/models/ParticipationLog.js` (getClassStudentCount)
@@ -135,7 +135,7 @@ Fixed critical bugs in the Student Roster module preventing deletion, renaming, 
 For existing databases, run the migration script:
 
 ```bash
-psql -U engagium_user -d engagium -f database/migrations/add_deleted_at_to_students.sql
+psql -U engagium_user -d engagium -f backend/db/migrations/add_deleted_at_to_students.sql
 ```
 
 Or manually:
@@ -190,8 +190,8 @@ CREATE INDEX IF NOT EXISTS idx_students_deleted_at ON students(deleted_at);
 - `backend/src/models/Class.js`
 - `backend/src/models/ParticipationLog.js`
 - `backend/src/controllers/studentController.js`
-- `database/schema.sql`
-- `database/migrations/add_deleted_at_to_students.sql` (new)
+- `backend/db/schema.sql`
+- `backend/db/migrations/add_deleted_at_to_students.sql` (new)
 
 **Frontend (4 files):**
 - `frontend/src/components/Students/StudentFormModal.jsx`

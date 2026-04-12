@@ -120,7 +120,7 @@ This document provides a status report of the Engagium MVP development progress 
 **Files Involved:**
 - `_extension/content/google-meet/participant-detector.js`
 - `backend/src/controllers/sessionController.js` (attendance endpoints)
-- `database/schema.sql` (attendance_records, attendance_intervals)
+- `backend/db/schema.sql` (attendance_records, attendance_intervals)
 
 ### 1.7 Real-Time Communication
 

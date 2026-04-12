@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const path = require('path');
+const { getSecret } = require('../config/secretLoader');
 
 class EmailService {
   constructor() {
@@ -8,8 +9,11 @@ class EmailService {
   }
 
   initializeTransporter() {
+    const smtpUser = getSecret('SMTP_USER');
+    const smtpPass = getSecret('SMTP_PASS');
+
     // Check if email service is configured
-    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    if (!process.env.SMTP_HOST || !smtpUser || !smtpPass) {
       console.warn('Email service not configured. Password reset emails will not be sent.');
       return;
     }
@@ -19,8 +23,8 @@ class EmailService {
       port: parseInt(process.env.SMTP_PORT) || 587,
       secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
+        user: smtpUser,
+        pass: smtpPass
       }
     });
   }
@@ -34,7 +38,7 @@ class EmailService {
     const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
     
     const mailOptions = {
-      from: `"${process.env.EMAIL_FROM_NAME || 'Engagium'}" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.EMAIL_FROM_NAME || 'Engagium'}" <${getSecret('SMTP_USER')}>`,
       to: email,
       subject: 'Password Reset Request',
       html: `

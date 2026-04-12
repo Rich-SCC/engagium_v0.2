@@ -33,6 +33,20 @@ import {
 } from '../dom/panel-manager.js';
 import { emitMicToggleSimple } from './mic-toggle-detector.js';
 
+const isDevBuild = () => {
+  try {
+    return !('update_url' in chrome.runtime.getManifest());
+  } catch {
+    return false;
+  }
+};
+
+const debugLog = (...args) => {
+  if (isDevBuild()) {
+    debugLog(...args);
+  }
+};
+
 // Cache for known participants (to detect changes)
 let knownParticipants = new Map();
 let panelObserver = null;
@@ -293,7 +307,7 @@ export function startObserving() {
       subtree: true
       // Removed attributes observer - too noisy
     });
-    console.log('[PeoplePanel] Observing side panel (cached query)');
+    debugLog('[PeoplePanel] Observing side panel (cached query)');
   } else {
     // Fallback: observe body but only for childList changes
     panelObserver.observe(document.body, {
@@ -301,11 +315,11 @@ export function startObserving() {
       subtree: true
       // No attributes - reduces noise significantly
     });
-    console.log('[PeoplePanel] Observing body (side panel not found)');
+    debugLog('[PeoplePanel] Observing body (side panel not found)');
   }
   
   isObserving = true;
-  console.log('[PeoplePanel] Started observing');
+  debugLog('[PeoplePanel] Started observing');
 }
 
 /**
@@ -319,7 +333,7 @@ export function stopObserving() {
   
   isObserving = false;
   knownParticipants.clear();
-  console.log('[PeoplePanel] Stopped observing');
+  debugLog('[PeoplePanel] Stopped observing');
 }
 
 /**

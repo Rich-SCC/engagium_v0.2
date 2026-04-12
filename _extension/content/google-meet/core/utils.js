@@ -5,6 +5,14 @@
 
 import { hashString as hashStr } from '../../../utils/string-utils.js';
 
+const isDevBuild = () => {
+  try {
+    return !('update_url' in chrome.runtime.getManifest());
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Creates a debounced version of a function
  * @param {Function} func - Function to debounce
@@ -97,7 +105,9 @@ export function sendMessage(type, data = {}) {
  * @param  {...any} args - Arguments to log
  */
 export function log(...args) {
-  console.log('[GoogleMeet]', ...args);
+  if (isDevBuild()) {
+    console.log('[GoogleMeet]', ...args);
+  }
 }
 
 /**

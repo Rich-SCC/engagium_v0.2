@@ -13,6 +13,20 @@ import { now } from '../../utils/date-utils.js';
 import { matchParticipant } from '../../utils/student-matcher.js';
 import { socketClient } from '../socket-client.js';
 
+const isDevBuild = () => {
+  try {
+    return !('update_url' in chrome.runtime.getManifest());
+  } catch {
+    return false;
+  }
+};
+
+const debugLog = (...args) => {
+  if (isDevBuild()) {
+    console.log(...args);
+  }
+};
+
 /**
  * Handles a participant joining the meeting
  * @param {Object} session - Active session object
@@ -34,7 +48,7 @@ export async function handleParticipantJoined(session, studentRoster, data) {
     await updateParticipant(existing.id, {
       left_at: null
     });
-    console.log('[ParticipantHandler] Participant rejoined:', participant.name);
+    debugLog('[ParticipantHandler] Participant rejoined:', participant.name);
     return null;
   }
 
@@ -62,7 +76,7 @@ export async function handleParticipantJoined(session, studentRoster, data) {
   // Emit real-time event via WebSocket
   await emitParticipantJoinedEvents(trackedParticipant, match);
 
-  console.log('[ParticipantHandler] Participant tracked:', {
+  debugLog('[ParticipantHandler] Participant tracked:', {
     name: participant.name,
     matched: !!match,
     confidence: match?.score
@@ -96,7 +110,7 @@ export async function handleParticipantLeft(session, data) {
   // Emit real-time event via WebSocket
   await emitParticipantLeftEvents(participant, leftAt);
 
-  console.log('[ParticipantHandler] Participant left:', participant.name);
+  debugLog('[ParticipantHandler] Participant left:', participant.name);
 }
 
 /**
@@ -119,7 +133,7 @@ export async function manualMatchParticipant(participantId, studentId, studentRo
     match_method: 'manual'
   });
 
-  console.log('[ParticipantHandler] Manual match:', participantId, '->', studentId);
+  debugLog('[ParticipantHandler] Manual match:', participantId, '->', studentId);
 }
 
 // ============================================================================

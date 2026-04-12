@@ -6,7 +6,10 @@ set -e
 
 DB_NAME="engagium"
 DB_USER="postgres"
-OUTPUT_DIR="."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+SCHEMA_FILE="$REPO_ROOT/backend/db/schema.sql"
+INIT_FILE="$REPO_ROOT/backend/db/init/init-database.sql"
 TEMP_DIR="/tmp/engagium_schema_sync"
 
 # Colors for output
@@ -50,7 +53,7 @@ cat "$TEMP_DIR/live_tables.txt" | sed 's/^/  - /'
 echo -e "\n${YELLOW}Step 3: Extracting tables from schema.sql...${NC}"
 
 # Get table list from schema.sql
-grep "CREATE TABLE IF NOT EXISTS" "$OUTPUT_DIR/schema.sql" | \
+grep "CREATE TABLE IF NOT EXISTS" "$SCHEMA_FILE" | \
     sed 's/.*EXISTS //' | sed 's/ (.*//' | sort > "$TEMP_DIR/schema_tables.txt"
 
 echo -e "${GREEN}✓ Found $(wc -l < $TEMP_DIR/schema_tables.txt) tables in schema.sql${NC}"
@@ -58,7 +61,7 @@ echo -e "${GREEN}✓ Found $(wc -l < $TEMP_DIR/schema_tables.txt) tables in sche
 echo -e "\n${YELLOW}Step 4: Extracting tables from init-database.sql...${NC}"
 
 # Get table list from init-database.sql
-grep "CREATE TABLE IF NOT EXISTS" "$OUTPUT_DIR/init-database.sql" | \
+grep "CREATE TABLE IF NOT EXISTS" "$INIT_FILE" | \
     sed 's/.*EXISTS //' | sed 's/ (.*//' | sort > "$TEMP_DIR/init_tables.txt"
 
 echo -e "${GREEN}✓ Found $(wc -l < $TEMP_DIR/init_tables.txt) tables in init-database.sql${NC}"
@@ -86,13 +89,13 @@ fi
 echo -e "\n${YELLOW}Step 6: Checking for specific differences...${NC}"
 
 # Check for notifications table (which should be removed)
-if grep -q "notifications" "$OUTPUT_DIR/schema.sql"; then
+if grep -q "notifications" "$SCHEMA_FILE"; then
     echo -e "${RED}✗ schema.sql still contains 'notifications' table${NC}"
 else
     echo -e "${GREEN}✓ schema.sql does not contain 'notifications' table${NC}"
 fi
 
-if grep -q "notifications" "$OUTPUT_DIR/init-database.sql"; then
+if grep -q "notifications" "$INIT_FILE"; then
     echo -e "${RED}✗ init-database.sql still contains 'notifications' table${NC}"
 else
     echo -e "${GREEN}✓ init-database.sql does not contain 'notifications' table${NC}"
@@ -109,13 +112,13 @@ psql -U "$DB_USER" -d "$DB_NAME" -t -A -c \
 echo -e "${GREEN}✓ Found $(wc -l < $TEMP_DIR/live_indexes.txt) indexes in live database${NC}"
 
 # Check for notification indexes in SQL files
-if grep -q "idx_notifications" "$OUTPUT_DIR/schema.sql"; then
+if grep -q "idx_notifications" "$SCHEMA_FILE"; then
     echo -e "${RED}✗ schema.sql still contains notification indexes${NC}"
 else
     echo -e "${GREEN}✓ schema.sql does not contain notification indexes${NC}"
 fi
 
-if grep -q "idx_notifications" "$OUTPUT_DIR/init-database.sql"; then
+if grep -q "idx_notifications" "$INIT_FILE"; then
     echo -e "${RED}✗ init-database.sql still contains notification indexes${NC}"
 else
     echo -e "${GREEN}✓ init-database.sql does not contain notification indexes${NC}"
@@ -137,7 +140,7 @@ if [ -n "$DIFF_INIT" ]; then
     ((ISSUES++))
 fi
 
-if grep -q "notifications\|idx_notifications" "$OUTPUT_DIR/schema.sql" "$OUTPUT_DIR/init-database.sql"; then
+if grep -q "notifications\|idx_notifications" "$SCHEMA_FILE" "$INIT_FILE"; then
     echo -e "${RED}⚠ Notification references found in SQL files${NC}"
     ((ISSUES++))
 fi

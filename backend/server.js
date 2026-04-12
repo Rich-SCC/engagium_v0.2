@@ -15,10 +15,46 @@ const extensionTokenRoutes = require('./src/routes/extensionTokens');
 
 // Import socket handlers
 const socketHandler = require('./src/socket/socketHandler');
-const { ensureParticipationLogsSchema } = require('./src/config/database');
+const {
+  closePool,
+  ensureParticipationLogsSchema,
+  checkDatabaseHealth,
+} = require('./src/config/database');
+const { assertJwtSecretsConfigured } = require('./src/config/jwt');
 
 const app = express();
 const server = http.createServer(app);
+
+const isProduction = process.env.NODE_ENV === 'production';
+
+const requireEnv = (name) => {
+  const value = process.env[name];
+  if (!value || !value.trim()) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+};
+
+const parseTrustProxy = () => {
+  const raw = process.env.TRUST_PROXY;
+  if (!raw) {
+    return 1;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  if (normalized === 'loopback') return 'loopback';
+  if (normalized === 'linklocal') return 'linklocal';
+  if (normalized === 'uniquelocal') return 'uniquelocal';
+
+  const numeric = Number.parseInt(normalized, 10);
+  if (!Number.isNaN(numeric)) {
+    return numeric;
+  }
+
+  return raw;
+};
 
 const parseAllowedOrigins = () => {
   const rawOrigins = process.env.CORS_ORIGIN;
@@ -38,6 +74,14 @@ const parseAllowedOrigins = () => {
 
 const allowedOrigins = parseAllowedOrigins();
 
+if (isProduction && allowedOrigins.length === 0) {
+  throw new Error('CORS_ORIGIN must be configured with at least one origin in production');
+}
+
+if (isProduction) {
+  assertJwtSecretsConfigured();
+}
+
 // Store app globally for socket handler access
 global.app = app;
 
@@ -50,6 +94,9 @@ const io = new Server(server, {
 });
 
 // Middleware
+app.disable('x-powered-by');
+app.set('trust proxy', parseTrustProxy());
+
 app.use(helmet());
 app.use(cors({
   origin: allowedOrigins,
@@ -84,8 +131,22 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+  const databaseHealth = await checkDatabaseHealth();
+
+  if (!databaseHealth.ready) {
+    return res.status(503).json({
+      status: 'NOT_READY',
+      timestamp: new Date().toISOString(),
+      database: 'unavailable'
+    });
+  }
+
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    database: 'ready'
+  });
 });
 
 // API Routes
@@ -122,6 +183,17 @@ async function startServer() {
     await ensureParticipationLogsSchema();
   } catch (error) {
     console.error('❌ Failed to apply participation log schema migration:', error);
+    if (isProduction) {
+      process.exit(1);
+    }
+  }
+
+  if (isProduction) {
+    const databaseHealth = await checkDatabaseHealth();
+    if (!databaseHealth.ready) {
+      console.error('❌ Database is not ready during startup. Aborting server start.');
+      process.exit(1);
+    }
   }
 
   server.listen(PORT, () => {
@@ -130,5 +202,37 @@ async function startServer() {
     console.log(`🔌 Socket.io server ready for connections`);
   });
 }
+
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`❌ Port ${PORT} is already in use.`);
+  } else {
+    console.error('❌ Server startup error:', error);
+  }
+  process.exit(1);
+});
+
+const gracefulShutdown = async (signal) => {
+  console.log(`\n${signal} received. Shutting down HTTP server...`);
+
+  try {
+    await new Promise((resolve) => server.close(resolve));
+
+    if (global.io) {
+      await new Promise((resolve) => global.io.close(resolve));
+    }
+
+    await closePool();
+
+    console.log('HTTP server closed.');
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Error during shutdown:', error);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 startServer();

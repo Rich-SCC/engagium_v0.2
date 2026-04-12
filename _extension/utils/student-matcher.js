@@ -5,6 +5,20 @@
 
 import { normalizeName } from './string-utils.js';
 
+const isDevBuild = () => {
+  try {
+    return !('update_url' in chrome.runtime.getManifest());
+  } catch {
+    return false;
+  }
+};
+
+const debugLog = (...args) => {
+  if (isDevBuild()) {
+    console.log(...args);
+  }
+};
+
 /**
  * Calculate Levenshtein distance between two strings
  * @param {string} str1 
@@ -69,13 +83,13 @@ function stringSimilarity(str1, str2) {
  */
 export function matchParticipant(participant, roster, threshold = 0.7) {
   if (!participant || !roster || roster.length === 0) {
-    console.log('[StudentMatcher] ❌ Invalid input - participant:', !!participant, 'roster size:', roster?.length || 0);
+    debugLog('[StudentMatcher] ❌ Invalid input - participant:', !!participant, 'roster size:', roster?.length || 0);
     return null;
   }
 
-  console.log('[StudentMatcher] 🔍 Matching participant:', participant.name, 'against', roster.length, 'students');
+  debugLog('[StudentMatcher] 🔍 Matching participant:', participant.name, 'against', roster.length, 'students');
   const normalizedParticipantName = normalizeName(participant.name);
-  console.log('[StudentMatcher] Normalized participant name:', `"${participant.name}" -> "${normalizedParticipantName}"`);
+  debugLog('[StudentMatcher] Normalized participant name:', `"${participant.name}" -> "${normalizedParticipantName}"`);
 
   const matches = [];
   let bestScore = 0;
@@ -89,7 +103,7 @@ export function matchParticipant(participant, roster, threshold = 0.7) {
     
     if (normalizedParticipantName && normalizedStudentName) {
       if (normalizedParticipantName === normalizedStudentName) {
-        console.log('[StudentMatcher] ✅ EXACT MATCH:', `"${normalizedParticipantName}" === "${normalizedStudentName}"`, '(', student.name, ')');
+        debugLog('[StudentMatcher] ✅ EXACT MATCH:', `"${normalizedParticipantName}" === "${normalizedStudentName}"`, '(', student.name, ')');
         return { student, score: 1.0, method: 'exact_name' };
       }
     }
@@ -139,14 +153,14 @@ export function matchParticipant(participant, roster, threshold = 0.7) {
 
   // Return best match
   if (matches.length === 0) {
-    console.log('[StudentMatcher] ❌ NO MATCH found for:', participant.name);
-    console.log('[StudentMatcher] Best similarity was:', (bestScore * 100).toFixed(1) + '% with', bestStudent, '(threshold:', (threshold * 100) + '%)');
-    console.log('[StudentMatcher] Sample roster names:', roster.slice(0, 5).map(s => `"${s.name}" -> "${normalizeName(s.name)}"`));
+    debugLog('[StudentMatcher] ❌ NO MATCH found for:', participant.name);
+    debugLog('[StudentMatcher] Best similarity was:', (bestScore * 100).toFixed(1) + '% with', bestStudent, '(threshold:', (threshold * 100) + '%)');
+    debugLog('[StudentMatcher] Sample roster names:', roster.slice(0, 5).map(s => `"${s.name}" -> "${normalizeName(s.name)}"`));
     return null;
   }
 
   matches.sort((a, b) => b.score - a.score);
-  console.log('[StudentMatcher] ✅ Best match:', matches[0].student.name, 'with score:', (matches[0].score * 100).toFixed(1) + '%');
+  debugLog('[StudentMatcher] ✅ Best match:', matches[0].student.name, 'with score:', (matches[0].score * 100).toFixed(1) + '%');
   return matches[0];
 }
 

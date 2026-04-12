@@ -6,6 +6,18 @@ import { resolveApiBaseUrl } from '../utils/apiBaseUrl';
 
 export const WebSocketContext = createContext(null);
 
+const debugLog = (...args) => {
+  if (import.meta.env.DEV) {
+    console.log(...args);
+  }
+};
+
+const debugWarn = (...args) => {
+  if (import.meta.env.DEV) {
+    console.warn(...args);
+  }
+};
+
 export const useWebSocket = () => {
   const context = useContext(WebSocketContext);
   if (!context) {
@@ -150,7 +162,7 @@ export const WebSocketProvider = ({ children }) => {
           started_at: session.started_at
         }));
         setActiveSessions(sessions);
-        console.log('[WebSocket] ✅ Loaded active sessions from server:', sessions.length, 'sessions');
+        debugLog('[WebSocket] ✅ Loaded active sessions from server:', sessions.length, 'sessions');
       }
     } catch (error) {
       console.error('[WebSocket] ❌ Failed to fetch active sessions:', error);
@@ -278,7 +290,7 @@ export const WebSocketProvider = ({ children }) => {
     if (!user || !token || !sessions || sessions.length === 0) return;
     
     setIsLoadingRecentEvents(true);
-    console.log('[WebSocket] 📥 Fetching recent events for', sessions.length, 'active sessions...');
+    debugLog('[WebSocket] 📥 Fetching recent events for', sessions.length, 'active sessions...');
     
     try {
       const allEvents = [];
@@ -287,11 +299,11 @@ export const WebSocketProvider = ({ children }) => {
         try {
           const [participationResponse, attendanceResponse] = await Promise.all([
             participationAPI.getLogs(session.session_id, { page: 1, limit: 200 }).catch(error => {
-              console.warn('[WebSocket] ⚠️ Failed to fetch participation logs for session', session.session_id, error);
+              debugWarn('[WebSocket] ⚠️ Failed to fetch participation logs for session', session.session_id, error);
               return null;
             }),
             sessionsAPI.getAttendanceWithIntervals(session.session_id).catch(error => {
-              console.warn('[WebSocket] ⚠️ Failed to fetch attendance intervals for session', session.session_id, error);
+              debugWarn('[WebSocket] ⚠️ Failed to fetch attendance intervals for session', session.session_id, error);
               return null;
             })
           ]);
@@ -303,7 +315,7 @@ export const WebSocketProvider = ({ children }) => {
               session.session_id
             );
             allEvents.push(...attendanceEvents);
-            console.log('[WebSocket] ✅ Loaded', attendanceEvents.length, 'attendance events for session', session.session_id);
+            debugLog('[WebSocket] ✅ Loaded', attendanceEvents.length, 'attendance events for session', session.session_id);
 
             // Preserve attendance state for future live updates
             setAttendedStudents(prev => {
@@ -335,10 +347,10 @@ export const WebSocketProvider = ({ children }) => {
               message: formatEventMessage(log)
             }));
             allEvents.push(...events);
-            console.log('[WebSocket] ✅ Loaded', events.length, 'participation events for session', session.session_id);
+            debugLog('[WebSocket] ✅ Loaded', events.length, 'participation events for session', session.session_id);
           }
         } catch (sessionError) {
-          console.warn('[WebSocket] ⚠️ Failed to fetch events for session', session.session_id, sessionError);
+          debugWarn('[WebSocket] ⚠️ Failed to fetch events for session', session.session_id, sessionError);
         }
       }
       
@@ -394,17 +406,17 @@ export const WebSocketProvider = ({ children }) => {
 
     // Connection event handlers
     newSocket.on('connect', () => {
-      console.log('[WebSocket] ✅ Connected to server');
-      console.log('[WebSocket] Socket ID:', newSocket.id);
+      debugLog('[WebSocket] ✅ Connected to server');
+      debugLog('[WebSocket] Socket ID:', newSocket.id);
       setIsConnected(true);
       
       // Join instructor-specific room
-      console.log('[WebSocket] 📤 Joining instructor room for user:', user.id);
+      debugLog('[WebSocket] 📤 Joining instructor room for user:', user.id);
       newSocket.emit('join_instructor_room', { user_id: user.id });
     });
 
     newSocket.on('disconnect', () => {
-      console.log('[WebSocket] ❌ Disconnected from server');
+      debugLog('[WebSocket] ❌ Disconnected from server');
       setIsConnected(false);
     });
 
@@ -415,19 +427,19 @@ export const WebSocketProvider = ({ children }) => {
 
     // Session event handlers
     newSocket.on('session:started', (data) => {
-      console.log('\\n========================================');
-      console.log('[WebSocket] 📥 RECEIVED: session:started');
-      console.log('========================================');
-      console.log('[WebSocket] Data:', JSON.stringify(data, null, 2));
-      console.log('========================================\\n');
+      debugLog('\n========================================');
+      debugLog('[WebSocket] 📥 RECEIVED: session:started');
+      debugLog('========================================');
+      debugLog('[WebSocket] Data:', JSON.stringify(data, null, 2));
+      debugLog('========================================\n');
       
       setActiveSessions(prev => {
         // Avoid duplicates
         if (prev.some(s => s.session_id === data.session_id)) {
-          console.log('[WebSocket] ⚠️ Session already exists, skipping duplicate');
+          debugLog('[WebSocket] ⚠️ Session already exists, skipping duplicate');
           return prev;
         }
-        console.log('[WebSocket] ✅ Adding new active session');
+        debugLog('[WebSocket] ✅ Adding new active session');
         return [...prev, data];
       });
       
@@ -443,11 +455,11 @@ export const WebSocketProvider = ({ children }) => {
     });
 
     newSocket.on('session:ended', (data) => {
-      console.log('\\n========================================');
-      console.log('[WebSocket] 📥 RECEIVED: session:ended');
-      console.log('========================================');
-      console.log('[WebSocket] Data:', JSON.stringify(data, null, 2));
-      console.log('========================================\\n');
+      debugLog('\n========================================');
+      debugLog('[WebSocket] 📥 RECEIVED: session:ended');
+      debugLog('========================================');
+      debugLog('[WebSocket] Data:', JSON.stringify(data, null, 2));
+      debugLog('========================================\n');
       
       setActiveSessions(prev => prev.filter(s => s.session_id !== data.session_id));
       
@@ -467,25 +479,25 @@ export const WebSocketProvider = ({ children }) => {
     });
 
     newSocket.on('participation:logged', (data) => {
-      console.log('\\n========================================');
-      console.log('[WebSocket] 📥 RECEIVED: participation:logged');
-      console.log('========================================');
-      console.log('[WebSocket] Session ID:', data.session_id);
-      console.log('[WebSocket] Student:', data.student_name);
-      console.log('[WebSocket] Type:', data.interaction_type);
-      console.log('[WebSocket] Timestamp:', data.timestamp);
-      console.log('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
-      console.log('========================================\\n');
+      debugLog('\n========================================');
+      debugLog('[WebSocket] 📥 RECEIVED: participation:logged');
+      debugLog('========================================');
+      debugLog('[WebSocket] Session ID:', data.session_id);
+      debugLog('[WebSocket] Student:', data.student_name);
+      debugLog('[WebSocket] Type:', data.interaction_type);
+      debugLog('[WebSocket] Timestamp:', data.timestamp);
+      debugLog('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
+      debugLog('========================================\n');
       
       // Log specifically for mic toggles
       if (data.interaction_type === 'mic_toggle') {
-        console.log('[WebSocket] 🎙️ MIC_TOGGLE RECEIVED!');
-        console.log('[WebSocket] Mic Status:', data.metadata?.isMuted ? 'MUTED' : 'UNMUTED');
+        debugLog('[WebSocket] 🎙️ MIC_TOGGLE RECEIVED!');
+        debugLog('[WebSocket] Mic Status:', data.metadata?.isMuted ? 'MUTED' : 'UNMUTED');
       }
       
       // Skip join/leave events as they're handled by participant:joined/left
       if (data.interaction_type === 'join' || data.interaction_type === 'leave') {
-        console.log('[WebSocket] ⏭️ Skipping join/leave event (handled by participant events)');
+        debugLog('[WebSocket] ⏭️ Skipping join/leave event (handled by participant events)');
         return;
       }
       
@@ -545,24 +557,24 @@ export const WebSocketProvider = ({ children }) => {
       }, ...prev]));
       
       if (data.interaction_type === 'speaking_session') {
-        console.log('[WebSocket] 🎙️ SPEAKING_SESSION added to feed!');
-        console.log('[WebSocket] Duration:', data.duration_seconds, 'seconds');
+        debugLog('[WebSocket] 🎙️ SPEAKING_SESSION added to feed!');
+        debugLog('[WebSocket] Duration:', data.duration_seconds, 'seconds');
       } else if (data.interaction_type === 'mic_toggle') {
-        console.log('[WebSocket] 🎙️ MIC_TOGGLE added to feed!');
+        debugLog('[WebSocket] 🎙️ MIC_TOGGLE added to feed!');
       } else {
-        console.log('[WebSocket] ✅ Added participation event to feed');
+        debugLog('[WebSocket] ✅ Added participation event to feed');
       }
     });
 
     newSocket.on('attendance:updated', (data) => {
-      console.log('\\n========================================');
-      console.log('[WebSocket] 📥 RECEIVED: attendance:updated');
-      console.log('========================================');
-      console.log('[WebSocket] Session ID:', data.session_id);
-      console.log('[WebSocket] Student:', data.student_name);
-      console.log('[WebSocket] Action:', data.action);
-      console.log('[WebSocket] Timestamp:', data.timestamp);
-      console.log('========================================\\n');
+      debugLog('\n========================================');
+      debugLog('[WebSocket] 📥 RECEIVED: attendance:updated');
+      debugLog('========================================');
+      debugLog('[WebSocket] Session ID:', data.session_id);
+      debugLog('[WebSocket] Student:', data.student_name);
+      debugLog('[WebSocket] Action:', data.action);
+      debugLog('[WebSocket] Timestamp:', data.timestamp);
+      debugLog('========================================\n');
       
       // Create unique key for this student in this session
       const studentSessionKey = `${data.session_id}:${data.student_name}`;
@@ -570,15 +582,15 @@ export const WebSocketProvider = ({ children }) => {
       // Check if this is the FIRST time we're seeing attendance for this student in this session
       setAttendedStudents(prev => {
         const isFirstAttendance = !prev.has(studentSessionKey);
-        console.log('[WebSocket] 🎯 Is first attendance?', isFirstAttendance, 'for', data.student_name);
-        console.log('[WebSocket] 🔍 Current attendedStudents:', Array.from(prev));
+        debugLog('[WebSocket] 🎯 Is first attendance?', isFirstAttendance, 'for', data.student_name);
+        debugLog('[WebSocket] 🔍 Current attendedStudents:', Array.from(prev));
         
         if (isFirstAttendance) {
           // Only replace participant:joined with "attended" on FIRST attendance
           setRecentEvents(prevEvents => {
             const fiveSecondsAgo = new Date(Date.now() - 5000);
             
-            console.log('[WebSocket] 🔍 Looking through', prevEvents.length, 'events');
+            debugLog('[WebSocket] 🔍 Looking through', prevEvents.length, 'events');
             
             const filtered = prevEvents.filter(event => {
               const isParticipantJoined = event.type === 'participant_joined';
@@ -587,13 +599,13 @@ export const WebSocketProvider = ({ children }) => {
               const isRecent = new Date(event.timestamp) > fiveSecondsAgo;
               
               if (isParticipantJoined && isSameName && isSameSession && isRecent) {
-                console.log('[WebSocket] 🔄 REPLACING participant:joined with attendance for', data.student_name);
+                debugLog('[WebSocket] 🔄 REPLACING participant:joined with attendance for', data.student_name);
                 return false;
               }
               return true;
             });
             
-            console.log('[WebSocket] 📊 Filtered out', prevEvents.length - filtered.length, 'events');
+            debugLog('[WebSocket] 📊 Filtered out', prevEvents.length - filtered.length, 'events');
             
             return dedupeAndSortRecentEvents([{
               id: `attendance-${Date.now()}-${Math.random()}`,
@@ -610,29 +622,29 @@ export const WebSocketProvider = ({ children }) => {
           // Mark this student as having attended
           const newSet = new Set(prev);
           newSet.add(studentSessionKey);
-          console.log('[WebSocket] ✅ Added to attendedStudents:', studentSessionKey);
+          debugLog('[WebSocket] ✅ Added to attendedStudents:', studentSessionKey);
           return newSet;
         } else {
           // This is a rejoin - DON'T add another attendance event, the participant:joined will show
-          console.log('[WebSocket] ⏭️ Skipping attendance event (rejoin) for', data.student_name);
+          debugLog('[WebSocket] ⏭️ Skipping attendance event (rejoin) for', data.student_name);
           return prev;
         }
       });
       
-      console.log('[WebSocket] ✅ Processed attendance event');
+      debugLog('[WebSocket] ✅ Processed attendance event');
     });
 
     newSocket.on('participant:joined', (data) => {
-      console.log('\\n========================================');
-      console.log('[WebSocket] 📥 RECEIVED: participant:joined');
-      console.log('========================================');
-      console.log('[WebSocket] Session ID:', data.session_id);
-      console.log('[WebSocket] Participant:', data.participant_name);
-      console.log('[WebSocket] Matched:', data.is_matched);
-      console.log('[WebSocket] Student ID:', data.student_id);
-      console.log('[WebSocket] Joined at:', data.joined_at);
-      console.log('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
-      console.log('========================================\\n');
+      debugLog('\n========================================');
+      debugLog('[WebSocket] 📥 RECEIVED: participant:joined');
+      debugLog('========================================');
+      debugLog('[WebSocket] Session ID:', data.session_id);
+      debugLog('[WebSocket] Participant:', data.participant_name);
+      debugLog('[WebSocket] Matched:', data.is_matched);
+      debugLog('[WebSocket] Student ID:', data.student_id);
+      debugLog('[WebSocket] Joined at:', data.joined_at);
+      debugLog('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
+      debugLog('========================================\n');
       
       setRecentEvents(prev => dedupeAndSortRecentEvents([{
         id: `participant-join-${Date.now()}-${Math.random()}`,
@@ -646,19 +658,19 @@ export const WebSocketProvider = ({ children }) => {
         message: `${data.participant_name} joined`
       }, ...prev]));
       
-      console.log('[WebSocket] ✅ Added participant join event to feed');
+      debugLog('[WebSocket] ✅ Added participant join event to feed');
     });
 
     newSocket.on('participant:left', (data) => {
-      console.log('\\n========================================');
-      console.log('[WebSocket] 📥 RECEIVED: participant:left');
-      console.log('========================================');
-      console.log('[WebSocket] Session ID:', data.session_id);
-      console.log('[WebSocket] Participant:', data.participant_name);
-      console.log('[WebSocket] Left at:', data.left_at);
-      console.log('[WebSocket] Duration (min):', data.total_duration_minutes);
-      console.log('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
-      console.log('========================================\\n');
+      debugLog('\n========================================');
+      debugLog('[WebSocket] 📥 RECEIVED: participant:left');
+      debugLog('========================================');
+      debugLog('[WebSocket] Session ID:', data.session_id);
+      debugLog('[WebSocket] Participant:', data.participant_name);
+      debugLog('[WebSocket] Left at:', data.left_at);
+      debugLog('[WebSocket] Duration (min):', data.total_duration_minutes);
+      debugLog('[WebSocket] Full Data:', JSON.stringify(data, null, 2));
+      debugLog('========================================\n');
       
       setRecentEvents(prev => dedupeAndSortRecentEvents([{
         id: `participant-left-${Date.now()}-${Math.random()}`,
@@ -671,7 +683,7 @@ export const WebSocketProvider = ({ children }) => {
         message: `${data.participant_name} left (${Math.round(data.total_duration_minutes || 0)}min)`
       }, ...prev]));
       
-      console.log('[WebSocket] ✅ Added participant left event to feed');
+      debugLog('[WebSocket] ✅ Added participant left event to feed');
     });
 
     setSocket(newSocket);

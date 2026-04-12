@@ -16,6 +16,7 @@ const api = axios.create({
 // Track if we're currently refreshing the token to avoid multiple refresh requests
 let isRefreshing = false;
 let failedQueue = [];
+let authRedirectInProgress = false;
 
 const processQueue = (error, token = null) => {
   failedQueue.forEach(prom => {
@@ -27,6 +28,17 @@ const processQueue = (error, token = null) => {
   });
   
   failedQueue = [];
+};
+
+const redirectToLandingPage = () => {
+  removeTokens();
+
+  if (typeof window === 'undefined' || authRedirectInProgress || window.location.pathname === '/') {
+    return;
+  }
+
+  authRedirectInProgress = true;
+  window.location.replace('/');
 };
 
 // Request interceptor to add auth token
@@ -51,9 +63,18 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    if (!originalRequest) {
+      return Promise.reject(new Error(error.message || 'An error occurred'));
+    }
+
     // Handle 401 unauthorized - token expired or invalid
     // Skip for login endpoint as 401 there means invalid credentials, not expired token
-    if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.url.includes('/auth/login')) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !originalRequest.url.includes('/auth/login') &&
+      !originalRequest.url.includes('/auth/refresh-token')
+    ) {
       if (isRefreshing) {
         // If we're already refreshing, queue this request
         return new Promise((resolve, reject) => {
@@ -75,8 +96,7 @@ api.interceptors.response.use(
 
       if (!refreshToken) {
         // No refresh token, redirect to landing page
-        removeTokens();
-        window.location.href = '/';
+        redirectToLandingPage();
         return Promise.reject(error);
       }
 
@@ -91,6 +111,7 @@ api.interceptors.response.use(
         
         // Update the authorization header
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+        originalRequest.headers = originalRequest.headers || {};
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         
         processQueue(null, accessToken);
@@ -99,8 +120,7 @@ api.interceptors.response.use(
       } catch (refreshError) {
         // Refresh failed, redirect to landing page
         processQueue(refreshError, null);
-        removeTokens();
-        window.location.href = '/';
+        redirectToLandingPage();
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

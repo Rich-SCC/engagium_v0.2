@@ -13,6 +13,20 @@
 
 import { CONFIG } from '../core/config.js';
 
+const isDevBuild = () => {
+  try {
+    return !('update_url' in chrome.runtime.getManifest());
+  } catch {
+    return false;
+  }
+};
+
+const debugLog = (...args) => {
+  if (isDevBuild()) {
+    debugLog(...args);
+  }
+};
+
 // Cache for DOM elements with timestamps
 const cache = {
   peopleButton: { element: null, timestamp: 0 },
@@ -61,7 +75,7 @@ export function initDOMManager() {
   };
   
   mutationObserver.observe(document.body, bodyObserverConfig);
-  console.log('[DOMManager] Initialized with cache invalidation');
+  debugLog('[DOMManager] Initialized with cache invalidation');
 }
 
 /**
@@ -73,7 +87,7 @@ export function stopDOMManager() {
     mutationObserver = null;
   }
   clearCache();
-  console.log('[DOMManager] Stopped');
+  debugLog('[DOMManager] Stopped');
 }
 
 /**

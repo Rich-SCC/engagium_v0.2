@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const ExtensionToken = require('../models/ExtensionToken');
+const { getJwtSecret } = require('../config/jwt');
 
 /**
  * Flexible auth middleware that accepts either:
@@ -17,7 +18,7 @@ const flexibleAuth = async (req, res, next) => {
     if (jwtToken) {
       // Verify JWT token
       try {
-        const decoded = jwt.verify(jwtToken, process.env.JWT_SECRET);
+        const decoded = jwt.verify(jwtToken, getJwtSecret());
         const user = await User.findById(decoded.id);
 
         if (!user) {

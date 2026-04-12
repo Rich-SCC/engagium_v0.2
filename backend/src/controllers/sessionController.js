@@ -7,6 +7,11 @@ const AttendanceInterval = require('../models/AttendanceInterval');
 const { normalizeMeetingLink } = require('../utils/urlUtils');
 
 const db = require('../config/database');
+const debugLog = (...args) => {
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(...args);
+  }
+};
 // Tracks active speaking windows keyed by "sessionId:participantName".
 const activeMicWindows = new Map();
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -228,17 +233,6 @@ const getSession = async (req, res) => {
   }
 };
 
-// Create new session - DEPRECATED
-// Use startSessionFromMeeting instead - sessions must be created via extension
-// This function is kept for backward compatibility but is not exposed via routes
-const createSession = async (req, res) => {
-  return res.status(410).json({
-    success: false,
-    error: 'Manual session creation is deprecated. Use the browser extension to start tracking sessions.',
-    migration_info: 'POST /api/sessions/start-from-meeting is the current method'
-  });
-};
-
 // Update session
 const updateSession = async (req, res) => {
   try {
@@ -293,73 +287,6 @@ const updateSession = async (req, res) => {
     });
   } catch (error) {
     console.error('Update session error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
-};
-
-// Start session
-// DEPRECATED: Manual session start is no longer supported
-// Sessions are automatically started when the extension detects a Google Meet session
-const startSession = async (req, res) => {
-  return res.status(410).json({
-    success: false,
-    error: 'Manual session start is deprecated',
-    message: 'Sessions are now automatically started by the browser extension when a Google Meet session is detected. Please use the extension to track sessions.',
-    migration: 'Use the startSessionFromMeeting endpoint which is triggered automatically by the extension'
-  });
-};
-
-// End session
-const endSession = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // First get the session to check access
-    const session = await Session.findById(id);
-
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        error: 'Session not found'
-      });
-    }
-
-    // Check if user has access to this session
-    if (session.instructor_id !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
-    // Check if session can be ended
-    if (session.status !== 'active') {
-      return res.status(400).json({
-        success: false,
-        error: 'Session can only be ended if it is currently active'
-      });
-    }
-
-    const endedSession = await Session.end(id);
-
-    // Emit socket event for real-time updates
-    req.app.get('io')?.emit('session:ended', {
-      sessionId: endedSession.id,
-      classId: endedSession.class_id,
-      title: endedSession.title,
-      endedAt: endedSession.ended_at
-    });
-
-    res.json({
-      success: true,
-      data: endedSession,
-      message: 'Session ended successfully'
-    });
-  } catch (error) {
-    console.error('End session error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'
@@ -474,12 +401,12 @@ const getSessionWithAttendance = async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log('[API] getSessionWithAttendance called for session:', id);
+    debugLog('[API] getSessionWithAttendance called for session:', id);
     
     const session = await Session.findWithAttendance(id);
 
-    console.log('[API] Session found:', !!session);
-    console.log('[API] Attendance records:', session?.attendance?.length || 0);
+    debugLog('[API] Session found:', !!session);
+    debugLog('[API] Attendance records:', session?.attendance?.length || 0);
 
     if (!session) {
       return res.status(404).json({
@@ -877,14 +804,14 @@ const handleLiveEvent = async (req, res) => {
   try {
     const { eventType, sessionId, data, timestamp } = req.body;
 
-    console.log('\n========================================');
-    console.log('[LiveEvent] 📥 RECEIVED FROM EXTENSION');
-    console.log('========================================');
-    console.log('[LiveEvent] Event Type:', eventType);
-    console.log('[LiveEvent] Session ID:', sessionId);
-    console.log('[LiveEvent] Timestamp:', timestamp || new Date().toISOString());
-    console.log('[LiveEvent] Data:', JSON.stringify(data, null, 2));
-    console.log('========================================\n');
+    debugLog('\n========================================');
+    debugLog('[LiveEvent] 📥 RECEIVED FROM EXTENSION');
+    debugLog('========================================');
+    debugLog('[LiveEvent] Event Type:', eventType);
+    debugLog('[LiveEvent] Session ID:', sessionId);
+    debugLog('[LiveEvent] Timestamp:', timestamp || new Date().toISOString());
+    debugLog('[LiveEvent] Data:', JSON.stringify(data, null, 2));
+    debugLog('========================================\n');
 
     if (!eventType || !sessionId) {
       console.error('[LiveEvent] ❌ Missing required fields: eventType or sessionId');
@@ -917,7 +844,7 @@ const handleLiveEvent = async (req, res) => {
     if (!canBroadcast) {
       console.warn('[LiveEvent] ⚠️ Socket.io not available - will persist event without broadcast');
     } else {
-      console.log('[LiveEvent] ✅ Socket.io available, preparing to broadcast...');
+      debugLog('[LiveEvent] ✅ Socket.io available, preparing to broadcast...');
     }
 
     // Broadcast event to session room and instructor room
@@ -953,7 +880,7 @@ const handleLiveEvent = async (req, res) => {
             }
           }
 
-        console.log('[LiveEvent] 📤 Broadcasting participant:joined to:', {
+        debugLog('[LiveEvent] 📤 Broadcasting participant:joined to:', {
           sessionRoom: `session:${sessionId}`,
           instructorRoom: `instructor_${req.user.id}`,
           participantName
@@ -985,7 +912,7 @@ const handleLiveEvent = async (req, res) => {
             timestamp: eventData.timestamp
           });
         }
-        console.log('[LiveEvent] ✅ Broadcasted participant:joined');
+        debugLog('[LiveEvent] ✅ Broadcasted participant:joined');
         break;
         }
 
@@ -1202,7 +1129,7 @@ const handleLiveEvent = async (req, res) => {
             timestamp: eventData.timestamp
           });
         }
-        console.log(`[LiveEvent] Extension connected to session ${sessionId}`);
+        debugLog(`[LiveEvent] Extension connected to session ${sessionId}`);
         break;
 
       case 'session:extension_disconnected':
@@ -1212,11 +1139,11 @@ const handleLiveEvent = async (req, res) => {
             timestamp: eventData.timestamp
           });
         }
-        console.log(`[LiveEvent] Extension disconnected from session ${sessionId}`);
+        debugLog(`[LiveEvent] Extension disconnected from session ${sessionId}`);
         break;
 
       default:
-        console.log('[LiveEvent] 📤 Broadcasting unknown event type:', eventType);
+        debugLog('[LiveEvent] 📤 Broadcasting unknown event type:', eventType);
         // Forward unknown events as-is
         if (canBroadcast) {
           io.to(`session:${sessionId}`).emit(eventType, eventData);
@@ -1290,7 +1217,7 @@ const recordParticipantJoin = async (req, res) => {
     // Emit socket event for real-time updates
     const io = global.io || req.app.get('io');
     if (io) {
-      console.log('[API] 📤 Emitting participant:joined to rooms:', {
+      debugLog('[API] 📤 Emitting participant:joined to rooms:', {
         sessionRoom: `session:${sessionId}`,
         instructorRoom: `instructor_${req.user.id}`
       });
@@ -1335,14 +1262,14 @@ const recordParticipantLeave = async (req, res) => {
     const { id: sessionId } = req.params;
     const { participant_name, left_at } = req.body;
 
-    console.log('\\n========================================');
-    console.log('[API] 📤 recordParticipantLeave called');
-    console.log('========================================');
-    console.log('[API] Session ID:', sessionId);
-    console.log('[API] Participant:', participant_name);
-    console.log('[API] Left at:', left_at);
-    console.log('[API] User:', req.user.id);
-    console.log('========================================\\n');
+    debugLog('\n========================================');
+    debugLog('[API] 📤 recordParticipantLeave called');
+    debugLog('========================================');
+    debugLog('[API] Session ID:', sessionId);
+    debugLog('[API] Participant:', participant_name);
+    debugLog('[API] Left at:', left_at);
+    debugLog('[API] User:', req.user.id);
+    debugLog('========================================\n');
 
     if (!participant_name) {
       return res.status(400).json({
@@ -1381,7 +1308,7 @@ const recordParticipantLeave = async (req, res) => {
     const durationData = await AttendanceInterval.calculateTotalDuration(sessionId, participant_name);
     const totalDuration = durationData?.total_minutes || 0;
     
-    console.log('[API] Duration calculation:', {
+    debugLog('[API] Duration calculation:', {
       totalMinutes: totalDuration,
       intervalCount: durationData?.interval_count,
       firstJoined: durationData?.first_joined_at,
@@ -1394,7 +1321,7 @@ const recordParticipantLeave = async (req, res) => {
     // Emit socket event for real-time updates
     const io = global.io || req.app.get('io');
     if (io) {
-      console.log('[API] 📤 Emitting participant:left to rooms:', {
+      debugLog('[API] 📤 Emitting participant:left to rooms:', {
         sessionRoom: `session:${sessionId}`,
         instructorRoom: `instructor_${req.user.id}`,
         participant: participant_name,
@@ -1415,7 +1342,7 @@ const recordParticipantLeave = async (req, res) => {
         total_duration_minutes: totalDuration
       });
       
-      console.log('[API] ✅ Broadcasted participant:left successfully');
+      debugLog('[API] ✅ Broadcasted participant:left successfully');
     }
 
     res.json({
@@ -1482,7 +1409,7 @@ const linkParticipantToStudent = async (req, res) => {
     const { id: sessionId } = req.params;
     const { participant_name, student_id, create_student = false } = req.body;
 
-    console.log('[API] linkParticipantToStudent called:', {
+    debugLog('[API] linkParticipantToStudent called:', {
       sessionId,
       participant_name,
       student_id,
@@ -1518,7 +1445,7 @@ const linkParticipantToStudent = async (req, res) => {
 
     // Create new student from participant if requested
     if (create_student && !student_id) {
-      console.log('[API] Creating student from participant:', participant_name);
+      debugLog('[API] Creating student from participant:', participant_name);
       
       const result = await Student.createFromParticipant(session.class_id, participant_name);
       
@@ -1527,7 +1454,7 @@ const linkParticipantToStudent = async (req, res) => {
       createdNew = result.created !== false; // true if newly created
       targetStudentId = studentRecord.id;
       
-      console.log('[API] Student result:', {
+      debugLog('[API] Student result:', {
         created: createdNew,
         studentId: targetStudentId,
         studentName: studentRecord.full_name
@@ -1542,7 +1469,7 @@ const linkParticipantToStudent = async (req, res) => {
     }
 
     // Link attendance record to student
-    console.log('[API] Linking attendance record:', {
+    debugLog('[API] Linking attendance record:', {
       sessionId,
       participant_name,
       targetStudentId
@@ -1555,11 +1482,11 @@ const linkParticipantToStudent = async (req, res) => {
     }
 
     // Link all intervals to student
-    console.log('[API] Linking intervals to student');
+    debugLog('[API] Linking intervals to student');
     await AttendanceInterval.linkToStudent(sessionId, participant_name, targetStudentId);
 
     // Backfill participation logs for this participant so analytics can map activity to the student.
-    console.log('[API] Linking participation logs to student');
+    debugLog('[API] Linking participation logs to student');
     const linkedLogsCount = await ParticipationLog.linkParticipantLogsToStudent(
       sessionId,
       participant_name,
@@ -1575,7 +1502,7 @@ const linkParticipantToStudent = async (req, res) => {
       ? `Created student "${participant_name}" and linked attendance`
       : `Linked attendance to student "${studentRecord.full_name}"`;
 
-    console.log('[API] ✅ Successfully linked participant to student:', message);
+    debugLog('[API] ✅ Successfully linked participant to student:', message);
 
     res.json({
       success: true,
@@ -1602,10 +1529,7 @@ module.exports = {
   getSessions,
   getActiveSessions,
   getSession,
-  // createSession - DEPRECATED: Use startSessionFromMeeting instead
-  // startSession - DEPRECATED: Sessions auto-start via extension
   updateSession,
-  endSession,
   deleteSession,
   getSessionStats,
   getSessionStudents,
