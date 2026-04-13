@@ -30,7 +30,7 @@ const isDevBuild = () => {
 
 const debugLog = (...args) => {
   if (isDevBuild()) {
-    debugLog(...args);
+    console.log('[GoogleMeetExtension]', ...args);
   }
 };
 
