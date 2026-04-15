@@ -175,14 +175,21 @@ CREATE TEMP TABLE tmp_sessions (
   duration_minutes INTEGER NOT NULL
 );
 
-WITH utc_today AS (
-  SELECT (NOW() AT TIME ZONE 'UTC')::DATE AS today_utc
+WITH seed_timezone AS (
+  SELECT 'Asia/Manila'::TEXT AS schedule_tz
+),
+local_today AS (
+  SELECT
+    st.schedule_tz,
+    (NOW() AT TIME ZONE st.schedule_tz)::DATE AS today_local
+  FROM seed_timezone st
 ),
 session_blueprint AS (
   SELECT
     c.class_id,
     c.class_key,
     c.class_name,
+    lt.schedule_tz,
     b.day_index,
     b.day_date,
     RIGHT(c.class_key, 1)::INTEGER AS class_no,
@@ -192,6 +199,35 @@ session_blueprint AS (
     GREATEST(5, 5 + ((b.day_index + RIGHT(c.class_key, 1)::INTEGER) % 6)) AS early_buffer_minutes,
     GREATEST(6, 6 + ((b.day_index * 2 + RIGHT(c.class_key, 1)::INTEGER) % 7)) AS overtime_buffer_minutes
   FROM tmp_classes c
+  CROSS JOIN local_today lt
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(
+      ARRAY_AGG(DISTINCT normalized_days.day_num) FILTER (WHERE normalized_days.day_num IS NOT NULL),
+      ARRAY[]::INTEGER[]
+    ) AS schedule_day_numbers
+    FROM (
+      SELECT CASE LOWER(TRIM(schedule_day))
+        WHEN 'monday' THEN 1
+        WHEN 'mon' THEN 1
+        WHEN 'tuesday' THEN 2
+        WHEN 'tue' THEN 2
+        WHEN 'tues' THEN 2
+        WHEN 'wednesday' THEN 3
+        WHEN 'wed' THEN 3
+        WHEN 'thursday' THEN 4
+        WHEN 'thu' THEN 4
+        WHEN 'thurs' THEN 4
+        WHEN 'friday' THEN 5
+        WHEN 'fri' THEN 5
+        WHEN 'saturday' THEN 6
+        WHEN 'sat' THEN 6
+        WHEN 'sunday' THEN 7
+        WHEN 'sun' THEN 7
+        ELSE NULL
+      END AS day_num
+      FROM unnest(c.schedule_days) AS schedule_day
+    ) normalized_days
+  ) day_map
   CROSS JOIN LATERAL (
     SELECT
       ROW_NUMBER() OVER (ORDER BY selected_days.day_date) - 1 AS day_index,
@@ -199,16 +235,11 @@ session_blueprint AS (
     FROM (
       SELECT recent_days.day_date
       FROM (
-        SELECT (u.today_utc - day_offset)::DATE AS day_date
+        SELECT (lt.today_local - day_offset)::DATE AS day_date
         FROM generate_series(0, 365) AS day_offset
-        CROSS JOIN utc_today u
       ) recent_days
-      WHERE LOWER(TRIM(TO_CHAR(recent_days.day_date, 'FMDay'))) = ANY(
-        ARRAY(
-          SELECT LOWER(TRIM(schedule_day))
-          FROM unnest(c.schedule_days) AS schedule_day
-        )
-      )
+      WHERE COALESCE(array_length(day_map.schedule_day_numbers, 1), 0) = 0
+        OR EXTRACT(ISODOW FROM recent_days.day_date)::INTEGER = ANY(day_map.schedule_day_numbers)
       ORDER BY recent_days.day_date DESC
       LIMIT 30
     ) selected_days
@@ -229,6 +260,7 @@ expanded_sessions AS (
     sp.class_id,
     sp.class_key,
     sp.class_name,
+    sp.schedule_tz,
     sp.day_index,
     sp.day_date,
     sp.fragment_count,
@@ -254,6 +286,7 @@ timed_sessions AS (
     es.class_id,
     es.class_key,
     es.class_name,
+    es.schedule_tz,
     es.day_index,
     es.day_date,
     es.fragment_no,
@@ -271,7 +304,7 @@ timed_sessions AS (
       FLOOR(es.fragment_start_minutes / 60)::INTEGER,
       MOD(es.fragment_start_minutes, 60)::INTEGER,
       0,
-      'UTC'
+      es.schedule_tz
     ) AS started_at
   FROM expanded_sessions es
 ),
@@ -286,11 +319,11 @@ inserted_sessions AS (
   )
   SELECT
     ts.class_id,
-    TRIM(TO_CHAR(ts.started_at AT TIME ZONE 'UTC', 'FMMonth FMDD, YYYY'))
+    TRIM(TO_CHAR(ts.started_at AT TIME ZONE ts.schedule_tz, 'FMMonth FMDD, YYYY'))
       || ' '
-      || LOWER(TO_CHAR(ts.started_at AT TIME ZONE 'UTC', 'FMMM:MIAM'))
+      || LOWER(TO_CHAR(ts.started_at AT TIME ZONE ts.schedule_tz, 'FMMM:MIAM'))
       || '-'
-      || LOWER(TO_CHAR((ts.started_at + (ts.duration_minutes * INTERVAL '1 minute')) AT TIME ZONE 'UTC', 'FMMM:MIAM'))
+      || LOWER(TO_CHAR((ts.started_at + (ts.duration_minutes * INTERVAL '1 minute')) AT TIME ZONE ts.schedule_tz, 'FMMM:MIAM'))
       || ' - Meet Session',
     'https://meet.google.com/' || LOWER(ts.class_key) || '-fragment-' || ts.day_index::TEXT || '-' || ts.fragment_no::TEXT,
     ts.started_at,
