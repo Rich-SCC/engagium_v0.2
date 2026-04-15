@@ -255,11 +255,12 @@ export const sessionsAPI = {
   update: (id, sessionData) => api.put(`/sessions/${id}`, sessionData),
   delete: (id) => api.delete(`/sessions/${id}`),
   start: (id) => api.put(`/sessions/${id}/start`),
-  end: (id) => api.put(`/sessions/${id}/end`),
+  end: (id, endedAt = new Date().toISOString()) =>
+    api.put(`/sessions/${id}/end-with-timestamp`, { ended_at: endedAt }),
   
   // Extension endpoints (NEW)
   startFromMeeting: (data) => api.post('/sessions/start-from-meeting', data),
-  endWithTimestamp: (id, endedAt) => 
+  endWithTimestamp: (id, endedAt = new Date().toISOString()) => 
     api.put(`/sessions/${id}/end-with-timestamp`, { ended_at: endedAt }),
   
   getStudents: (id) => api.get(`/sessions/${id}/students`),
