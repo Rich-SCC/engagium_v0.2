@@ -39,21 +39,23 @@ CREATE TEMP TABLE tmp_seed_classes (
   subject TEXT NOT NULL,
   section TEXT NOT NULL,
   description TEXT NOT NULL,
+  schedule_days TEXT[] NOT NULL,
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
   meeting_slug TEXT NOT NULL
 );
 
-INSERT INTO tmp_seed_classes (class_key, class_name, subject, section, description, start_time, end_time, meeting_slug)
+INSERT INTO tmp_seed_classes (class_key, class_name, subject, section, description, schedule_days, start_time, end_time, meeting_slug)
 VALUES
-  ('C1', 'Applied Statistics', 'Mathematics', 'A', 'Introductory applied statistics with problem-solving drills.', '08:30', '11:20', 'stats-a'),
-  ('C2', 'Software Engineering Studio', 'Computer Science', 'B', 'Collaborative engineering lab with standups and code critiques.', '11:00', '14:10', 'se-studio-b'),
-  ('C3', 'Communication Research Methods', 'Communication', 'C', 'Research design workshops and guided presentations.', '14:00', '17:00', 'comm-research-c');
+  ('C1', 'Applied Statistics', 'Mathematics', 'A', 'Introductory applied statistics with problem-solving drills.', ARRAY['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], '08:30', '11:00', 'stats-a'),
+  ('C2', 'Software Engineering Studio', 'Computer Science', 'B', 'Collaborative engineering lab with standups and code critiques.', ARRAY['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], '12:00', '14:00', 'se-studio-b'),
+  ('C3', 'Communication Research Methods', 'Communication', 'C', 'Research design workshops and guided presentations.', ARRAY['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], '14:30', '17:00', 'comm-research-c');
 
 CREATE TEMP TABLE tmp_classes (
   class_key TEXT PRIMARY KEY,
   class_id UUID NOT NULL,
   class_name TEXT NOT NULL,
+  schedule_days TEXT[] NOT NULL,
   start_minutes INTEGER NOT NULL,
   end_minutes INTEGER NOT NULL
 );
@@ -76,7 +78,7 @@ WITH inserted_classes AS (
     sc.description,
     jsonb_build_array(
       jsonb_build_object(
-        'days', jsonb_build_array('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'),
+        'days', to_jsonb(sc.schedule_days),
         'startTime', sc.start_time,
         'endTime', sc.end_time
       )
@@ -86,11 +88,12 @@ WITH inserted_classes AS (
   CROSS JOIN tmp_seed_classes sc
   RETURNING id, name
 )
-INSERT INTO tmp_classes (class_key, class_id, class_name, start_minutes, end_minutes)
+INSERT INTO tmp_classes (class_key, class_id, class_name, schedule_days, start_minutes, end_minutes)
 SELECT
   sc.class_key,
   ic.id,
   sc.class_name,
+  sc.schedule_days,
   (split_part(sc.start_time, ':', 1)::INTEGER * 60) + split_part(sc.start_time, ':', 2)::INTEGER,
   (split_part(sc.end_time, ':', 1)::INTEGER * 60) + split_part(sc.end_time, ':', 2)::INTEGER
 FROM inserted_classes ic
@@ -175,13 +178,6 @@ CREATE TEMP TABLE tmp_sessions (
 WITH utc_today AS (
   SELECT (NOW() AT TIME ZONE 'UTC')::DATE AS today_utc
 ),
-base_days AS (
-  SELECT
-    day_index,
-    (u.today_utc - (29 - day_index))::DATE AS day_date
-  FROM generate_series(0, 29) AS day_index
-  CROSS JOIN utc_today u
-),
 session_blueprint AS (
   SELECT
     c.class_id,
@@ -196,7 +192,27 @@ session_blueprint AS (
     GREATEST(5, 5 + ((b.day_index + RIGHT(c.class_key, 1)::INTEGER) % 6)) AS early_buffer_minutes,
     GREATEST(6, 6 + ((b.day_index * 2 + RIGHT(c.class_key, 1)::INTEGER) % 7)) AS overtime_buffer_minutes
   FROM tmp_classes c
-  CROSS JOIN base_days b
+  CROSS JOIN LATERAL (
+    SELECT
+      ROW_NUMBER() OVER (ORDER BY selected_days.day_date) - 1 AS day_index,
+      selected_days.day_date
+    FROM (
+      SELECT recent_days.day_date
+      FROM (
+        SELECT (u.today_utc - day_offset)::DATE AS day_date
+        FROM generate_series(0, 365) AS day_offset
+        CROSS JOIN utc_today u
+      ) recent_days
+      WHERE LOWER(TRIM(TO_CHAR(recent_days.day_date, 'FMDay'))) = ANY(
+        ARRAY(
+          SELECT LOWER(TRIM(schedule_day))
+          FROM unnest(c.schedule_days) AS schedule_day
+        )
+      )
+      ORDER BY recent_days.day_date DESC
+      LIMIT 30
+    ) selected_days
+  ) b
 ),
 session_plan AS (
   SELECT
@@ -270,7 +286,12 @@ inserted_sessions AS (
   )
   SELECT
     ts.class_id,
-    ts.class_name || ' | Day ' || (ts.day_index + 1)::TEXT || ' | Fragment ' || ts.fragment_no::TEXT,
+    TRIM(TO_CHAR(ts.started_at AT TIME ZONE 'UTC', 'FMMonth FMDD, YYYY'))
+      || ' '
+      || LOWER(TO_CHAR(ts.started_at AT TIME ZONE 'UTC', 'FMMM:MIAM'))
+      || '-'
+      || LOWER(TO_CHAR((ts.started_at + (ts.duration_minutes * INTERVAL '1 minute')) AT TIME ZONE 'UTC', 'FMMM:MIAM'))
+      || ' - Meet Session',
     'https://meet.google.com/' || LOWER(ts.class_key) || '-fragment-' || ts.day_index::TEXT || '-' || ts.fragment_no::TEXT,
     ts.started_at,
     ts.started_at + (ts.duration_minutes * INTERVAL '1 minute'),
