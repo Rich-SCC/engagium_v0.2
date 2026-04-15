@@ -54,8 +54,14 @@ function addProtocol(url) {
 function normalizeMeetingLink(link) {
   if (!link) return '';
   
+  const rawLink = String(link).trim();
+  if (!rawLink) return '';
+
   // Remove protocol for consistent storage
-  let cleanLink = link.replace(/^https?:\/\//, '');
+  let cleanLink = rawLink.replace(/^https?:\/\//i, '');
+
+  // Remove query/hash noise and trailing slash to prevent duplicate storage variants.
+  cleanLink = cleanLink.split(/[?#]/)[0].replace(/\/+$/, '');
   
   // Check if it's a Google Meet link/code and format it properly
   if (cleanLink.startsWith('meet.google.com/') || /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(cleanLink)) {

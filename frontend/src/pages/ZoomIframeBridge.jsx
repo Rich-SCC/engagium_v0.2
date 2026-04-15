@@ -16,6 +16,7 @@ import {
 const TOKEN_STORAGE_KEY = 'engagium_zoom_bridge_token';
 const CLASS_ID_STORAGE_KEY = 'engagium_zoom_bridge_class_id';
 const TOKEN_REQUEST_RETRY_DELAYS_MS = [0, 800, 2000];
+const ZOOM_HEARTBEAT_INTERVAL_MS = 12000;
 
 const getTokenFromUrl = () => {
   const params = new URLSearchParams(window.location.search);
@@ -535,6 +536,7 @@ function ZoomIframeBridge() {
   const knownParticipantsRef = useRef(new Map());
   const recentLifecycleRef = useRef(new Map());
   const recentParticipationSignalsRef = useRef(new Map());
+  const heartbeatIntervalRef = useRef(null);
 
   const requestTokenFromParent = useCallback((reason = 'bootstrap') => {
     window.parent?.postMessage(
@@ -586,6 +588,60 @@ function ZoomIframeBridge() {
       timestamp: new Date().toISOString(),
     });
   }, []);
+
+  useEffect(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+
+    const activeSessionId = session?.id;
+    const activeToken = tokenRef.current;
+    const sdk = zoomSdkRef.current;
+
+    if (!activeSessionId || !activeToken || typeof sdk?.getRunningContext !== 'function') {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let heartbeatInFlight = false;
+
+    const sendZoomHeartbeat = async () => {
+      if (cancelled || heartbeatInFlight) {
+        return;
+      }
+
+      heartbeatInFlight = true;
+
+      try {
+        const runningContextRaw = await sdk.getRunningContext();
+        const runningContext = runningContextRaw?.runningContext || null;
+
+        await sendLiveEvent('session:zoom_heartbeat', {
+          platform: 'zoom',
+          source: 'zoom_iframe_bridge',
+          runningContext,
+          runningContextRaw,
+        }, activeSessionId);
+      } catch (error) {
+        // Heartbeat timeout handling is backend-driven; client just retries next interval.
+      } finally {
+        heartbeatInFlight = false;
+      }
+    };
+
+    // Send immediately so backend monitor starts without waiting a full interval.
+    sendZoomHeartbeat();
+    heartbeatIntervalRef.current = setInterval(sendZoomHeartbeat, ZOOM_HEARTBEAT_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
+    };
+  }, [session?.id, sendLiveEvent, token, zoomState?.initialized]);
 
   const isSelfParticipant = useCallback((participantId, participantName) => {
     const normalizedId = normalizeIdentityValue(participantId);
@@ -1100,7 +1156,6 @@ function ZoomIframeBridge() {
         meeting_link: meetingLink,
         started_at: new Date().toISOString(),
         platform: 'zoom',
-        title: `Zoom Session - ${new Date().toLocaleString()}`,
       });
 
       const createdSession = response?.data;

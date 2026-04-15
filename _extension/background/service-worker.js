@@ -44,6 +44,8 @@ setTimeout(() => {
 
 // Meeting detection state
 let currentMeetingDetection = null; // { meeting_id, platform, tab_id }
+// Active tracking tab context (persists after meeting detection is cleared)
+let activeSessionTabContext = null; // { meeting_id, platform, tab_id }
 
 // ============================================================================
 // Message Handler
@@ -345,12 +347,13 @@ async function handleMeetingLeft(data) {
   }
   
   logger.log(' Auto-ending session due to meeting exit:', session.id);
-  
-  // Store tab_id before clearing detection state
-  const tabId = currentMeetingDetection?.tab_id;
-  
+
+  // Store tab_id before clearing tracked state
+  const tabId = currentMeetingDetection?.tab_id || activeSessionTabContext?.tab_id;
+
   // Clear meeting detection state
   currentMeetingDetection = null;
+  activeSessionTabContext = null;
   
   try {
     // Notify content script to stop tracking (if tab still exists)
@@ -463,6 +466,17 @@ async function handleStartSession(data) {
       session: session
     }).catch(() => {}); // Ignore if no listeners
 
+    // Persist tab context for auto-end logic after detection state is cleared.
+    // This enables tab close/navigation listeners while tracking is active.
+    if (currentMeetingDetection?.tab_id) {
+      activeSessionTabContext = {
+        meeting_id: meeting_id,
+        platform: platform,
+        tab_id: currentMeetingDetection.tab_id
+      };
+      logger.log(' Active session tab context set:', activeSessionTabContext);
+    }
+
     // Clear meeting detection state AFTER notifying content script
     currentMeetingDetection = null;
 
@@ -514,6 +528,9 @@ async function handleEndSession(data) {
     });
 
     await clearSessionData(sessionId);
+
+    // Session is finished; clear tracked tab context.
+    activeSessionTabContext = null;
 
     logger.log(' Session ended and synced:', sessionId);
 
@@ -713,13 +730,18 @@ self.addEventListener('online', () => {
  */
 chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
   logger.log(' Tab removed:', tabId);
-  
-  // Check if this was the meeting tab
-  if (currentMeetingDetection && currentMeetingDetection.tab_id === tabId) {
+
+  const trackedContext = currentMeetingDetection?.tab_id === tabId
+    ? currentMeetingDetection
+    : (activeSessionTabContext?.tab_id === tabId ? activeSessionTabContext : null);
+
+  // Check if this was a tracked meeting tab
+  if (trackedContext) {
     logger.log(' Meeting tab closed, auto-ending session');
-    
-    const meetingId = currentMeetingDetection.meeting_id;
+
+    const meetingId = trackedContext.meeting_id;
     currentMeetingDetection = null; // Clear detection state
+    activeSessionTabContext = null;
     
     // Auto-end session if active
     await handleMeetingLeft({ meetingId });
@@ -733,9 +755,13 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Only process when URL actually changes to a different page
   if (!changeInfo.url) return;
-  
-  // Check if this is the meeting tab
-  if (!currentMeetingDetection || currentMeetingDetection.tab_id !== tabId) {
+
+  const trackedContext = currentMeetingDetection?.tab_id === tabId
+    ? currentMeetingDetection
+    : (activeSessionTabContext?.tab_id === tabId ? activeSessionTabContext : null);
+
+  // Check if this is a tracked meeting tab
+  if (!trackedContext) {
     return;
   }
   
@@ -750,14 +776,15 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // 3. In a different meeting (meeting ID changed)
   const leftMeeting = !changeInfo.url.includes('meet.google.com') || 
                       !newMeetingId || 
-                      newMeetingId !== currentMeetingDetection.meeting_id;
+                      newMeetingId !== trackedContext.meeting_id;
   
   if (leftMeeting) {
     logger.log(' Navigated away from meeting (tab navigation), auto-ending session');
-    logger.log(' Old meeting:', currentMeetingDetection.meeting_id, '| New URL:', changeInfo.url);
-    
-    const meetingId = currentMeetingDetection.meeting_id;
+    logger.log(' Old meeting:', trackedContext.meeting_id, '| New URL:', changeInfo.url);
+
+    const meetingId = trackedContext.meeting_id;
     currentMeetingDetection = null; // Clear detection state
+    activeSessionTabContext = null;
     
     // Auto-end session if active
     await handleMeetingLeft({ meetingId });

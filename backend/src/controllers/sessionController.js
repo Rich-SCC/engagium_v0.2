@@ -14,6 +14,10 @@ const debugLog = (...args) => {
 };
 // Tracks active speaking windows keyed by "sessionId:participantName".
 const activeMicWindows = new Map();
+const zoomHeartbeatState = new Map();
+const ZOOM_HEARTBEAT_INTERVAL_MS = 12000;
+const ZOOM_HEARTBEAT_GRACE_MS = 3000;
+const ZOOM_HEARTBEAT_MISS_LIMIT = 3;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const normalizeUuidList = (values) => [...new Set(
@@ -160,6 +164,200 @@ const formatSpeakingDuration = (seconds) => {
   }
 
   return `${mins}m ${secs}s`;
+};
+
+const detectSessionPlatform = (platformHint, meetingLink) => {
+  const normalizedHint = String(platformHint || '').trim().toLowerCase();
+  if (normalizedHint.includes('zoom')) {
+    return 'zoom';
+  }
+  if (normalizedHint.includes('google') || normalizedHint.includes('meet')) {
+    return 'google-meet';
+  }
+
+  const normalizedLink = String(meetingLink || '').trim().toLowerCase();
+  if (normalizedLink.includes('zoom.us')) {
+    return 'zoom';
+  }
+  if (normalizedLink.includes('meet.google.com')) {
+    return 'google-meet';
+  }
+
+  return 'meeting';
+};
+
+const PRETTY_TITLE_PATTERN = / - (Meet|Zoom|Meeting) Session$/;
+const LEGACY_AUTO_TITLE_PATTERN = /^\[\d{4}-\d{2}-\d{2}\]\[\d{2}:\d{2}\]\([^)]+\)$/;
+
+const formatPrettyDate = (date) => new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric'
+}).format(date);
+
+const formatPrettyTime = (date) => new Intl.DateTimeFormat('en-US', {
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true
+}).format(date).replace(/\s+/g, '').toLowerCase();
+
+const getPlatformSessionLabel = (platform) => {
+  if (platform === 'google-meet') {
+    return 'Meet Session';
+  }
+  if (platform === 'zoom') {
+    return 'Zoom Session';
+  }
+  return 'Meeting Session';
+};
+
+const buildAutoSessionTitle = ({ startedAt, endedAt = null, platformHint, meetingLink }) => {
+  const parsedDate = new Date(startedAt);
+  const safeDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  const platform = detectSessionPlatform(platformHint, meetingLink);
+  const sessionLabel = getPlatformSessionLabel(platform);
+
+  const prettyDate = formatPrettyDate(safeDate);
+  const prettyStartTime = formatPrettyTime(safeDate);
+
+  let timePart = prettyStartTime;
+  if (endedAt) {
+    const parsedEndDate = new Date(endedAt);
+    if (!Number.isNaN(parsedEndDate.getTime())) {
+      timePart = `${prettyStartTime}-${formatPrettyTime(parsedEndDate)}`;
+    }
+  }
+
+  return `${prettyDate} ${timePart} - ${sessionLabel}`;
+};
+
+const shouldRetitleOnSessionEnd = (title) => {
+  if (!title || typeof title !== 'string') {
+    return true;
+  }
+
+  const trimmed = title.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  return LEGACY_AUTO_TITLE_PATTERN.test(trimmed) || PRETTY_TITLE_PATTERN.test(trimmed);
+};
+
+const finalizeSessionEnd = async ({ session, endedAt, platformHint }) => {
+  const sessionId = session.id;
+
+  await AttendanceInterval.closeAllOpenIntervals(sessionId, endedAt);
+
+  const summary = await AttendanceInterval.getSessionAttendanceSummary(sessionId);
+  for (const participant of summary) {
+    await AttendanceRecord.updateDuration(
+      sessionId,
+      participant.participant_name,
+      participant.total_duration_minutes,
+      endedAt
+    );
+  }
+
+  await AttendanceRecord.markAbsentStudents(sessionId, session.class_id);
+
+  const shouldRetitle = shouldRetitleOnSessionEnd(session.title);
+  const nextTitle = shouldRetitle
+    ? buildAutoSessionTitle({
+      startedAt: session.started_at,
+      endedAt,
+      platformHint: platformHint || null,
+      meetingLink: session.meeting_link
+    })
+    : null;
+
+  if (nextTitle) {
+    await Session.update(sessionId, { title: nextTitle });
+  }
+
+  return Session.updateEndTime(sessionId, endedAt);
+};
+
+const clearZoomHeartbeatMonitor = (sessionId) => {
+  const existing = zoomHeartbeatState.get(sessionId);
+  if (existing?.timeoutId) {
+    clearTimeout(existing.timeoutId);
+  }
+  zoomHeartbeatState.delete(sessionId);
+};
+
+const scheduleZoomHeartbeatTimeout = (sessionId) => {
+  const current = zoomHeartbeatState.get(sessionId);
+  if (!current) return;
+
+  if (current.timeoutId) {
+    clearTimeout(current.timeoutId);
+  }
+
+  current.timeoutId = setTimeout(async () => {
+    const state = zoomHeartbeatState.get(sessionId);
+    if (!state) return;
+
+    state.missedCount = (state.missedCount || 0) + 1;
+
+    if (state.missedCount < ZOOM_HEARTBEAT_MISS_LIMIT) {
+      scheduleZoomHeartbeatTimeout(sessionId);
+      return;
+    }
+
+    try {
+      const session = await Session.findById(sessionId);
+
+      if (!session || session.status !== 'active') {
+        clearZoomHeartbeatMonitor(sessionId);
+        return;
+      }
+
+      const endedAt = new Date().toISOString();
+      const updatedSession = await finalizeSessionEnd({
+        session,
+        endedAt,
+        platformHint: 'zoom'
+      });
+
+      const io = global.io;
+      if (io) {
+        io.to(`session:${sessionId}`).emit('session:ended', {
+          session_id: updatedSession.id,
+          ended_at: updatedSession.ended_at,
+          reason: 'zoom_heartbeat_timeout'
+        });
+
+        io.to(`instructor_${session.instructor_id}`).emit('session:ended', {
+          session_id: updatedSession.id,
+          ended_at: updatedSession.ended_at,
+          reason: 'zoom_heartbeat_timeout'
+        });
+      }
+
+      console.warn(`[ZoomHeartbeat] Auto-ended session ${sessionId} after ${ZOOM_HEARTBEAT_MISS_LIMIT} missed heartbeats`);
+    } catch (error) {
+      console.error(`[ZoomHeartbeat] Failed to auto-end session ${sessionId}:`, error);
+    } finally {
+      clearZoomHeartbeatMonitor(sessionId);
+    }
+  }, ZOOM_HEARTBEAT_INTERVAL_MS + ZOOM_HEARTBEAT_GRACE_MS);
+};
+
+const registerZoomHeartbeat = (sessionId, runningContext = null) => {
+  const current = zoomHeartbeatState.get(sessionId) || {
+    missedCount: 0,
+    timeoutId: null,
+    lastHeartbeatAt: null,
+    lastRunningContext: null
+  };
+
+  current.missedCount = 0;
+  current.lastHeartbeatAt = new Date().toISOString();
+  current.lastRunningContext = runningContext;
+
+  zoomHeartbeatState.set(sessionId, current);
+  scheduleZoomHeartbeatTimeout(sessionId);
 };
 
 // Get all sessions for current instructor
@@ -663,7 +861,7 @@ const getClassSessions = async (req, res) => {
 // Start session from meeting (Extension-triggered)
 const startSessionFromMeeting = async (req, res) => {
   try {
-    const { class_id, meeting_link, started_at, title } = req.body;
+    const { class_id, meeting_link, started_at, title, platform } = req.body;
 
     // Validation
     if (!class_id || !meeting_link || !started_at) {
@@ -692,13 +890,11 @@ const startSessionFromMeeting = async (req, res) => {
       });
     }
 
-    // Auto-generate title if not provided
-    const sessionTitle = title || `${classData.name} - ${new Date(started_at).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit'
-    })}`;
+    const sessionTitle = title || buildAutoSessionTitle({
+      startedAt: started_at,
+      platformHint: platform,
+      meetingLink: normalizedLink
+    });
 
     const session = await Session.create({
       class_id,
@@ -734,7 +930,7 @@ const startSessionFromMeeting = async (req, res) => {
 const endSessionWithTimestamp = async (req, res) => {
   try {
     const { id } = req.params;
-    const { ended_at } = req.body;
+    const { ended_at, platform } = req.body;
 
     if (!ended_at) {
       return res.status(400).json({
@@ -759,24 +955,13 @@ const endSessionWithTimestamp = async (req, res) => {
       });
     }
 
-    // Close all open attendance intervals with the session end time
-    await AttendanceInterval.closeAllOpenIntervals(id, ended_at);
+    const updatedSession = await finalizeSessionEnd({
+      session,
+      endedAt: ended_at,
+      platformHint: platform
+    });
 
-    // Recalculate total durations for all participants and update attendance records
-    const summary = await AttendanceInterval.getSessionAttendanceSummary(id);
-    for (const participant of summary) {
-      await AttendanceRecord.updateDuration(
-        id, 
-        participant.participant_name, 
-        participant.total_duration_minutes, 
-        ended_at
-      );
-    }
-
-    // Mark students who are in the class roster but didn't attend as absent
-    await AttendanceRecord.markAbsentStudents(id, session.class_id);
-
-    const updatedSession = await Session.updateEndTime(id, ended_at);
+    clearZoomHeartbeatMonitor(session.id);
 
     // Emit socket event
     if (global.io) {
@@ -856,6 +1041,23 @@ const handleLiveEvent = async (req, res) => {
 
     // Map extension event types to frontend event types
     switch (eventType) {
+      case 'session:zoom_heartbeat':
+        {
+          const sessionPlatform = detectSessionPlatform('zoom', session.meeting_link);
+          if (sessionPlatform === 'zoom') {
+            registerZoomHeartbeat(sessionId, data?.runningContext || null);
+          }
+
+          if (canBroadcast) {
+            io.to(`instructor_${req.user.id}`).emit('session:zoom_heartbeat', {
+              session_id: sessionId,
+              running_context: data?.runningContext || null,
+              timestamp: eventData.timestamp
+            });
+          }
+        }
+        break;
+
       case 'participant:joined':
         {
           const participantName =
@@ -1133,6 +1335,7 @@ const handleLiveEvent = async (req, res) => {
         break;
 
       case 'session:extension_disconnected':
+        clearZoomHeartbeatMonitor(sessionId);
         if (canBroadcast) {
           io.to(`instructor_${req.user.id}`).emit('session:extension_disconnected', {
             session_id: sessionId,

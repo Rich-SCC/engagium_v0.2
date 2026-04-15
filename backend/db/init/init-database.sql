@@ -180,6 +180,9 @@ CREATE TABLE IF NOT EXISTS session_links (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_links_class_id_link_url_unique
+ON session_links (class_id, LOWER(link_url));
+
 -- Exempted accounts table (exclude from tracking)
 CREATE TABLE IF NOT EXISTS exempted_accounts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

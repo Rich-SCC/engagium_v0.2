@@ -21,6 +21,58 @@ import ParticipationFilters from '@/components/Participation/ParticipationFilter
 import ParticipationLogsList from '@/components/Participation/ParticipationLogsList';
 import { formatMeetingLinkForDisplay, getMeetingLinkText } from '@/utils/urlUtils';
 
+const PRETTY_AUTO_TITLE_PATTERN = / - (Meet|Zoom|Meeting) Session$/;
+const LEGACY_AUTO_TITLE_PATTERN = /^\[\d{4}-\d{2}-\d{2}\]\[\d{2}:\d{2}\]\([^)]+\)$/;
+
+const detectSessionLabel = (meetingLink) => {
+  const normalized = String(meetingLink || '').toLowerCase();
+  if (normalized.includes('meet.google.com')) return 'Meet Session';
+  if (normalized.includes('zoom.us') || normalized.includes('zoom://')) return 'Zoom Session';
+  return 'Meeting Session';
+};
+
+const formatPrettyDate = (date) => date.toLocaleDateString('en-US', {
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric'
+});
+
+const formatPrettyTime = (date) => date.toLocaleTimeString('en-US', {
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true
+}).replace(/\s+/g, '').toLowerCase();
+
+const shouldUseLocalDerivedTitle = (title) => {
+  if (!title || typeof title !== 'string') return true;
+  const trimmed = title.trim();
+  if (!trimmed) return true;
+  if (LEGACY_AUTO_TITLE_PATTERN.test(trimmed)) return true;
+  if (PRETTY_AUTO_TITLE_PATTERN.test(trimmed)) return true;
+  if (/^Zoom Session - /i.test(trimmed)) return true;
+  return false;
+};
+
+const buildLocalDisplayTitle = (session) => {
+  const startedAt = session?.started_at ? new Date(session.started_at) : null;
+  if (!startedAt || Number.isNaN(startedAt.getTime())) {
+    return session?.title || 'Session';
+  }
+
+  const datePart = formatPrettyDate(startedAt);
+  const startPart = formatPrettyTime(startedAt);
+  let timePart = startPart;
+
+  if (session?.ended_at) {
+    const endedAt = new Date(session.ended_at);
+    if (!Number.isNaN(endedAt.getTime())) {
+      timePart = `${startPart}-${formatPrettyTime(endedAt)}`;
+    }
+  }
+
+  return `${datePart} ${timePart} - ${detectSessionLabel(session?.meeting_link)}`;
+};
+
 const SessionDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -54,6 +106,9 @@ const SessionDetailPage = () => {
   const session = sessionData?.data;
   const participation = participationData?.data;
   const participationLogs = participationLogsData?.data?.data || [];
+  const displayTitle = shouldUseLocalDerivedTitle(session?.title)
+    ? buildLocalDisplayTitle(session)
+    : session?.title;
 
   // Mutations
   const updateSessionMutation = useMutation({
@@ -211,7 +266,7 @@ const SessionDetailPage = () => {
             <ArrowLeftIcon className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">{session.title}</h1>
+            <h1 className="text-3xl font-bold text-gray-900">{displayTitle}</h1>
             <p className="text-gray-600 mt-1">{session.class_name}</p>
           </div>
         </div>

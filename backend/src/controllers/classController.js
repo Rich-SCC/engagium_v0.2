@@ -1,6 +1,7 @@
 const Class = require('../models/Class');
 const SessionLink = require('../models/SessionLink');
 const ExemptedAccount = require('../models/ExemptedAccount');
+const { normalizeMeetingLink } = require('../utils/urlUtils');
 
 const DEFAULT_SCHEDULE_DURATION_MINUTES = 90;
 const DEFAULT_EARLY_BUFFER_MINUTES = 30;
@@ -732,9 +733,40 @@ const addClassLink = async (req, res) => {
       });
     }
 
+    const normalizedLink = normalizeMeetingLink(link_url);
+    const existingLinks = await SessionLink.findByClassId(id);
+    const duplicateLink = existingLinks.find(
+      (candidate) => normalizeMeetingLink(candidate.link_url).toLowerCase() === normalizedLink.toLowerCase()
+    );
+
+    if (duplicateLink) {
+      if (is_primary && !duplicateLink.is_primary) {
+        const updatedPrimary = await SessionLink.update(duplicateLink.id, {
+          link_url: duplicateLink.link_url,
+          link_type: duplicateLink.link_type,
+          label: duplicateLink.label,
+          zoom_meeting_id: duplicateLink.zoom_meeting_id,
+          zoom_passcode: duplicateLink.zoom_passcode,
+          is_primary: true
+        });
+
+        return res.json({
+          success: true,
+          data: updatedPrimary,
+          message: 'Link already exists for this class; existing link kept.'
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: duplicateLink,
+        message: 'Link already exists for this class; existing link kept.'
+      });
+    }
+
     const link = await SessionLink.create({
       class_id: id,
-      link_url,
+      link_url: normalizedLink,
       link_type,
       label,
       zoom_meeting_id,
@@ -786,11 +818,25 @@ const updateClassLink = async (req, res) => {
       is_primary
     });
 
+    if (!updatedLink) {
+      return res.status(404).json({
+        success: false,
+        error: 'Link not found'
+      });
+    }
+
     res.json({
       success: true,
       data: updatedLink
     });
   } catch (error) {
+    if (error?.code === 'DUPLICATE_CLASS_LINK') {
+      return res.status(409).json({
+        success: false,
+        error: error.message
+      });
+    }
+
     console.error('Update class link error:', error);
     res.status(500).json({
       success: false,
