@@ -1,9 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeftIcon, CalendarIcon, ClockIcon, Squares2X2Icon } from '@heroicons/react/24/outline';
+import { ArrowDownTrayIcon, ArrowLeftIcon, CalendarIcon, ClockIcon, Squares2X2Icon } from '@heroicons/react/24/outline';
 import { sessionsAPI, participationAPI, classesAPI } from '@/services/api';
 import { formatClassDisplay } from '@/utils/classFormatter';
+import {
+  buildAttendanceBundleCsv,
+  buildAttendanceBundlePdf,
+  buildParticipationBundleCsv,
+  buildParticipationBundlePdf,
+  downloadCsvFile,
+  downloadPdfFile,
+  makeReportBaseName,
+} from '@/utils/sessionBundleReportExport';
 import AttendanceRoster from '@/components/Sessions/AttendanceRoster';
 import ParticipationSummary from '@/components/Participation/ParticipationSummary';
 import ParticipationFilters from '@/components/Participation/ParticipationFilters';
@@ -57,6 +66,9 @@ const BundledSessionDetailPage = () => {
   const [activeTab, setActiveTab] = useState('attendance');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState('');
+  const [reportScope, setReportScope] = useState('attendance');
+  const [reportFormat, setReportFormat] = useState('csv');
+  const [isExporting, setIsExporting] = useState(false);
 
   const bundleFromState = location.state?.bundle || null;
 
@@ -283,6 +295,84 @@ const BundledSessionDetailPage = () => {
     };
   }, [stitchedLogs, stitchedAttendance]);
 
+  const handleDownloadReport = async () => {
+    const includeAttendance = reportScope === 'attendance' || reportScope === 'both';
+    const includeParticipation = reportScope === 'participation' || reportScope === 'both';
+
+    if (!includeAttendance && !includeParticipation) return;
+
+    setIsExporting(true);
+    try {
+      let logsForExport = stitchedLogs;
+
+      if (includeParticipation && logsForExport.length === 0 && sessionIds.length > 0) {
+        const refetchResult = await refetchLogs();
+        if (refetchResult?.error) {
+          throw refetchResult.error;
+        }
+
+        const refreshedGrouped = refetchResult?.data?.data || {};
+        const refreshedLogs = sessionIds
+          .flatMap((sessionId) => (Array.isArray(refreshedGrouped[sessionId]) ? refreshedGrouped[sessionId] : []))
+          .sort((left, right) => {
+            const leftTs = toDate(left.timestamp)?.getTime() || 0;
+            const rightTs = toDate(right.timestamp)?.getTime() || 0;
+            return rightTs - leftTs;
+          });
+
+        logsForExport = refreshedLogs;
+      }
+
+      const baseName = makeReportBaseName({
+        classInfo,
+        bundleId: bundleId ? decodeURIComponent(bundleId) : 'bundle',
+      });
+
+      const reportLabel = classInfo
+        ? `Session Bundle Report - ${formatClassDisplay(classInfo)}`
+        : 'Session Bundle Report';
+      const reportContext = {
+        sessionDate: formatDateLabel(stitchedStartAt),
+        plannedWindow: `${formatTimeLabel(plannedStartAt)} - ${formatTimeLabel(plannedEndAt)}`,
+        actualWindow: `${formatTimeLabel(stitchedStartAt)} - ${formatTimeLabel(stitchedEndAt)}`,
+      };
+
+      if (reportFormat === 'csv') {
+        if (includeAttendance) {
+          const attendanceCsv = buildAttendanceBundleCsv({ attendance: stitchedAttendance });
+          downloadCsvFile(attendanceCsv, `${baseName}_attendance_report.csv`);
+        }
+
+        if (includeParticipation) {
+          const participationCsv = buildParticipationBundleCsv({ logs: logsForExport });
+          downloadCsvFile(participationCsv, `${baseName}_participation_report.csv`);
+        }
+      } else {
+        if (includeAttendance) {
+          const attendancePdf = buildAttendanceBundlePdf({
+            attendance: stitchedAttendance,
+            reportTitle: `${reportLabel} - Attendance`,
+            ...reportContext,
+          });
+          downloadPdfFile(attendancePdf, `${baseName}_attendance_report.pdf`);
+        }
+
+        if (includeParticipation) {
+          const participationPdf = buildParticipationBundlePdf({
+            logs: logsForExport,
+            reportTitle: `${reportLabel} - Participation`,
+            ...reportContext,
+          });
+          downloadPdfFile(participationPdf, `${baseName}_participation_report.pdf`);
+        }
+      }
+    } catch (error) {
+      alert('Failed to export session bundle report');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   if (sessionsLoading && fragments.length === 0) {
     return <div className="text-center py-12 text-gray-500">Loading stitched session...</div>;
   }
@@ -323,6 +413,37 @@ const BundledSessionDetailPage = () => {
               {bundleId ? ` • ${decodeURIComponent(bundleId)}` : ''}
             </p>
           </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <select
+            value={reportScope}
+            onChange={(event) => setReportScope(event.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+          >
+            <option value="attendance">Attendance Report</option>
+            <option value="participation">Participation Summary</option>
+            <option value="both">Attendance + Participation</option>
+          </select>
+
+          <select
+            value={reportFormat}
+            onChange={(event) => setReportFormat(event.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+          >
+            <option value="csv">CSV</option>
+            <option value="pdf">PDF</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={handleDownloadReport}
+            disabled={isExporting || sessionIds.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed"
+          >
+            <ArrowDownTrayIcon className="w-5 h-5" />
+            {isExporting ? 'Exporting...' : 'Download Report'}
+          </button>
         </div>
       </div>
 

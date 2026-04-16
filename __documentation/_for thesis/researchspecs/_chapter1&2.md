@@ -1,150 +1,138 @@
-ENGAGIUM: CLASS PARTICIPATION TRACKER FOR ONLINE LEARNING FOR PROFESSORS OF ST. CLARE COLLEGE OF CALOOCAN
+# ENGAGIUM: Class Participation Tracker for Online Learning for Professors of St. Clare College of Caloocan
 
 
 
-
-
-
-A Thesis
-Submitted to the Faculty
+**A Thesis**  
+Submitted to the Faculty  
 of Institute of Computer Studies
 
-
-
-
-
-In Partial Fulfillment of the requirement 
-for the Degree of Bachelor of Science 
+**In Partial Fulfillment of the requirement**  
+for the Degree of Bachelor of Science  
 in Computer Science
 
+**By:**
+
+- AYA-AY, CYRUS JIMUEL O.
+- BAFLOR, DENY SHIA M.
+- DE GUZMAN, RICH A.
+- DURANA III, ANGEL A.
+- GREGORIO, KIRSTEN ERICKA E.
+- LINGHON, ISSIAH WAYNE M.
+- PONFERRADA, JUSTINE
+- SILVESTRE, CARL DANIEL G.
 
 
+**September 2025**
 
+## Table of Contents
 
-By:
-AYA-AY, CYRUS JIMUEL O.
-BAFLOR, DENY SHIA M.
-DE GUZMAN, RICH A.
-DURANA III, ANGEL A.
-GREGORIO, KIRSTEN ERICKA E.
-LINGHON, ISSIAH WAYNE M.
-PONFERRADA, JUSTINE
-SILVESTRE, CARL DANIEL G.
-
-
-SEPTEMBER 2025
-TABLE OF CONTENTS
-
-Title										Page
-
-TITLE PAGE
-
-CHAPTER I	INTRODUCTION							
-		Background of the Study
-		Statement of the Problems
-		Objective of the Study
-		Significance of the Study
-		Scope and Delimitation
-		Definition of Terms
-CHAPTER II	REVIEW OF RELATED LITERATURE AND STUDIES
-		Related Literature (Foreign & Local)
-		Related Studies (Foreign & Local)
-CHAPTER III	METHODS OF RESEARCH AND PROCEDURES
-		Research Methodology
-		Research Design
-		Data Gathering 
-		Statistical Treatment
-BIBLIOGRAPHY
+- Title Page
+- Chapter I: Introduction
+  - Background of the Study
+  - Statement of the Problems
+  - Objective of the Study
+  - Significance of the Study
+  - Scope and Delimitation
+  - Definition of Terms
+- Chapter II: Review of Related Literature and Studies
+  - Related Literature (Foreign & Local)
+  - Related Studies (Foreign & Local)
+- Chapter III: Methods of Research and Procedures
+  - Research Methodology
+  - Research Design
+  - Data Gathering
+  - Statistical Treatment
+- Bibliography
 	
 
 
+# Chapter I
 
+## Problem and Its Background
 
+### Background of the Study
+The global transition to online and blended learning has profoundly reshaped higher education, especially synchronous instruction delivered through platforms such as Google Meet and Zoom. These tools ensured instructional continuity but exposed persistent difficulties in monitoring student engagement during live sessions. Studies confirm that student participation is a key determinant of academic success, as it enhances collaboration, motivation, and deeper comprehension (Martin & Bolliger, 2018). Yet, in virtual classrooms, participation can appear in multiple forms—speaking, chatting, raising a hand, reacting, or toggling the microphone—that instructors often fail to capture consistently (Wang, Huang, & Quek, 2021).
 
+Recent research emphasizes that participation, when properly monitored and acknowledged, directly contributes to improved performance and sustained motivation in online learning (Fu et al., 2024; Karmini, Yudabakti, Seniwati, Makulua, & Burnama, 2024). The challenge lies in the absence of tools that fairly represent student contributions across modalities. At St. Clare College of Caloocan, professors who conduct blended classes still need a consistent way to capture engagement during synchronous online meetings. Without reliable data, instructors may unintentionally overlook students who participate through less visible means, such as chat messages or reactions, resulting in perceptions of bias and inequitable grading.
+To address this instructional gap, the researchers propose ENGAGIUM: Class Participation Tracker for Online Learning, a web-based system with a Google Meet extension and a Zoom extension designed to assist professors in monitoring synchronous participation objectively. ENGAGIUM automatically captures participation events such as microphone activity, chat interactions, reactions, and hand-raise actions, then visualizes them through instructor-facing dashboards and reports. By transforming participation into measurable data, the system promotes transparency, fairness, and more consistent grading in virtual classrooms.
 
+Therefore, this study aims to design and develop ENGAGIUM, integrating educational theory and technology to create an equitable, data-driven approach to participation assessment in synchronous online and blended learning environments.
 
+### Statement of the Problem
 
-CHAPTER I
-Problem and Its Background
+#### General Problem
+How can professors of St. Clare College of Caloocan fairly and consistently track student participation during synchronous online class sessions conducted through Google Meet and Zoom?
 
-Background of the Study
-The global transition to online and blended learning has profoundly reshaped higher education. The COVID-19 pandemic accelerated the adoption of virtual platforms such as Zoom, Google Meet, and Google Classroom. These tools ensured instructional continuity but exposed persistent difficulties in monitoring student engagement during synchronous sessions. Studies confirm that student participation is a key determinant of academic success, as it enhances collaboration, motivation, and deeper comprehension (Martin & Bolliger, 2018). Yet, in virtual classrooms, participation can appear in multiple forms—speaking, chatting, responding to polls, or using reaction icons—that instructors often fail to capture consistently (Wang, Huang, & Quek, 2021).
+#### Specific Problem
+1.	What challenges do professors encounter in capturing and consolidating student participation from live Google Meet and Zoom class sessions?
+2.	How can a system be designed to automatically recognize and categorize participation events such as join/leave, chat, reactions, hand raises, and microphone activity?
+3.	How can the system generate instructor-facing participation summaries and class-level reports that professors can use for grading and feedback?
+4.	How can the system minimize grading bias by replacing manual observation with recorded participation data and session logs?
+5.	How can the developed system be integrated into the current workflow through a Google Meet extension and a Zoom extension?
+6.	How can the usability, reliability, and accuracy of the system be evaluated in terms of event capture, data recording, and dashboard reporting?
 
-Recent research emphasizes that participation, when properly monitored and acknowledged, directly contributes to improved performance and sustained motivation in online learning (Fu et al., 2024; Karmini, Yudabakti, Seniwati, Makulua, & Burnama, 2024). The challenge lies in the absence of tools that fairly represent student contributions across modalities. At St. Clare College of Caloocan, classes follow a blended format that alternates between online and in-person meetings each week. Although this approach offers flexibility, it also creates difficulties in maintaining consistent records of engagement, especially during online sessions where interaction is dynamic and fragmented. Without reliable data, instructors may unintentionally overlook students who participate through less visible means, such as chat messages or reactions, resulting in perceptions of bias and inequitable grading.
-To address this instructional gap, the researchers propose ENGAGIUM: Class Participation Tracker for Online Learning, a web-based and browser-extended system designed to assist professors in monitoring engagement objectively. ENGAGIUM automatically captures participation events—microphone activity, chat interactions, and reactions—then visualizes them through dashboards and reports. By transforming participation into measurable data, the system promotes transparency, fairness, and motivation in virtual classrooms.
+### Objective of the Study
 
-Therefore, this study aims to design and develop ENGAGIUM, integrating educational theory and technology to create an equitable, data-driven approach to participation assessment in blended learning environments.
+#### General Objective
+To design, develop, and evaluate a class participation tracker that enables professors of St. Clare College of Caloocan to monitor student engagement during synchronous online class sessions fairly, efficiently, and transparently.
 
-Statement of the Problem
+#### Specific Objectives
+1.	To develop a browser-based system integrated with Google Meet and Zoom that automatically captures and records synchronous participation data.
+2.	To create an instructor-facing interface that presents summarized engagement statistics through dashboards and downloadable reports.
+3.	To support meeting-driven session creation, tracking, and closure for live class sessions.
+4.	To reduce grading bias by providing professors with objective, quantifiable participation records.
+5.	To preserve privacy by storing only participation metadata and text-based content, excluding audio and video recordings.
+6.	To evaluate the system’s performance, usability, and reliability using standard software assessment criteria.
 
-General Problem
-How can professors of St. Clare College of Caloocan fairly and consistently track student participation in an online and blended learning setup?
-
-Specific Problem
-1.	What challenges do professors encounter in accurately capturing and recording student participation across multiple online platforms?
-2.	How can a system be designed to automatically recognize and categorize different forms of online participation (e.g., speaking, chat, polls, and reactions)?
-3.	How can the system generate comprehensive participation reports that professors can use for grading and feedback?
-4.	How can the system minimize grading bias by replacing manual observation with data-driven tracking?
-5.	How can the developed system be integrated effectively into existing platforms such as Zoom and Google Meet?
-6.	How can the usability and effectiveness of the developed system be evaluated in terms of accuracy, reliability, and user satisfaction?
-
-Objective of the Study
-
-General Objective
- To design, develop, and evaluate a class participation tracker that enables professors of St. Clare College of Caloocan to monitor student engagement in online and blended learning environments fairly, efficiently, and transparently.
-
-Specific Objectives
-1.	To develop a browser-based system integrated with online learning platforms (Zoom and Google Meet) that automatically captures and records participation data.
-2.	To create a user interface that presents summarized engagement statistics through dashboards and downloadable reports.
-3.	To reduce grading bias by providing professors with objective, quantifiable participation data.
-4.	To motivate students toward active engagement by ensuring that all forms of participation are recognized.
-5.	To evaluate the system’s performance, usability, and reliability using standard software assessment criteria.
-6.	To align the system’s functions with educational theories such as the Constructivist Learning Theory and the Community of Inquiry Framework, which emphasize interaction and presence as components of effective learning.
-
-Significance of the Study
+### Significance of the Study
 The proposed study holds relevance for several educational stakeholders:
 
-1.	Professors. ENGAGIUM provides instructors with an automated, data-driven mechanism for assessing participation, reducing the workload associated with manual tracking, and ensuring objectivity in evaluation.
-2.	Students. The system ensures fair acknowledgment of all forms of participation, thus improving motivation and accountability in virtual learning settings.
-3.	Academic Administrators. Collected participation data may be used for institutional analytics, enabling academic departments to evaluate instructional engagement trends and inform professional development.
-4.	Institution. The system supports the college’s goals of digital transformation, instructional transparency, and compliance with the Data Privacy Act of 2012 (Republic Act 10173).
-5.	Future Researchers. ENGAGIUM can serve as a basis for further studies on automated engagement tracking, educational analytics, and digital fairness in blended education.
+1.	Professors. ENGAGIUM provides instructors with an automated, data-driven mechanism for assessing participation, reducing the workload associated with manual tracking, and supporting more consistent grading in synchronous classes.
+2.	Students. The system provides a fairer basis for recognizing visible and less visible forms of participation, which may improve transparency in participation-based grading even if students do not directly log in to the system.
+3.	Institution. The system supports the college’s goals of digital transformation and instructional transparency while keeping data collection limited to participation metadata and text-based content in line with privacy requirements.
+4.	Future Researchers. ENGAGIUM can serve as a basis for further studies on automated engagement tracking, meeting-side participation capture, and privacy-aware educational analytics.
 
 By offering measurable, transparent, and secure participation data, ENGAGIUM advances the pedagogical use of technology to enhance teaching and learning experiences in online contexts.
 
 
-Scope and Delimitation
-The study focuses on the design, development, and evaluation of ENGAGIUM, a class participation tracker for professors of St. Clare College of Caloocan who conduct online or blended classes through Zoom or Google Meet.
+### Scope and Delimitation
+The study focuses on the design, development, and evaluation of ENGAGIUM, a professor-facing class participation tracker for synchronous online sessions conducted through Google Meet and Zoom.
 
-Scope:
-•	Tracks real-time participation events such as microphone activity, chat messages, and reaction use.
-•	Generates analytical dashboards and downloadable participation summaries.
-•	Ensures compliance with privacy regulations by storing only event metadata and text-based content, excluding audio and video recordings.
-•	Operates primarily on desktop browsers (Google Chrome and Microsoft Edge).
-•	Utilizes the Agile Software Development Life Cycle (SDLC) methodology for iterative design, testing, and improvement.
-•	The development and evaluation will take place during Academic Year 2025–2026.
+#### Scope:
 
-Delimitations:
-•	The system does not monitor participation during asynchronous or face-to-face sessions.
-•	Its accuracy depends on stable internet connectivity and access permissions of integrated platforms.
-•	It is designed for faculty use; students interact only indirectly through participation data collection.
-•	Mobile device compatibility is limited due to browser extension constraints.
-•	The evaluation phase will focus on functionality and usability rather than long-term institutional deployment.
+- Tracks real-time participation events such as join/leave activity, microphone activity, chat messages, reaction use, and hand-raise actions.
+- Generates instructor-facing dashboards and participation summaries for individual classes.
+- Uses a Google Meet extension and a Zoom extension for online class participation tracking.
+- Stores participation metadata and text-based content only, excluding audio and video recordings.
+- Supports meeting-driven session creation, tracking, and closure for professor-owned classes.
+- Utilizes the Agile Software Development Life Cycle (SDLC) methodology for iterative design, testing, and improvement.
+- The development and evaluation will take place during Academic Year 2025–2026.
+
+#### Delimitations:
+
+- The system does not monitor participation during asynchronous or face-to-face sessions.
+- Its accuracy depends on stable internet connectivity and access permissions of integrated platforms.
+- It is designed for faculty use; students do not have direct system accounts or dashboards.
+- Google Meet tracking is limited to desktop browser use and platform access restrictions.
+- Zoom support depends on platform access and account permissions.
+- Mobile device use is not a target platform for Google Meet tracking.
+- The evaluation phase will focus on functionality, reliability, and usability within the research setting rather than production-scale deployment.
 
 These boundaries ensure that the study remains achievable within the given timeframe while addressing its primary objective—enhancing fairness in participation tracking for online learning.
 
-Definition of Terms
-•	Blended Learning: A teaching approach combining face-to-face and online instruction.
-•	Browser Extension: A lightweight software component added to a web browser to introduce new functionalities, such as automated participation tracking.
-•	Class Participation: Observable actions of student engagement during class, including speaking, messaging, and reacting in online sessions.
-•	Community of Inquiry Framework: A model of online learning emphasizing social, cognitive, and teaching presence as essential to meaningful education (Garrison, Anderson, & Archer, 2000).
-•	Constructivist Learning Theory: A theory stating that learners build knowledge through interaction and active involvement (Vygotsky, 1978).
-•	Dashboard: A visual interface displaying real-time summaries of collected participation data.
-•	Engagement: The degree of attention, curiosity, and involvement that students demonstrate during learning activities.
-•	Fairness: Equal recognition and assessment of all student participation regardless of the medium used.
-•	Participation Event: A recorded instance of engagement, such as using the microphone, posting in chat, or sending a reaction.
-•	Transparency: The visibility and verifiability of participation records and grading criteria for both instructors and students.
-•	Usability: The degree to which users can effectively and efficiently use a system to achieve specific goals.
+### Definition of Terms
+
+- **Blended Learning:** A teaching approach combining face-to-face and online instruction.
+- **Browser Extension:** A lightweight software component added to a web browser to introduce new functionalities, such as automated participation tracking.
+- **Class Participation:** Observable actions of student engagement during class, including speaking, messaging, and reacting in online sessions.
+- **Community of Inquiry Framework:** A model of online learning emphasizing social, cognitive, and teaching presence as essential to meaningful education (Garrison, Anderson, & Archer, 2000).
+- **Constructivist Learning Theory:** A theory stating that learners build knowledge through interaction and active involvement (Vygotsky, 1978).
+- **Dashboard:** A visual interface displaying real-time summaries of collected participation data.
+- **Engagement:** The degree of attention, curiosity, and involvement that students demonstrate during learning activities.
+- **Fairness:** Equal recognition and assessment of all student participation regardless of the medium used.
+- **Participation Event:** A recorded instance of engagement, such as using the microphone, posting in chat, or sending a reaction.
+- **Transparency:** The visibility and verifiability of participation records and grading criteria for both instructors and students.
+- **Usability:** The degree to which users can effectively and efficiently use a system to achieve specific goals.
 
 
 
@@ -152,129 +140,100 @@ Definition of Terms
 
 
 
+# Chapter II
 
+## Related Literature and Studies
+### A. Related Literature
 
+#### 1. Foreign Literature
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-CHAPTER II
-Related Literature and Studies
-A.	Related Literature
-1.	Foreign Literature
-Theoretical Foundations of Motivation and Engagement
+##### Theoretical Foundations of Motivation and Engagement
 The study of student participation and engagement in online learning is grounded in several psychological and educational theories. Self-Determination Theory (SDT), developed by Deci and Ryan (2000) and expanded by Ryan and Deci (2017), emphasizes that motivation arises when three basic psychological needs—autonomy, competence, and relatedness—are met. Within virtual classrooms, these needs influence how learners choose to engage in discussions, respond to tasks, and maintain active presence. Howard et al. (2021) confirm through meta-analysis that students who perceive higher autonomy and competence exhibit stronger engagement and persistence across learning contexts.
 Constructivist Learning Theory, introduced by Vygotsky (1978), supports the view that knowledge is constructed through social interaction and collaboration. Online environments that enable dialogue and cooperation thus sustain deeper cognitive processing. Similarly, the Community of Inquiry (CoI) Framework of Garrison, Anderson, and Archer (2000) defines meaningful online learning as the interplay of teaching, social, and cognitive presence. These frameworks collectively guide the pedagogical rationale for ENGAGIUM, which encourages active participation through interactive tracking and feedback mechanisms that recognize all student contributions.
 Talosa, Lonzaga, and Rivera (2025) add that teacher self-efficacy and blended delivery competence significantly determine engagement outcomes in higher education. This reinforces the need for digital tools that support both instructors and learners in maintaining interaction and motivation throughout hybrid modes of instruction.
-________________________________________
-Online Participation and Engagement 
+
+##### Online Participation and Engagement
 Recent international literature underlines participation as acentral indicator of learning quality in digital classrooms. Oshodi (2022) assessed participation metrics in e-classrooms and reported that consistent instructor feedback and visible acknowledgment of student input directly increase attendance and engagement. Prasetyanto, Rizki, and Sunitiyoso (2022) examined post-pandemic online participation intentions among Indonesian students and found that convenience and perceived teacher responsiveness drive continued willingness to attend online classes.
 Samnidze et al. (2023) identified technical readiness, social comfort, and instructor presence as the strongest determinants of active online participation. Bergdahl, Nouri, and Fors (2024) analyzed higher education engagement using learning analytics and noted that engagement is multidimensional—encompassing cognitive focus, behavioral participation, and emotional investment. Their findings emphasize that systematic tracking of participation data can reveal patterns that traditional manual observation may overlook.
 Wongthong (2024) confirmed that synchronous platforms affect both student and parent perceptions of learning satisfaction, indicating that class participation is not just an academic metric but also a measure of institutional credibility and teaching quality.
-________________________________________
-Challenges in Monitoring Online Participation
+
+##### Challenges in Monitoring Online Participation
 Despite the pedagogical benefits of engagement, researchers highlight persistent barriers to accurately monitoring it in virtual environments. Donelan et al. (2025) noted that many students remain passive in synchronous sessions because of anxiety, unstable internet, or lack of opportunities to contribute. Kshirsagar and Inamdar (2023) investigated teacher experiences in evaluating participation and found that subjective criteria, inconsistent observation, and limited technological support hinder fair assessment.
 Panmei and Devi (2024) examined participation challenges in South Asian contexts, concluding that socioeconomic factors, device accessibility, and inconsistent connectivity significantly affect online engagement. Al-Nofaie (2022) observed that even when students attend sessions regularly, instructors often fail to recognize non-verbal engagement—such as reactions or chat activity—which leads to perceived grading bias. These findings justify ENGAGIUM’s automated design, which captures multiple forms of participation to mitigate subjectivity.
-Technology-Supported Participation Tracking
+
+##### Technology-Supported Participation Tracking
 Technological advancement has enabled new forms of participation analytics. Gan and Ouh (2023) presented a framework for integrating real-time participation tracking through digital tools, demonstrating that automation improves grading efficiency and fairness. Márquez et al. (2023) established that feedback frequency and data-driven participation scoring positively influence academic performance and student motivation.
 Kaliisa et al. (2024) reviewed learning analytics dashboards and found that visualization tools enhance learners’ self-awareness of participation but warned of potential data overload and interpretive bias. The VEMETER project (2025) introduced a participation evaluation tool capable of tracking and quantifying interaction frequency in virtual classes. Its results confirmed that automated participation metrics can increase teacher objectivity.
-Further, Svábenský et al. (2024) assessed algorithmic bias in predictive models for student performance, emphasizing the need for transparent criteria in AI-based analytics—a principle central to ENGAGIUM’s fairness goal. Collectively, these systems provide proof that automated participation tracking and data visualization can transform how engagement is evaluated in online classrooms.
-________________________________________
-Fairness and Data Ethics in Educational Technology
+Further, Svábenský et al. (2024) assessed fairness concerns in model-based analytics and emphasized the need for transparent criteria. This supports ENGAGIUM’s focus on clear participation records and visible metrics for instructors. Collectively, these systems provide proof that automated participation tracking and data visualization can transform how engagement is evaluated in online classrooms.
+
+##### Fairness and Data Ethics in Educational Technology
 Automation in participation tracking necessitates ethical safeguards. Loureiro et al. (2022) investigated how digital environments reveal varying participation forms and concluded that fairness depends on transparent metrics accessible to both instructors and students. Funa (2025) proposed policy guidelines for AI use in education, stressing data minimization, informed consent, and bias prevention.
-In the context of privacy legislation, Foronda et al. (2023) analyzed the implementation of the Philippine Data Privacy Act of 2012 in organizational settings, outlining compliance challenges applicable to academic institutions. Miano (2025) found that many state universities in the Philippines lack standardized data privacy protocols, making ethical system design essential. These studies reinforce the principle that participation-tracking tools must collect only necessary, anonymized data—a practice fully reflected in ENGAGIUM’s software requirement specification.
-2.	Local Literature
-Post-Pandemic Engagement and Motivation in the Philippine Context
+In the context of privacy legislation, Foronda et al. (2023) analyzed the implementation of the Philippine Data Privacy Act of 2012 in organizational settings, outlining compliance challenges applicable to academic institutions. Miano (2025) found that many state universities in the Philippines lack standardized data privacy protocols, making ethical system design essential. These studies reinforce the principle that participation-tracking tools must collect only necessary data—a practice reflected in ENGAGIUM’s scope.
+
+#### 2. Local Literature
+
+##### Post-Pandemic Engagement and Motivation in the Philippine Context
 Filipino educators continue to face the challenge of sustaining student engagement after the shift to blended and flexible learning. Jopson et al. (2024) documented the lived experiences of college students adapting to hybrid instruction and found that engagement levels fluctuate depending on instructional mode and feedback visibility. Students often perceive online participation as undervalued compared to face-to-face interaction, underscoring the need for equitable digital participation assessment tools.
 Ayog and Oliva (2023) studied writing competency and participation in Filipino classes, reporting that participation improved when students received structured recognition for their contributions. Their findings imply that digital participation trackers could reinforce participation by providing immediate acknowledgment.
 In a complementary study, Aquino (2023) examined physical education participation in a state university and found that motivation depends on visibility of effort and instructor feedback—paralleling the same engagement mechanics needed in virtual settings. Together, these studies reveal that sustained engagement in Philippine higher education hinges on fairness, visibility, and feedback—three factors embedded in the ENGAGIUM system’s design.
-________________________________________
-Learning Analytics and LMS-Based Engagement
+
+##### Learning Analytics and LMS-Based Engagement
 Local initiatives on educational analytics provide further support for automating participation evaluation. Rogers, Mercado, and Decano (2025) used Moodle interaction data to study correlations between online activity and academic performance. They concluded that frequency of participation and diversity of interactions predict higher achievement, validating the premise of data-driven engagement analysis.
 Similarly, Cruz, Bautista, and Ramos (2025) leveraged predictive analytics on learning management system (LMS) logs at Centro Escolar University and found that participation patterns, such as discussion post frequency and chat involvement, significantly affect academic outcomes. Their work demonstrates that Philippine institutions are beginning to use engagement data as an academic performance indicator—a concept that ENGAGIUM advances by shifting this process to real-time participation capture.
-________________________________________
-Data Ethics and Institutional Privacy Compliance
+
+##### Data Ethics and Institutional Privacy Compliance
 Responsible data management has become a major theme in Philippine educational technology. Foronda, Javier, Vigonte, and Abante (2023) reviewed the implementation of the Data Privacy Act of 2012 (RA 10173) in local organizations and highlighted weak enforcement of data minimization and consent protocols. Miano (2025) confirmed this trend in a study of a state university, where most staff lacked awareness of privacy standards in data handling.
 Sancon (2023) proposed a model for institutional data governance that can serve as a template for academic technology projects. These local works collectively emphasize that educational systems must ensure compliance with privacy legislation—a requirement explicitly integrated into ENGAGIUM’s security and compliance features as outlined in its software requirement specification.
-________________________________________
-Technology Acceptance and Faculty Readiness
+
+##### Technology Acceptance and Faculty Readiness
 Adoption of new classroom technology also depends on user acceptance. Porto (2025) found that organizational culture and faculty attitude strongly influence e-learning technology adoption. Quiban (2024) extended the Technology Acceptance Model (TAM) for LMS use in Philippine universities and concluded that perceived usefulness and ease of use directly affect adoption intent.
 Alejandro, Sanchez, Sumalinog, Mananay, and Goles (2024) examined pre-service teachers’ acceptance of AI applications in education and noted that trust and ethical awareness determine user willingness to engage with AI-assisted systems. Cervantes and Navarro (2025) confirmed similar findings among business students, stressing the need for transparency in algorithmic decisions.
 These insights guide ENGAGIUM’s user interface design and feature transparency—ensuring that professors perceive the system as both useful and ethically sound.
-B.	Related Studies
-1.	Foreign Studies
-System Prototypes and Implementation Efforts
+
+### B. Related Studies
+
+#### 1. Foreign Studies
+
+##### System Prototypes and Implementation Efforts
 Several international prototypes have explored the automation of participation tracking in online learning. Gan and Ouh (2023) developed a system presented at the IEEE TALE Conference that automatically measures class participation through digital event logs and visual dashboards. Their findings demonstrated that technology-enhanced participation tracking improved fairness in grading and reduced instructor bias. Similarly, the VEMETER project (2025) introduced a virtual class participation evaluator capable of monitoring reaction frequency, speaking turns, and chat activity. Results confirmed that automated metrics could reflect true engagement levels more accurately than manual observation.
 Márquez, Lazcano, Bada, and Arroyo-Barrigüete (2023) investigated how systematic feedback and participation monitoring affect academic performance. They observed a direct positive relationship between recorded participation data and students’ sense of inclusion, suggesting that visibility of contributions enhances motivation. These studies validate the practicality of systems like ENGAGIUM, which combine real-time detection and structured visualization of participation data for educational decision-making.
-________________________________________
-Learning Analytics Applications
-The role of learning analytics has expanded from simple reporting to predictive modeling of engagement. Kaliisa, Misiejuk, López-Pernas, Khalil, and Saqr (2024) evaluated the effectiveness of learning analytics dashboards on students’ motivation and self-regulation. Their review found that dashboards heighten awareness of participation but may overwhelm users if not properly designed. This highlights the importance of clarity and usability—two priorities of ENGAGIUM’s interface.
-Bergdahl, Nouri, and Fors (2024) noted that analytics can uncover hidden engagement patterns, enabling institutions to intervene early with disengaged students. Svábenský et al. (2024) examined algorithmic bias in predictive models and stressed the importance of explainable analytics to prevent unfair evaluation. These findings underscore ENGAGIUM’s commitment to data transparency and unbiased processing in representing student engagement.
-AI and Bias Evaluation
-As artificial intelligence increasingly supports educational analytics, ethical considerations emerge. Loureiro, Bettencourt, Raposo-Rivas, and Ocaña (2022) analyzed participation visualization tools and argued that student data must be contextualized rather than used for surveillance. Funa (2025) expanded this perspective by outlining policy recommendations for AI in education, including bias mitigation and privacy protection mechanisms. Both studies underline that ethical governance should be integrated into software architecture—a guideline observed in ENGAGIUM’s design where participation data are anonymized and limited to textual event metadata.
+
+##### Learning Analytics Applications
+The role of learning analytics has expanded from simple reporting to deeper analysis of participation patterns. Kaliisa, Misiejuk, López-Pernas, Khalil, and Saqr (2024) evaluated the effectiveness of learning analytics dashboards on students’ motivation and self-regulation. Their review found that dashboards can improve participation awareness but may overwhelm users if not properly designed. This highlights the importance of clarity and usability—two priorities of ENGAGIUM’s interface.
+Bergdahl, Nouri, and Fors (2024) noted that analytics can uncover hidden engagement patterns that instructors may miss during manual observation. Svábenský et al. (2024) stressed the importance of explainable and fair analytics to prevent unfair evaluation. These findings underscore ENGAGIUM’s commitment to transparent participation reporting.
+
+##### AI and Bias Evaluation
+As analytics tools increasingly support educational decision-making, ethical considerations emerge. Loureiro, Bettencourt, Raposo-Rivas, and Ocaña (2022) analyzed participation visualization tools and argued that student data must be contextualized rather than used for surveillance. Funa (2025) expanded this perspective by outlining policy recommendations for AI in education, including bias mitigation and privacy protection mechanisms. Both studies underline that ethical governance should be integrated into software design—a guideline observed in ENGAGIUM’s focus on limited data collection and transparent participation records.
 These foreign studies collectively provide the technological and ethical foundations of ENGAGIUM’s proposed system. They prove that automation and analytics can meaningfully quantify participation without compromising fairness or privacy when properly implemented.
-2.	Local Studies
-Real-Time Participation Analytics in Philippine Higher Education
-Empirical research in Philippine higher education demonstrates the technical and institutional readiness for real-time participation analytics. Rogers, Mercado, and Decano (2025) examined Moodle interaction logs and reported that frequency and diversity of participation predict better course outcomes. Their findings confirm that engagement data, when systematically collected, carry significant academic value. Similarly, Cruz, Bautista, and Ramos (2025) used predictive analytics on LMS datasets at a Philippine university and found that discussion and chat activities strongly correlate with final grades. These studies show that automatically captured participation data can function as valid indicators of student engagement and performance—core to the analytical model that ENGAGIUM seeks to implement.
+
+#### 2. Local Studies
+
+##### Real-Time Participation Analytics in Philippine Higher Education
+Empirical research in Philippine higher education demonstrates growing readiness for real-time participation analytics. Rogers, Mercado, and Decano (2025) examined Moodle interaction logs and reported that frequency and diversity of participation predict better course outcomes. Their findings confirm that engagement data, when systematically collected, carry significant academic value. Similarly, Cruz, Bautista, and Ramos (2025) used predictive analytics on LMS datasets at a Philippine university and found that discussion and chat activities strongly correlate with final grades. These studies show that automatically captured participation data can function as valid indicators of student engagement and performance—core to the participation model that ENGAGIUM seeks to implement.
 Beyond correlation, these works highlight the emerging research culture around participation data as a pedagogical resource. The integration of LMS analytics into course evaluation reflects a growing shift toward evidence-based teaching and automated performance tracking in local institutions. ENGAGIUM builds upon these empirical efforts by capturing real-time participation signals from synchronous platforms and converting them into transparent, instructor-accessible engagement metrics.
-________________________________________
-Human-Centered Dashboard Design
+
+##### Human-Centered Dashboard Design
 Design-oriented studies in the Philippines emphasize usability and participatory development of learning analytics tools. Revano and Garcia (2025) from FEU Institute of Technology created a human-centered analytics dashboard for higher education using participatory design principles. They reported higher faculty acceptance when dashboards prioritized clarity, visual simplicity, and actionable summaries. This demonstrates that usability and interpretability are crucial for adoption among instructors.
 The study’s findings directly inform ENGAGIUM’s interface design, which aims to balance analytic depth with simplicity. By offering intuitive visualization and configurable reporting, ENGAGIUM aligns with the participatory design ethos proven effective in local contexts.
-________________________________________
-Technology Acceptance and Predictive Systems
+
+##### Technology Acceptance and Predictive Systems
 Local research also underscores the role of perceived usefulness and institutional culture in technology adoption. Quiban (2024) and Porto (2025) extended the Technology Acceptance Model (TAM) to local higher education institutions and found that ease of use, perceived utility, and supportive culture drive adoption. Alejandro et al. (2024) and Cervantes & Navarro (2025) further identified trust and ethical transparency as determinants of willingness to adopt AI-enhanced learning tools.
-These insights complement empirical analytics studies by Rogers et al. (2025) and Cruz et al. (2025), whose predictive models link online engagement with performance. Together, they show that analytics systems succeed when they are both technically reliable and ethically transparent—principles central to ENGAGIUM’s faculty workflow and reporting framework.
-________________________________________
-Data Privacy and System Governance
+These insights complement empirical analytics studies by Rogers et al. (2025) and Cruz et al. (2025), whose models link online engagement with performance. Together, they show that analytics systems succeed when they are reliable, practical, and ethically transparent—principles central to ENGAGIUM’s faculty workflow and reporting framework.
+
+##### Data Privacy and System Governance
 Data governance remains a recurring concern in Philippine educational technology. Foronda et al. (2023) reviewed implementation of the Data Privacy Act (RA 10173) and found weak institutional practices in consent and data minimization. Miano (2025) confirmed low awareness of privacy standards among staff in state universities, while Sancon (2023) proposed a governance model emphasizing transparency and role-based control.
 These studies collectively justify ENGAGIUM’s privacy-centric architecture, which limits collection to event metadata, requires informed consent, and enforces access restrictions based on user role. By embedding privacy by design, ENGAGIUM operationalizes local data protection requirements within its system specification.
-C.	Synthesis of the Literature and Studies
+
+### C. Synthesis of the Literature and Studies
 Across both foreign and local literature, three recurring research gaps emerge. First, there remains an absence of localized, real-time participation tracking systems that can integrate directly with synchronous learning platforms such as Zoom or Google Meet. While several international prototypes have demonstrated the feasibility of automated engagement analytics, Philippine studies have so far relied mainly on retrospective LMS logs. This limits their capacity to capture live, multimodal participation events that occur during online classes.
 Second, there is limited empirical evaluation of fairness, transparency, and usability in existing automated engagement tools. Many studies acknowledge the promise of analytics dashboards but stop short of assessing how these tools affect perception of equity in participation grading or instructor decision-making. Ethical issues surrounding bias, interpretability, and informed consent remain underexplored, particularly in local higher education contexts where data privacy compliance is still inconsistent.
 Third, the linkage between educational data mining and classroom-level analytics is insufficient. Although institutional databases and LMS records provide rich information, few systems in Philippine higher education connect these data streams to real-time classroom engagement or instructor-facing dashboards. As a result, participation metrics often remain fragmented, delaying feedback and reducing their pedagogical usefulness.
-ENGAGIUM directly addresses these gaps through three design commitments. It integrates automation by capturing live participation through a browser-based extension, enabling real-time analytics without additional instructor workload. It ensures fair data visualization by providing transparent scoring and simplified dashboards that highlight measurable engagement indicators. Finally, it upholds privacy-compliant analytics by adhering to RA 10173 through data minimization, consent-based collection, and role-based access control. Together, these features position ENGAGIUM as a localized, ethical, and practical solution for participation tracking in Philippine higher education.
+ENGAGIUM addresses these gaps through three practical design commitments. It integrates automation by capturing live participation through Google Meet and Zoom extensions, reducing additional instructor workload. It supports fairer participation assessment through clear records and simplified professor-facing dashboards. Finally, it follows privacy-compliant handling under RA 10173 through data minimization, consent-based collection, and role-based access control. Together, these features position ENGAGIUM as a localized, ethical, and practical solution for participation tracking in Philippine higher education.
 
 
 
 
-
-
-
-
-CHAPTER III
-Methods of Research and Procedures
-Research Methodology
-Research Design
-Data Gathering
-Statistical Treatment
-
-
-
-
-
-
-
-
-
-
-
-
-
+# Bibliography
 
 BIBLIOGRAPHY
 
