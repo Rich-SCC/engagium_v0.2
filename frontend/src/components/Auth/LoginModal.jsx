@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 
 const LoginModal = ({ onClose, onSwitchToSignUp, onSwitchToForgotPassword }) => {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
   });
+  const [showPassword, setShowPassword] = useState(false);
   const { login, isLoading, error, clearError } = useAuth();
   const navigate = useNavigate();
 
@@ -55,7 +57,7 @@ const LoginModal = ({ onClose, onSwitchToSignUp, onSwitchToForgotPassword }) => 
               name="email"
               value={formData.email}
               onChange={handleChange}
-              placeholder="profeasestclare.scc@gmail.com"
+              placeholder="Email"
               className="w-full px-6 py-4 rounded-2xl border-2 border-gray-300 focus:border-teal-600 focus:outline-none text-gray-700"
               required
             />
@@ -65,16 +67,27 @@ const LoginModal = ({ onClose, onSwitchToSignUp, onSwitchToForgotPassword }) => 
             <label htmlFor="password" className="block text-gray-900 font-semibold mb-2">
               Password
             </label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder="**************"
-              className="w-full px-6 py-4 rounded-2xl border-2 border-gray-300 focus:border-teal-600 focus:outline-none text-gray-700"
-              required
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                id="password"
+                name="password"
+                value={formData.password}
+                onChange={handleChange}
+                placeholder="Password"
+                className="w-full px-6 py-4 pr-14 rounded-2xl border-2 border-gray-300 focus:border-teal-600 focus:outline-none text-gray-700"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((previous) => !previous)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeSlashIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
+              </button>
+            </div>
           </div>
 
           <div className="text-right">

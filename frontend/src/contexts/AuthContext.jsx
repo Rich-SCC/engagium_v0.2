@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { authAPI } from '@/services/api';
-import { getToken, setTokens, removeTokens, isTokenValid } from '@/utils/auth';
+import { getToken, getRefreshToken, setToken, setTokens, removeTokens, isTokenValid } from '@/utils/auth';
 
 // Auth context
 const AuthContext = createContext();
@@ -128,6 +128,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       const token = getToken();
+      const refreshToken = getRefreshToken();
 
       if (token && isTokenValid()) {
         try {
@@ -142,7 +143,30 @@ export const AuthProvider = ({ children }) => {
             },
           });
         } catch (error) {
-          // Token is invalid, remove it
+          // Token/profile verification failed.
+          removeTokens();
+          dispatch({ type: 'INIT_COMPLETE' });
+        }
+      } else if (refreshToken) {
+        try {
+          const refreshResponse = await authAPI.refreshToken(refreshToken);
+          const newAccessToken = refreshResponse?.data?.accessToken;
+
+          if (!newAccessToken) {
+            throw new Error('Missing access token from refresh response');
+          }
+
+          setToken(newAccessToken);
+
+          const profileResponse = await authAPI.getProfile();
+          dispatch({
+            type: 'LOGIN_SUCCESS',
+            payload: {
+              user: profileResponse.data.user,
+              token: newAccessToken,
+            },
+          });
+        } catch (error) {
           removeTokens();
           dispatch({ type: 'INIT_COMPLETE' });
         }

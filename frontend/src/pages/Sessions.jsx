@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { sessionsAPI, classesAPI } from '@/services/api';
 import { formatClassDisplay } from '@/utils/classFormatter';
@@ -127,6 +127,8 @@ const Sessions = () => {
   const [dismissedOrphanKeys, setDismissedOrphanKeys] = useState([]);
   const [selectedOrphanKeys, setSelectedOrphanKeys] = useState([]);
   const [orphanAssignmentMap, setOrphanAssignmentMap] = useState({});
+  const bundledBodyScrollRef = useRef(null);
+  const [bundledScrollMetrics, setBundledScrollMetrics] = useState({ left: 0, max: 0 });
 
   const { data: sessionsData, isLoading } = useQuery({
     queryKey: ['sessions'],
@@ -534,6 +536,25 @@ const Sessions = () => {
     console.groupEnd();
   }, [listMode, bundleDebug]);
 
+  useEffect(() => {
+    const updateBundledScrollMetrics = () => {
+      const body = bundledBodyScrollRef.current;
+      if (!body) return;
+
+      const max = Math.max(0, body.scrollWidth - body.clientWidth);
+      const left = Math.min(Math.max(0, body.scrollLeft), max);
+
+      setBundledScrollMetrics((previous) => {
+        if (previous.left === left && previous.max === max) return previous;
+        return { left, max };
+      });
+    };
+
+    updateBundledScrollMetrics();
+    window.addEventListener('resize', updateBundledScrollMetrics);
+    return () => window.removeEventListener('resize', updateBundledScrollMetrics);
+  }, [listMode, filteredBundledRows, expandedBundleIds]);
+
   const bundlesLoading = listMode === 'bundled' && (isLoading || !classesData);
 
   const toggleBundleRow = (bundleId) => {
@@ -729,11 +750,25 @@ const Sessions = () => {
     return 'bg-rose-50 text-rose-700 border border-rose-200';
   };
 
-  const getOvertimeTone = (minutes) => {
-    const numeric = Number(minutes) || 0;
-    if (numeric === 0) return 'text-gray-700';
-    if (numeric <= 15) return 'text-amber-700 font-medium';
-    return 'text-rose-700 font-semibold';
+  const handleBundledTopScrollControl = (event) => {
+    const body = bundledBodyScrollRef.current;
+    if (!body) return;
+
+    body.scrollLeft = Number(event.target.value);
+    const max = Math.max(0, body.scrollWidth - body.clientWidth);
+    const left = Math.min(Math.max(0, body.scrollLeft), max);
+    setBundledScrollMetrics({ left, max });
+  };
+
+  const handleBundledBodyScroll = () => {
+    const body = bundledBodyScrollRef.current;
+    if (!body) return;
+    const max = Math.max(0, body.scrollWidth - body.clientWidth);
+    const left = Math.min(Math.max(0, body.scrollLeft), max);
+    setBundledScrollMetrics((previous) => {
+      if (previous.left === left && previous.max === max) return previous;
+      return { left, max };
+    });
   };
 
   const renderWindowTimeline = (bundle) => {
@@ -925,29 +960,44 @@ const Sessions = () => {
             </div>
           ) : listMode === 'bundled' ? (
             <div className="space-y-4">
-              <div className="bg-white rounded-lg shadow">
-              <table className="min-w-full divide-y divide-gray-200">
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+              {bundledScrollMetrics.max > 0 ? (
+                <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
+                  <input
+                    type="range"
+                    min={0}
+                    max={bundledScrollMetrics.max}
+                    value={bundledScrollMetrics.left}
+                    onChange={handleBundledTopScrollControl}
+                    className="w-full accent-accent-700"
+                    aria-label="Scroll bundled sessions table horizontally"
+                  />
+                </div>
+              ) : null}
+              <div
+                ref={bundledBodyScrollRef}
+                onScroll={handleBundledBodyScroll}
+                className="w-full overflow-x-auto"
+              >
+              <table className="min-w-[1030px] w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50 sticky top-0 z-10">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider"></th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Date</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Class</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Planned Window</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Actual Window</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Window Drift</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Fragments</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Early</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Overtime</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Break</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">Attendance</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Actions</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider sticky right-0 z-20 bg-gray-50">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {groupedBundledRows.map((group) => (
                     <React.Fragment key={`group-${group.date}`}>
                       <tr className="bg-slate-100/90">
-                        <td colSpan={12} className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-700">
+                        <td colSpan={9} className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-700">
                           {new Date(group.date).toLocaleDateString('en-US', {
                             weekday: 'long',
                             month: 'short',
@@ -959,6 +1009,9 @@ const Sessions = () => {
 
                       {group.items.map((bundle, rowIndex) => {
                         const isExpanded = expandedBundleIds.includes(bundle.bundle_id);
+                        const actionCellBg = rowIndex % 2 === 0
+                          ? 'bg-white group-hover:bg-slate-50'
+                          : 'bg-slate-50/40 group-hover:bg-slate-100/60';
                         return (
                           <React.Fragment key={bundle.bundle_id}>
                             <tr
@@ -971,13 +1024,6 @@ const Sessions = () => {
                                 ) : (
                                   <ChevronRightIcon className="w-4 h-4" />
                                 )}
-                              </td>
-                              <td className="px-6 py-5 whitespace-nowrap text-sm text-gray-500">
-                                {new Date(bundle.date).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  year: 'numeric',
-                                })}
                               </td>
                               <td className="px-6 py-5 text-sm font-bold text-gray-900">
                                 {bundle.classInfo ? formatClassDisplay(bundle.classInfo) : 'N/A'}
@@ -992,15 +1038,13 @@ const Sessions = () => {
                                 {renderWindowTimeline(bundle)}
                               </td>
                               <td className="px-4 py-5 whitespace-nowrap text-right text-xs text-gray-700">{bundle.session_count || 0}</td>
-                              <td className="px-4 py-5 whitespace-nowrap text-right text-sm text-gray-900">{bundle.early_start_minutes || 0}m</td>
-                              <td className={`px-4 py-5 whitespace-nowrap text-right text-sm ${getOvertimeTone(bundle.overtime_minutes)}`}>{bundle.overtime_minutes || 0}m</td>
                               <td className="px-4 py-5 whitespace-nowrap text-right text-xs text-gray-700">{bundle.break_minutes || 0}m</td>
                               <td className="px-6 py-5 whitespace-nowrap text-sm">
                                 <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${getAttendanceTone(bundle.attendance_rate || 0)}`}>
                                   {bundle.attendance_rate || 0}%
                                 </span>
                               </td>
-                              <td className="px-6 py-5 whitespace-nowrap text-sm font-medium">
+                              <td className={`px-6 py-5 whitespace-nowrap text-sm font-medium sticky right-0 z-10 ${actionCellBg}`}>
                                 {Array.isArray(bundle.session_ids) && bundle.session_ids.length > 0 ? (
                                   <Link
                                     to={`/app/sessions/bundled/${encodeURIComponent(bundle.bundle_id)}?ids=${encodeURIComponent(bundle.session_ids.join(','))}`}
@@ -1018,7 +1062,7 @@ const Sessions = () => {
                             {isExpanded ? (
                               <tr className="bg-accent-50/60">
                                 <td></td>
-                                <td colSpan={11} className="px-6 py-4">
+                                <td colSpan={8} className="px-6 py-4">
                                   <div className="text-xs font-semibold uppercase tracking-wide text-accent-900 mb-3">Session fragments</div>
                                   <div className="rounded-md border border-accent-100 bg-white/90 divide-y divide-accent-100">
                                     {bundle.sessions.map((fragment) => (
@@ -1060,6 +1104,7 @@ const Sessions = () => {
                   ))}
                 </tbody>
               </table>
+              </div>
               </div>
 
             </div>
@@ -1206,8 +1251,9 @@ const Sessions = () => {
           ) : null}
 
           {listMode === 'raw' && filteredRawSessions.length > 0 ? (
-            <div className="bg-white rounded-lg shadow">
-              <table className="min-w-full divide-y divide-gray-200">
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="w-full overflow-x-auto">
+              <table className="min-w-[760px] w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
@@ -1262,6 +1308,7 @@ const Sessions = () => {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           ) : null}
     </div>

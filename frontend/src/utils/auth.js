@@ -40,11 +40,18 @@ export const isTokenValid = () => {
   if (!token) return false;
 
   try {
-    // Parse JWT token to check expiration
-    const payload = JSON.parse(atob(token.split('.')[1]));
+    const parts = token.split('.');
+    if (parts.length < 2) return false;
+
+    // JWT payload is base64url, so normalize before decoding.
+    const base64 = parts[1]
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    const payload = JSON.parse(atob(padded));
     const now = Date.now() / 1000;
 
-    return payload.exp > now;
+    return Number.isFinite(payload.exp) && payload.exp > now;
   } catch {
     return false;
   }

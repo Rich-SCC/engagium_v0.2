@@ -82,7 +82,7 @@ api.interceptors.response.use(
         })
           .then(token => {
             originalRequest.headers.Authorization = `Bearer ${token}`;
-            return axios(originalRequest);
+            return api(originalRequest);
           })
           .catch(err => {
             return Promise.reject(err);
@@ -116,7 +116,7 @@ api.interceptors.response.use(
         
         processQueue(null, accessToken);
         
-        return axios(originalRequest);
+        return api(originalRequest);
       } catch (refreshError) {
         // Refresh failed, redirect to landing page
         processQueue(refreshError, null);
