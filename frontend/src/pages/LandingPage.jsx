@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import { 
   CheckCircleIcon, 
   ClockIcon, 
@@ -20,9 +21,38 @@ import featureimg from '@/assets/images/feature-landing.png';
 
 const LandingPage = () => {
   const navigate = useNavigate();
+  const { clearError } = useAuth();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isSignUpOpen, setIsSignUpOpen] = useState(false);
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+
+  const openLoginModal = () => {
+    clearError();
+    setIsSignUpOpen(false);
+    setIsForgotPasswordOpen(false);
+    setIsLoginOpen(true);
+  };
+
+  const openSignUpModal = () => {
+    clearError();
+    setIsLoginOpen(false);
+    setIsForgotPasswordOpen(false);
+    setIsSignUpOpen(true);
+  };
+
+  const openForgotPasswordModal = () => {
+    clearError();
+    setIsLoginOpen(false);
+    setIsSignUpOpen(false);
+    setIsForgotPasswordOpen(true);
+  };
+
+  const closeAllAuthModals = () => {
+    clearError();
+    setIsLoginOpen(false);
+    setIsSignUpOpen(false);
+    setIsForgotPasswordOpen(false);
+  };
 
   return (
     <div className="min-h-screen bg-white">
@@ -62,13 +92,13 @@ const LandingPage = () => {
           {/* Auth Buttons - Left Aligned */}
           <div className="flex gap-4 justify-center">
             <button 
-              onClick={() => setIsLoginOpen(true)}
+              onClick={openLoginModal}
               className="px-8 py-3 bg-white border-2 border-accent-500 text-accent-600 rounded-lg font-semibold hover:bg-accent-50 transition-all duration-300 shadow-sm hover:shadow-md"
             >
               Log In
             </button>
             <button 
-              onClick={() => setIsSignUpOpen(true)}
+              onClick={openSignUpModal}
               className="px-8 py-3 bg-accent-500 text-white rounded-lg font-semibold hover:bg-accent-600 transition-all duration-300 shadow-md hover:shadow-lg"
             >
               Sign Up
@@ -368,14 +398,12 @@ const LandingPage = () => {
       {/* Login Modal */}
       {isLoginOpen && (
         <LoginModal 
-          onClose={() => setIsLoginOpen(false)} 
+          onClose={closeAllAuthModals} 
           onSwitchToSignUp={() => {
-            setIsLoginOpen(false);
-            setIsSignUpOpen(true);
+            openSignUpModal();
           }}
           onSwitchToForgotPassword={() => {
-            setIsLoginOpen(false);
-            setIsForgotPasswordOpen(true);
+            openForgotPasswordModal();
           }}
         />
       )}
@@ -383,10 +411,9 @@ const LandingPage = () => {
       {/* Sign Up Modal */}
       {isSignUpOpen && (
         <SignUpModal 
-          onClose={() => setIsSignUpOpen(false)} 
+          onClose={closeAllAuthModals} 
           onSwitchToLogin={() => {
-            setIsSignUpOpen(false);
-            setIsLoginOpen(true);
+            openLoginModal();
           }} 
         />
       )}
@@ -394,10 +421,9 @@ const LandingPage = () => {
       {/* Forgot Password Modal */}
       {isForgotPasswordOpen && (
         <ForgotPasswordModal 
-          onClose={() => setIsForgotPasswordOpen(false)} 
+          onClose={closeAllAuthModals} 
           onBackToLogin={() => {
-            setIsForgotPasswordOpen(false);
-            setIsLoginOpen(true);
+            openLoginModal();
           }} 
         />
       )}

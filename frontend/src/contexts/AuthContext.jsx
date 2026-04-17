@@ -103,7 +103,7 @@ const authReducer = (state, action) => {
     case 'INIT_COMPLETE':
       return {
         ...state,
-        isLoading: false,
+        isInitializing: false,
       };
 
     default:
@@ -116,7 +116,8 @@ const initialState = {
   isAuthenticated: false,
   user: null,
   token: null,
-  isLoading: true, // Start as true to prevent premature redirects
+  isLoading: false,
+  isInitializing: true, // Only gate route rendering during initial session bootstrap
   error: null,
 };
 
