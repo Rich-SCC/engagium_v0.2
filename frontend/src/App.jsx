@@ -55,7 +55,14 @@ function App() {
   return (
     <Routes>
       {/* Landing Page - Public */}
-      <Route path="/" element={<LandingPage />} />
+      <Route
+        path="/"
+        element={
+          <PublicRoute>
+            <LandingPage />
+          </PublicRoute>
+        }
+      />
 
       {/* Forgot Password - Public */}
       <Route

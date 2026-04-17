@@ -18,6 +18,7 @@ const socketHandler = require('./src/socket/socketHandler');
 const {
   closePool,
   ensureParticipationLogsSchema,
+  ensureRefreshTokenSessionsSchema,
   checkDatabaseHealth,
 } = require('./src/config/database');
 const { assertJwtSecretsConfigured } = require('./src/config/jwt');
@@ -181,8 +182,9 @@ const PORT = process.env.PORT || 3001;
 async function startServer() {
   try {
     await ensureParticipationLogsSchema();
+    await ensureRefreshTokenSessionsSchema();
   } catch (error) {
-    console.error('❌ Failed to apply participation log schema migration:', error);
+    console.error('❌ Failed to apply startup schema migrations:', error);
     if (isProduction) {
       process.exit(1);
     }

@@ -77,6 +77,7 @@ module.exports = {
   query: (text, params) => pool.query(text, params),
   pool,
   ensureParticipationLogsSchema,
+  ensureRefreshTokenSessionsSchema,
   checkDatabaseHealth,
   closePool,
 };
@@ -96,6 +97,34 @@ async function ensureParticipationLogsSchema() {
     ALTER TABLE IF EXISTS participation_logs
       ADD CONSTRAINT participation_logs_student_id_fkey
       FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL
+  `);
+}
+
+async function ensureRefreshTokenSessionsSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS refresh_token_sessions (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash VARCHAR(64) NOT NULL,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      device_id VARCHAR(128),
+      user_agent TEXT,
+      ip_address VARCHAR(64),
+      revoked BOOLEAN DEFAULT false,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+      last_used_at TIMESTAMP WITH TIME ZONE,
+      UNIQUE (user_id, token_hash)
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_user_id
+    ON refresh_token_sessions (user_id)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_expires_at
+    ON refresh_token_sessions (expires_at)
   `);
 }
 

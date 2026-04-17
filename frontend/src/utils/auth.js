@@ -1,5 +1,6 @@
 const TOKEN_KEY = 'engagium_token';
 const REFRESH_TOKEN_KEY = 'engagium_refresh_token';
+const DEVICE_ID_KEY = 'engagium_device_id';
 
 export const getToken = () => {
   return localStorage.getItem(TOKEN_KEY);
@@ -60,4 +61,23 @@ export const isTokenValid = () => {
 export const getAuthToken = () => {
   const token = getToken();
   return token ? `Bearer ${token}` : null;
+};
+
+const createDeviceId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `dev_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+};
+
+export const getOrCreateDeviceId = () => {
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+
+  if (!deviceId) {
+    deviceId = createDeviceId();
+    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+  }
+
+  return deviceId;
 };

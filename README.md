@@ -55,6 +55,24 @@ npm install
 npm run dev
 ```
 
+## Running Prod And Dev Simultaneously
+
+Run the stacks with different Compose project names and different host ports.
+
+1. Start production stack:
+	NGINX_PORT=8888 docker compose -p engagium-prod -f docker-compose.prod.yml up -d
+
+2. Start development stack on non-overlapping ports:
+	DB_PORT=5433 BACKEND_PORT=3002 FRONTEND_PORT=5174 NGINX_PORT=8889 docker compose -p engagium-dev -f docker-compose.dev.yml up -d
+
+3. Route hostnames at the edge proxy:
+	engagium.app -> 127.0.0.1:8888
+	dev.engagium.app -> 127.0.0.1:8889
+
+4. Verify both stacks are up:
+	docker compose -p engagium-prod -f docker-compose.prod.yml ps
+	docker compose -p engagium-dev -f docker-compose.dev.yml ps
+
 ## Environment Setup
 
 See [Environment Setup](__documentation/ENV_SETUP.md) and [Secrets Setup](__documentation/SECRETS_SETUP.md).

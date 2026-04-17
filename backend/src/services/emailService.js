@@ -222,7 +222,13 @@ The Engagium Team
 
     try {
       const info = await this.transporter.sendMail(mailOptions);
-      console.log('Password reset email sent:', info.messageId);
+      console.log('Password reset email sent:', {
+        messageId: info.messageId,
+        accepted: info.accepted,
+        rejected: info.rejected,
+        pending: info.pending,
+        response: info.response,
+      });
       return info;
     } catch (error) {
       console.error('Error sending password reset email:', error);

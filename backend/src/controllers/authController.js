@@ -22,6 +22,50 @@ const generateRefreshToken = (userId) => {
   );
 };
 
+const getTokenExpiryDate = (token) => {
+  const decoded = jwt.decode(token);
+  if (!decoded || !Number.isFinite(decoded.exp)) {
+    return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  }
+
+  return new Date(decoded.exp * 1000);
+};
+
+const extractClientMetadata = (req) => {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const ipAddress = Array.isArray(forwardedFor)
+    ? forwardedFor[0]
+    : (typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : (req.ip || null));
+
+  const rawDeviceId = req.header('X-Device-Id');
+  const deviceId = typeof rawDeviceId === 'string' && rawDeviceId.trim().length > 0
+    ? rawDeviceId.trim().slice(0, 128)
+    : null;
+
+  return {
+    deviceId,
+    userAgent: req.get('User-Agent') || null,
+    ipAddress,
+  };
+};
+
+const maskEmail = (email) => {
+  if (typeof email !== 'string') {
+    return 'unknown';
+  }
+
+  const [local = '', domain = ''] = email.trim().split('@');
+  if (!local || !domain) {
+    return 'invalid';
+  }
+
+  const localPreview = local.length <= 2
+    ? `${local[0] || '*'}*`
+    : `${local.slice(0, 2)}***`;
+
+  return `${localPreview}@${domain}`;
+};
+
 // Register new user
 const register = async (req, res) => {
   try {
@@ -63,9 +107,14 @@ const register = async (req, res) => {
     // Generate tokens
     const accessToken = generateAccessToken(user.id);
     const refreshToken = generateRefreshToken(user.id);
+    const refreshExpiresAt = getTokenExpiryDate(refreshToken);
+    const metadata = extractClientMetadata(req);
 
     // Store refresh token in database
-    await User.storeRefreshToken(user.id, refreshToken);
+    await User.storeRefreshToken(user.id, refreshToken, {
+      ...metadata,
+      expiresAt: refreshExpiresAt,
+    });
 
     res.status(201).json({
       success: true,
@@ -132,9 +181,14 @@ const login = async (req, res) => {
     // Generate tokens
     const accessToken = generateAccessToken(user.id);
     const refreshToken = generateRefreshToken(user.id);
+    const refreshExpiresAt = getTokenExpiryDate(refreshToken);
+    const metadata = extractClientMetadata(req);
 
     // Store refresh token in database
-    await User.storeRefreshToken(user.id, refreshToken);
+    await User.storeRefreshToken(user.id, refreshToken, {
+      ...metadata,
+      expiresAt: refreshExpiresAt,
+    });
 
     res.json({
       success: true,
@@ -245,8 +299,15 @@ const updateProfile = async (req, res) => {
 // Logout (client-side token removal, but we can add server-side token blacklist if needed)
 const logout = async (req, res) => {
   try {
-    // Clear refresh token from database
-    await User.clearRefreshToken(req.user.id);
+    const providedRefreshToken = typeof req.body?.refreshToken === 'string'
+      ? req.body.refreshToken
+      : null;
+
+    if (providedRefreshToken) {
+      await User.revokeRefreshToken(req.user.id, providedRefreshToken);
+    } else {
+      await User.clearRefreshToken(req.user.id);
+    }
 
     res.json({
       success: true,
@@ -264,9 +325,9 @@ const logout = async (req, res) => {
 // Refresh access token
 const refreshToken = async (req, res) => {
   try {
-    const { refreshToken } = req.body;
+    const requestRefreshToken = req.body?.refreshToken;
 
-    if (!refreshToken) {
+    if (!requestRefreshToken) {
       return res.status(401).json({
         success: false,
         error: 'Refresh token is required'
@@ -277,7 +338,7 @@ const refreshToken = async (req, res) => {
     let decoded;
     try {
       decoded = jwt.verify(
-        refreshToken,
+        requestRefreshToken,
         getJwtRefreshSecret()
       );
     } catch (error) {
@@ -296,7 +357,7 @@ const refreshToken = async (req, res) => {
     }
 
     // Validate refresh token in database
-    const isValid = await User.validateRefreshToken(decoded.id, refreshToken);
+    const isValid = await User.validateRefreshToken(decoded.id, requestRefreshToken);
     if (!isValid) {
       return res.status(401).json({
         success: false,
@@ -304,13 +365,22 @@ const refreshToken = async (req, res) => {
       });
     }
 
-    // Generate new access token
+    // Rotate refresh token and issue a new access token.
     const newAccessToken = generateAccessToken(decoded.id);
+    const newRefreshToken = generateRefreshToken(decoded.id);
+    const refreshExpiresAt = getTokenExpiryDate(newRefreshToken);
+    const metadata = extractClientMetadata(req);
+
+    await User.rotateRefreshToken(decoded.id, requestRefreshToken, newRefreshToken, {
+      ...metadata,
+      expiresAt: refreshExpiresAt,
+    });
 
     res.json({
       success: true,
       data: {
-        accessToken: newAccessToken
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken
       }
     });
   } catch (error) {
@@ -349,6 +419,10 @@ const forgotPassword = async (req, res) => {
     // Always return success to prevent email enumeration
     // Even if user doesn't exist, we don't want to reveal that
     if (!result) {
+      console.info('Forgot password requested for non-existent account:', {
+        email: maskEmail(email),
+        ipAddress: extractClientMetadata(req).ipAddress,
+      });
       return res.json({
         success: true,
         message: 'If an account exists with that email, a password reset link has been sent'

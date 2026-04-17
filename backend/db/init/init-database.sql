@@ -80,6 +80,21 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Refresh token sessions table (per-device, multi-session support)
+CREATE TABLE IF NOT EXISTS refresh_token_sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    device_id VARCHAR(128),
+    user_agent TEXT,
+    ip_address VARCHAR(64),
+    revoked BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_used_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE(user_id, token_hash)
+);
+
 -- Extension tokens table (for Chrome extension authentication)
 CREATE TABLE IF NOT EXISTS extension_tokens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -248,6 +263,8 @@ CREATE INDEX IF NOT EXISTS idx_attendance_intervals_participant_name ON attendan
 CREATE INDEX IF NOT EXISTS idx_extension_tokens_user_id ON extension_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_extension_tokens_token_hash ON extension_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_extension_tokens_expires_at ON extension_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_user_id ON refresh_token_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_expires_at ON refresh_token_sessions(expires_at);
 
 -- Create updated_at trigger function (must exist before creating triggers)
 CREATE OR REPLACE FUNCTION update_updated_at_column()

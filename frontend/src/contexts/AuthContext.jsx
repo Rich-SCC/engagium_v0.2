@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { authAPI } from '@/services/api';
-import { getToken, getRefreshToken, setToken, setTokens, removeTokens, isTokenValid } from '@/utils/auth';
+import { getToken, getRefreshToken, setTokens, removeTokens, isTokenValid } from '@/utils/auth';
 
 // Auth context
 const AuthContext = createContext();
@@ -151,12 +151,13 @@ export const AuthProvider = ({ children }) => {
         try {
           const refreshResponse = await authAPI.refreshToken(refreshToken);
           const newAccessToken = refreshResponse?.data?.accessToken;
+          const newRefreshToken = refreshResponse?.data?.refreshToken || refreshToken;
 
           if (!newAccessToken) {
             throw new Error('Missing access token from refresh response');
           }
 
-          setToken(newAccessToken);
+          setTokens(newAccessToken, newRefreshToken);
 
           const profileResponse = await authAPI.getProfile();
           dispatch({

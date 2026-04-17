@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getToken, getRefreshToken, setToken, removeTokens } from '@/utils/auth';
+import { getToken, getRefreshToken, setTokens, removeTokens, getOrCreateDeviceId } from '@/utils/auth';
 import { resolveApiBaseUrl } from '@/utils/apiBaseUrl';
 
 const API_BASE_URL = resolveApiBaseUrl();
@@ -45,9 +45,13 @@ const redirectToLandingPage = () => {
 api.interceptors.request.use(
   (config) => {
     const token = getToken();
+    const deviceId = getOrCreateDeviceId();
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    config.headers['X-Device-Id'] = deviceId;
+
     return config;
   },
   (error) => {
@@ -102,12 +106,18 @@ api.interceptors.response.use(
 
       try {
         // Attempt to refresh the access token
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh-token`, {
-          refreshToken
-        });
+        const response = await axios.post(
+          `${API_BASE_URL}/auth/refresh-token`,
+          { refreshToken },
+          {
+            headers: {
+              'X-Device-Id': getOrCreateDeviceId(),
+            },
+          }
+        );
 
-        const { accessToken } = response.data.data;
-        setToken(accessToken);
+        const { accessToken, refreshToken: newRefreshToken } = response.data.data;
+        setTokens(accessToken, newRefreshToken || refreshToken);
         
         // Update the authorization header
         api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
@@ -138,7 +148,7 @@ api.interceptors.response.use(
 export const authAPI = {
   register: (userData) => api.post('/auth/register', userData),
   login: (credentials) => api.post('/auth/login', credentials),
-  logout: () => api.post('/auth/logout'),
+  logout: () => api.post('/auth/logout', { refreshToken: getRefreshToken() }),
   getProfile: () => api.get('/auth/profile'),
   updateProfile: (userData) => api.put('/auth/profile', userData),
   changePassword: (passwordData) => api.put('/auth/change-password', passwordData),
