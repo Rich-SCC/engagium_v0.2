@@ -2,7 +2,7 @@
 
 **Version:** 3.0  
 **Purpose:** Professor-only participation tracking web application with Google Meet extension support and Zoom Apps SDK bridge support  
-**Last Updated:** April 12, 2026  
+**Last Updated:** April 16, 2026  
 **Status:** Current implementation reference
 
 ---
@@ -130,6 +130,7 @@ Implemented routes include:
 - `PUT /api/auth/profile`
 - `PUT /api/auth/change-password`
 - `POST /api/auth/logout`
+- `POST /api/auth/generate-extension-token`
 
 ### 3.2 Extension token authentication
 
@@ -214,15 +215,30 @@ Notable endpoints include:
 - `POST /api/classes/:id/exemptions`
 - `DELETE /api/classes/:id/exemptions/:exemptionId`
 - `GET /api/classes/:classId/students`
+- `GET /api/classes/:classId/students/:studentId`
+- `GET /api/classes/:classId/students/:studentId/analytics`
 - `POST /api/classes/:classId/students/import`
+- `GET /api/classes/:classId/students/check-duplicates`
+- `GET /api/classes/:classId/students/export`
+- `POST /api/classes/:classId/students/bulk`
 - `POST /api/classes/:classId/students/bulk-delete`
 - `POST /api/classes/:classId/students/bulk-update`
 - `POST /api/classes/:classId/students/merge`
 - `POST /api/classes/:classId/students/from-participant`
 - `GET /api/classes/:classId/tags`
 - `POST /api/classes/:classId/tags`
+- `PUT /api/classes/:classId/tags/:tagId`
+- `DELETE /api/classes/:classId/tags/:tagId`
+- `GET /api/classes/:classId/students/:studentId/tags`
+- `POST /api/classes/:classId/students/:studentId/tags/:tagId`
+- `DELETE /api/classes/:classId/students/:studentId/tags/:tagId`
+- `POST /api/classes/:classId/tags/:tagId/bulk-assign`
+- `POST /api/classes/:classId/tags/:tagId/bulk-remove`
+- `GET /api/classes/:classId/notes/recent`
 - `GET /api/classes/:classId/students/:studentId/notes`
 - `POST /api/classes/:classId/students/:studentId/notes`
+- `PUT /api/classes/:classId/students/:studentId/notes/:noteId`
+- `DELETE /api/classes/:classId/students/:studentId/notes/:noteId`
 
 ### 5.2 Sessions
 
@@ -238,14 +254,19 @@ Important endpoints include:
 - `POST /api/sessions/start-from-meeting`
 - `PUT /api/sessions/:id/end-with-timestamp`
 - `POST /api/sessions/live-event`
+- `GET /api/sessions/:id/students`
 - `POST /api/sessions/:id/attendance/join`
 - `POST /api/sessions/:id/attendance/leave`
 - `GET /api/sessions/:id/attendance/full`
+- `POST /api/sessions/:id/attendance/link`
 - `POST /api/sessions/:id/attendance/bulk`
 - `POST /api/sessions/:id/participation/bulk`
 - `GET /api/sessions/:id/full`
+- `GET /api/sessions/:id/attendance`
+- `GET /api/sessions/:id/attendance/stats`
 - `PUT /api/sessions/:id`
 - `DELETE /api/sessions/:id`
+- `POST /api/sessions/attendance/full/bulk`
 
 ### 5.3 Participation
 
@@ -306,7 +327,7 @@ The extension is intentionally focused on Google Meet.
 
 Current manifest characteristics:
 
-- Content script match: `https://meet.google.com/*-*-*`
+- Content script matches: `https://meet.google.com/*-*-*`
 - Background service worker: `background/service-worker.js`
 - Popup UI: `popup/index.html`
 - Options UI: `options/index.html`
