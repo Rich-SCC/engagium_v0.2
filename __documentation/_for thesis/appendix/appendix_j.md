@@ -1,9 +1,9 @@
 # APPENDIX J  
 COST AND BENEFIT ANALYSIS
 
-This appendix presents an analysis of the development costs and practical benefits of the ENGAGIUM system.
+This appendix presents a practical analysis of the development costs and benefits of the ENGAGIUM system in its completed form.
 
-> **Note:** This appendix contains placeholder values `[TBD]` that will be filled in with actual figures.
+> **Note:** Exact timesheet-style accounting was not maintained during development. This appendix therefore reports confirmed direct monetary costs and provides reasonable operational estimates for benefits.
 
 ---
 
@@ -13,11 +13,11 @@ This appendix presents an analysis of the development costs and practical benefi
 
 | Role | Estimated Hours |
 |------|-----------------|
-| Lead Developer | [TBD] |
-| UI/UX Design | [TBD] |
-| Quality Assurance/Testing | [TBD] |
-| Documentation | [TBD] |
-| **Total Development Hours** | **[TBD]** |
+| Lead Developer | Not formally tracked |
+| UI/UX Design | Not formally tracked |
+| Quality Assurance/Testing | Not formally tracked |
+| Documentation | Not formally tracked |
+| **Total Development Hours** | **Not formally tracked** |
 
 ### J.1.2 Tools and Resources Used
 
@@ -35,10 +35,11 @@ This appendix presents an analysis of the development costs and practical benefi
 
 | Item | Description | Cost |
 |------|-------------|------|
-| Development Server/Hosting | [TBD] | [TBD] |
-| Database Hosting | [TBD] | [TBD] |
-| Domain (if applicable) | [TBD] | [TBD] |
-| **Infrastructure Costs** | | **[TBD]** |
+| Development/Application Hosting | Self-hosted on an existing Ubuntu Linux spare PC | 0 (no additional cash outlay) |
+| Database Hosting | PostgreSQL hosted on the same self-managed Ubuntu server | 0 |
+| Domain | name.com domain via GitHub Education benefit | 0 |
+| Tunneling/Edge Access | Cloudflare Free Plan | 0 |
+| **Infrastructure Costs** | | **0 direct monetary cost** |
 
 ---
 
@@ -50,22 +51,22 @@ The following table estimates the time savings achieved by using ENGAGIUM compar
 
 | Activity | Manual Method (min/session) | With ENGAGIUM (min/session) | Time Saved (min/session) |
 |----------|-----------------------------|-----------------------------|--------------------------|
-| Attendance Recording | [TBD] | [TBD] | [TBD] |
-| Participation Monitoring | [TBD] | [TBD] | [TBD] |
-| Post-Session Documentation | [TBD] | [TBD] | [TBD] |
-| Report Generation | [TBD] | [TBD] | [TBD] |
-| **Total per Session** | **[TBD]** | **[TBD]** | **[TBD]** |
+| Attendance Recording | 8 | 2 | 6 |
+| Participation Monitoring | 15 | 6 | 9 |
+| Post-Session Documentation | 10 | 4 | 6 |
+| Report Generation | 12 | 4 | 8 |
+| **Total per Session** | **45** | **16** | **29** |
 
 ### J.2.2 Projected Time Savings (Per Instructor)
 
 | Parameter | Value |
 |-----------|-------|
-| Average sessions per week | [TBD] |
-| Weeks per semester | [TBD] |
+| Average sessions per week | 5 |
+| Weeks per semester | 18 |
 | Semesters per year | 2 |
-| Total sessions per year | [TBD] |
-| Time saved per session (minutes) | [TBD] |
-| **Total time saved per year (hours)** | **[TBD]** |
+| Total sessions per year | 180 |
+| Time saved per session (minutes) | 29 |
+| **Total time saved per year (hours)** | **87 hours** |
 
 ### J.2.3 Qualitative Benefits
 
@@ -90,22 +91,20 @@ The following table estimates the time savings achieved by using ENGAGIUM compar
 
 | Category | Details |
 |----------|---------|
-| Development Effort | [TBD] total hours |
+| Development Effort | Significant effort; exact hours were not formally tracked |
 | Software Costs | Free (open-source stack) |
-| Infrastructure Costs | [TBD] |
+| Infrastructure Costs | 0 direct monetary cost (self-hosted + education/free-tier services) |
 
 ### J.3.2 Benefit Summary
 
 | Category | Details |
 |----------|---------|
-| Time Savings | Approximately [TBD] minutes saved per session |
-| Annual Time Savings (per instructor) | Approximately [TBD] hours |
+| Time Savings | Approximately 29 minutes saved per session |
+| Annual Time Savings (per instructor) | Approximately 87 hours |
 | Key Qualitative Benefits | Improved accuracy, objectivity, real-time visibility, reduced administrative burden |
 
 ### J.3.3 Conclusion
 
-> **[PLACEHOLDER]**
->
-> Summary conclusion will be added after actual figures are determined.
+ENGAGIUM demonstrates strong practical value with minimal financial barrier to adoption. The project required substantial development and validation effort, but direct monetary spending was effectively zero due to use of open-source tools, education-provided domain credits, self-hosted infrastructure, and free-tier tunneling services. In return, the system delivers meaningful operational gains through consistent participation tracking, faster reporting, improved evidence quality, and notable instructor time savings across an academic year.
 
 ENGAGIUM provides practical value to instructors by automating the tedious task of participation tracking during online classes. While the system required significant development effort, it leverages free and open-source technologies, minimizing direct costs. The primary benefits are non-monetary—time savings, improved accuracy, and enhanced fairness in participation assessment—which align with the academic and pedagogical goals of the project.

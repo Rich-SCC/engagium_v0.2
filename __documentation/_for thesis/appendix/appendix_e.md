@@ -1,13 +1,11 @@
 # APPENDIX E  
 USER MANUAL
 
-> ⚠️ **DRAFT** — This appendix is subject to change as the UI/UX evolves. To be finalized before final submission when the interface is frozen.
-
 This appendix provides a comprehensive guide for instructors on installing, configuring, and using the ENGAGIUM system.
 
 ---
 
-## E.1 Installation Guide (Chrome Extension)
+## E.1 Installation Guide
 
 ### E.1.1 Prerequisites
 
@@ -17,29 +15,18 @@ Before installing ENGAGIUM, ensure you have:
 - An active **ENGAGIUM account** (register at the web dashboard)
 - A stable **internet connection**
 
-### E.1.2 Installing from Chrome Web Store
+### E.1.2 Installing as Unpacked Extension (Current Deployment Method)
 
-> **Note:** If ENGAGIUM is not yet published to the Chrome Web Store, follow the "Installing as Unpacked Extension" instructions in Section E.1.3.
+As of current deployment, ENGAGIUM is installed as an unpacked extension.
 
-1. Open Google Chrome
-2. Navigate to the Chrome Web Store
-3. Search for "ENGAGIUM" or use the direct link provided by your institution
-4. Click **Add to Chrome**
-5. In the confirmation dialog, click **Add extension**
-6. The ENGAGIUM icon will appear in your Chrome toolbar
-
-### E.1.3 Installing as Unpacked Extension (Development/Testing)
-
-If you received ENGAGIUM as a ZIP file or folder:
-
-1. Extract the extension files to a folder on your computer
+1. Obtain the extension folder from your institution or project repository
 2. Open Chrome and navigate to `chrome://extensions/`
 3. Enable **Developer mode** using the toggle in the top-right corner
 4. Click **Load unpacked**
-5. Select the folder containing the extension files (the folder with `manifest.json`)
-6. The extension will appear in your extensions list
+5. Select the ENGAGIUM extension folder (the folder with `manifest.json`)
+6. Confirm that the ENGAGIUM icon appears in your Chrome toolbar
 
-### E.1.4 Connecting to Your Account
+### E.1.3 Connecting the Chrome Extension to Your Account
 
 After installation, you must connect the extension to your ENGAGIUM account:
 
@@ -53,6 +40,19 @@ After installation, you must connect the extension to your ENGAGIUM account:
 8. Return to the extension's Options page
 9. Paste the token and click **Connect**
 10. You should see a confirmation message: "Connected as [Your Name]"
+
+### E.1.4 Zoom Integration Setup (Local/Developer Testing)
+
+For the Zoom side, ENGAGIUM is currently used in local/developer testing deployment.
+
+1. Obtain the Zoom integration test build or private deployment link from the project team
+2. Sign in to Zoom with your instructor account
+3. Complete the provided authorization flow (if prompted)
+4. Open or join a Zoom meeting
+5. Launch ENGAGIUM from the configured Zoom app/test entry point
+6. Verify connection status before starting class tracking
+
+> **Important:** ENGAGIUM is not yet publicly listed in Zoom App Marketplace. Zoom usage in this version is limited to local or institution-managed testing deployment.
 
 ---
 
@@ -112,7 +112,7 @@ The main navigation menu includes:
 | Menu Item | Description |
 |-----------|-------------|
 | **Home** | Dashboard overview with statistics |
-| **Classes** | Manage your classes and student rosters |
+| **My Classes** | Manage your classes, links, and exemptions |
 | **Sessions** | View session history and calendar |
 | **Live Feed** | Real-time participation during active sessions |
 | **Analytics** | Participation metrics and reports |
@@ -122,7 +122,7 @@ The main navigation menu includes:
 
 **Creating a New Class:**
 
-1. Navigate to **Classes**
+1. Navigate to **My Classes**
 2. Click **+ Create New Class**
 3. Fill in the form:
    - **Class Name**: e.g., "Introduction to Computing"
@@ -149,9 +149,22 @@ The main navigation menu includes:
 
 1. In the class details, go to **Settings** tab
 2. Under **Meeting Links**, click **+ Add Link**
-3. Paste your Google Meet URL
+3. Paste your Google Meet or Zoom URL
 4. Optionally mark as **Primary** link
 5. Click **Save**
+
+**Managing Class Status and Exemptions:**
+
+1. In **My Classes**, use class actions to **Archive/Unarchive** when needed
+2. Use **Manage Exemptions** to add accounts that should not be tracked
+3. Note: Classes with existing sessions cannot be deleted until related session data is handled
+
+**Student Roster Advanced Actions (Class Details):**
+
+1. In **Students** tab, you can use bulk actions (select multiple students)
+2. Available actions include **Bulk Delete** and **Tag Assignment**
+3. Use **Merge Students** to combine duplicate records
+4. Use **Notes** to maintain student-specific context
 
 ---
 
@@ -172,7 +185,16 @@ This is the recommended method for starting sessions:
 6. The extension will confirm: "Session started"
 7. The status indicator will turn green: 🟢 Tracking
 
-### E.4.2 During the Session
+### E.4.2 From the Dashboard (Session Detail)
+
+You can also control session lifecycle from the dashboard:
+
+1. Navigate to **Sessions**
+2. Open a session record
+3. In **Session Details**, click **Start Session** (if not active) or **End Session** (if active)
+4. Confirm the status update in the page header and Live Feed
+
+### E.4.3 During the Session
 
 While the session is active:
 
@@ -186,7 +208,7 @@ While the session is active:
 - You can view real-time updates on the **Live Feed** page in the dashboard
 - Continue teaching normally—ENGAGIUM works silently in the background
 
-### E.4.3 Ending the Session
+### E.4.4 Ending the Session
 
 When your class is finished:
 
@@ -198,7 +220,7 @@ When your class is finished:
    - Mark enrolled students who didn't attend as "Absent"
    - Finalize all records
 
-Alternatively, you can end the session from the **Live Feed** page by clicking the **End Session** button.
+Alternatively, you can end the session from **Session Details** in the dashboard.
 
 ---
 
@@ -214,7 +236,7 @@ To view detailed attendance and participation for a session:
 4. You will see tabs for:
    - **Attendance**: List of students with status, join times, and durations
    - **Participation**: Individual events (chat, reactions, hand raises, mic)
-   - **Summary**: Overview statistics
+   - **Details**: Session metadata and overall summary information
 
 ### E.5.2 Attendance Records
 
@@ -246,13 +268,20 @@ The Participation tab displays chronological events:
 For aggregated data across multiple sessions:
 
 1. Navigate to **Analytics**
-2. Select a **date range** and **class** (or all classes)
-3. View:
-   - Total participation events
-   - Average attendance rate
-   - Top participants
-   - Participation by type (chart)
-   - Low participation alerts
+2. Select a **class** to load its analytics dashboard
+3. View attendance-focused metrics and class-level engagement summaries
+
+### E.5.5 Bundled Session Reports and Exports
+
+The system also supports grouped reporting for stitched sessions:
+
+1. Navigate to **Sessions**
+2. Switch to **Bundled** view mode
+3. Open a bundled session record
+4. Use report export actions to download:
+   - Attendance report (CSV/PDF)
+   - Participation report (CSV/PDF)
+   - Combined reporting scope when available
 
 ---
 
@@ -326,9 +355,9 @@ For aggregated data across multiple sessions:
 **Solutions:**
 
 1. Check your internet connection
-2. Try ending from the dashboard's **Live Feed** page instead
+2. Try ending from the dashboard's **Session Details** page instead
 3. Refresh the extension popup and try again
-4. If the issue persists, the session can be ended from **Sessions** → find the session → **End Session**
+4. If the issue persists, go to **Sessions** → open the session record → click **End Session**
 
 ---
 
@@ -360,9 +389,9 @@ A: Currently, ENGAGIUM is designed for instructor use only. Students do not have
 
 ---
 
-**Q: Does ENGAGIUM work with Zoom or Microsoft Teams?**
+**Q: Does ENGAGIUM support Zoom?**
 
-A: The current version of ENGAGIUM supports **Google Meet only**. Support for other platforms is planned for future releases.
+A: ENGAGIUM currently supports **Google Meet** for production tracking. A **Zoom integration path** exists for local/developer testing and institution-managed validation.
 
 ---
 
@@ -391,7 +420,7 @@ A: Yes. You can install the extension on multiple computers and connect them to 
 
 **Q: How do I update the extension?**
 
-A: If installed from Chrome Web Store, updates are automatic. If installed as an unpacked extension, download the new version and reload it at `chrome://extensions/`.
+A: In the current deployment, ENGAGIUM is loaded as an unpacked extension. To update, obtain the latest extension build from your institution/project team, then reload it at `chrome://extensions/`.
 
 ---
 

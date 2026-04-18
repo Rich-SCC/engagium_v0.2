@@ -1,98 +1,93 @@
-# APPENDIX B  
+# APPENDIX B
 SYSTEM ARCHITECTURE AND TECHNICAL FRAMEWORK
 
-This appendix provides a comprehensive technical overview of the ENGAGIUM system, including its architecture, modules, API structure, database schema, and technology stack.
+**Last Updated:** April 18, 2026
+
+This appendix presents the current technical architecture of ENGAGIUM based on implemented modules, active API contracts, and the live database schema.
 
 ---
 
 ## B.1 Overview of Engagium System
 
-**ENGAGIUM** is an automated participation tracking system designed for instructors conducting synchronous online classes via Google Meet. The system addresses the challenge of manual participation monitoring by automatically detecting and recording student engagement activities in real time.
+ENGAGIUM is a professor-facing participation tracking platform for synchronous online classes. The current implementation integrates:
 
-**Core Capabilities:**
+1. A React web dashboard for instructor workflows.
+2. A Chrome Manifest V3 extension for Google Meet event capture.
+3. A Zoom Apps SDK bridge path in the web application.
+4. A shared Node.js + Express + PostgreSQL + Socket.io backend.
 
-- **Automated Attendance Tracking**: Detects when participants join and leave Google Meet sessions, recording precise timestamps and calculating total duration
-- **Participation Event Detection**: Monitors chat messages, emoji reactions, hand raises, and microphone activity
-- **Real-Time Dashboard**: Provides instructors with live visibility into session activity via WebSocket-based updates
-- **Student Roster Management**: Allows instructors to manage class rosters, import students via CSV, and automatically match participant names to enrolled students
-- **Session Analytics**: Aggregates attendance and participation data for review and reporting
+### Core Capabilities
 
-**Design Principles:**
+- Meeting-driven session lifecycle management.
+- Attendance interval tracking (join/leave with duration totals).
+- Participation logging (chat, reaction, hand raise, mic toggles, join/leave markers).
+- Real-time dashboard updates through room-based Socket.io communication.
+- Class, roster, tags, notes, links, exemptions, and bulk operations.
+- Extension-token-based authentication for meeting-side clients.
 
-1. **Privacy-First**: The system does not record audio, video, or message content—only metadata about participation events
-2. **Non-Intrusive**: The browser extension operates silently without affecting the Google Meet experience
-3. **Offline-Resilient**: Local storage and sync queues ensure data is not lost during network interruptions
-4. **Real-Time**: WebSocket communication enables instant dashboard updates
+### Technical Characteristics
+
+1. Privacy-preserving signal capture (no audio/video recording in system data model).
+2. Offline-resilient extension submission via queued retries.
+3. Unified data model for Google Meet and Zoom bridge flows.
+4. Flexible authorization model supporting JWT and extension tokens.
 
 ---
 
 ## B.2 System Architecture (3-Tier Model)
 
-ENGAGIUM follows a three-tier architecture separating presentation, application logic, and data storage.
+ENGAGIUM follows a three-tier architecture with clear separation of interface, business logic, and persistence.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           ENGAGIUM 3-TIER ARCHITECTURE                           │
+│                           ENGAGIUM 3-TIER ARCHITECTURE                         │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
     ┌─────────────────────────────────────────────────────────────────────────────┐
-    │                            PRESENTATION TIER                                 │
-    │                                                                              │
-    │   ┌─────────────────────────────┐      ┌─────────────────────────────┐      │
-    │   │     Chrome Extension        │      │       Web Dashboard         │      │
-    │   │                             │      │                             │      │
-    │   │  • Popup UI (session ctrl)  │      │  • React SPA                │      │
-    │   │  • Options Page (auth)      │      │  • Real-time updates        │      │
-    │   │  • Content Scripts (detect) │      │  • Responsive design        │      │
-    │   └─────────────────────────────┘      └─────────────────────────────┘      │
-    │                                                                              │
+    │                            PRESENTATION TIER                               │
+    │                                                                             │
+    │   ┌─────────────────────────────┐      ┌────────────────────────────────┐  │
+    │   │ Chrome Extension            │      │ Web Application                │  │
+    │   │ (Google Meet)               │      │ (React Dashboard + Zoom Bridge)│  │
+    │   │ - service worker            │      │ - public auth/zoom routes      │  │
+    │   │ - detectors + sync queue    │      │ - protected /app instructor UI │  │
+    │   │ - popup/options UI          │      │ - live feed, analytics, settings│ │
+    │   └─────────────────────────────┘      └────────────────────────────────┘  │
     └─────────────────────────────────────────────────────────────────────────────┘
-                                         │
-                    HTTP REST API        │        WebSocket (Socket.io)
-                    X-Extension-Token    │        JWT Bearer Token
-                                         ▼
+                                      │
+                                      ▼
     ┌─────────────────────────────────────────────────────────────────────────────┐
-    │                            APPLICATION TIER                                  │
-    │                                                                              │
+    │                            APPLICATION TIER                                │
+    │                                                                             │
     │   ┌─────────────────────────────────────────────────────────────────────┐   │
-    │   │                    Node.js + Express Backend                         │   │
-    │   │                                                                      │   │
-    │   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │   │
-    │   │  │    Auth     │  │   Class     │  │  Session    │  │Participation│ │   │
-    │   │  │  Controller │  │ Controller  │  │ Controller  │  │ Controller  │ │   │
-    │   │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘ │   │
-    │   │                                                                      │   │
-    │   │  ┌─────────────────────────────┐  ┌─────────────────────────────┐   │   │
-    │   │  │   Flexible Auth Middleware  │  │    Socket.io Server         │   │   │
-    │   │  │   (JWT or Extension Token)  │  │    (Room-based broadcast)   │   │   │
-    │   │  └─────────────────────────────┘  └─────────────────────────────┘   │   │
+    │   │ Node.js + Express + Socket.io Backend                              │   │
+    │   │ - auth, class, session, participation, extension-token APIs        │   │
+    │   │ - JWT auth + flexible auth + extension auth                        │   │
+    │   │ - room-based realtime event distribution                            │   │
     │   └─────────────────────────────────────────────────────────────────────┘   │
-    │                                                                              │
     └─────────────────────────────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
+                                      │
+                                      ▼
     ┌─────────────────────────────────────────────────────────────────────────────┐
-    │                              DATA TIER                                       │
-    │                                                                              │
+    │                               DATA TIER                                    │
+    │                                                                             │
     │   ┌─────────────────────────────────────────────────────────────────────┐   │
-    │   │                        PostgreSQL Database                           │   │
-    │   │                                                                      │   │
-    │   │  • users              • sessions              • participation_logs   │   │
-    │   │  • classes            • attendance_records    • notifications        │   │
-    │   │  • students           • attendance_intervals  • extension_tokens     │   │
-    │   │  • session_links      • student_tags          • student_notes        │   │
+    │   │ PostgreSQL                                                         │   │
+    │   │ - auth/token tables                                                │   │
+    │   │ - class/student/session domain tables                              │   │
+    │   │ - attendance interval/final record tables                          │   │
+    │   │ - participation/event log tables                                   │   │
     │   └─────────────────────────────────────────────────────────────────────┘   │
-    │                                                                              │
     └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Tier Responsibilities:**
+### Tier Responsibilities
 
 | Tier | Components | Responsibilities |
 |------|------------|------------------|
-| **Presentation** | Chrome Extension, React Dashboard | User interface, event detection, data visualization |
-| **Application** | Node.js/Express, Socket.io | Business logic, API endpoints, authentication, real-time broadcasting |
-| **Data** | PostgreSQL | Persistent storage, data integrity, relational queries |
+| Presentation | Extension + React application | Event capture, user interaction, live data rendering |
+| Application | Express APIs + Socket.io | Authorization, orchestration, business rules, realtime propagation |
+| Data | PostgreSQL schema | Persistent system of record and relational integrity |
 
 ---
 
@@ -100,363 +95,374 @@ ENGAGIUM follows a three-tier architecture separating presentation, application 
 
 ### B.3.1 Browser Extension Modules
 
-| Module | File(s) | Responsibility | Key Technologies |
-|--------|---------|----------------|------------------|
-| **Service Worker** | `service-worker.js` | Central coordinator; handles message passing, API calls, session state | Manifest V3, Chrome APIs |
-| **Session Manager** | `session-manager.js` | Manages session lifecycle (start, end, status tracking) | State management |
-| **API Client** | `api-client.js` | HTTP requests to backend with extension token auth | Fetch API |
-| **Socket Client** | `socket-client.js` | WebSocket connection for real-time updates | Socket.io client |
-| **Sync Queue** | `sync-queue.js` | Queues failed requests for retry when online | IndexedDB |
-| **Participant Detector** | `participant-detector.js` | Observes People Panel for join/leave events | MutationObserver |
-| **Chat Monitor** | `chat-monitor.js` | Detects chat messages in Chat Panel | MutationObserver |
-| **Reaction Detector** | `reaction-detector.js` | Captures emoji reactions via toast notifications | MutationObserver |
-| **Hand Raise Detector** | `hand-raise-detector.js` | Monitors "Raised hands" section | MutationObserver |
-| **Media State Detector** | `media-state-detector.js` | Detects microphone unmute events | Button state observation |
-| **Popup UI** | `popup.jsx` | Quick session control interface | React, Vite |
-| **Options Page** | `options.jsx` | Authentication, class mapping, settings | React, Vite |
+| Module Group | Representative Files | Responsibility |
+|-------------|----------------------|----------------|
+| Background runtime | `background/service-worker.js`, `background/session-manager.js`, `background/api-client.js`, `background/socket-client.js`, `background/sync-queue.js`, `background/handlers/participant-handler.js` | Session state, API/socket communication, retry queue, background orchestration |
+| Meet detection | `content/google-meet/detection/participant-detector.js`, `chat-detector.js`, `reaction-detector.js`, `raised-hand-detector.js`, `mic-toggle-detector.js`, `meeting-exit-detector.js`, `url-monitor.js`, `people-panel.js` | Detect Google Meet participation and lifecycle signals |
+| Meet core and DOM | `content/google-meet/core/*`, `content/google-meet/dom/*` | Shared config/state/event-emission and DOM mediation |
+| UI modules | `content/google-meet/ui/*`, `popup/popup.jsx`, `options/options.jsx` | Tracking indicators, notifications, popup/options user interfaces |
+| Utilities | `_extension/utils/*` | Storage, matching, formatting, auth, logging helpers |
 
 ### B.3.2 Backend Modules
 
-| Module | File(s) | Responsibility | Key Endpoints |
-|--------|---------|----------------|---------------|
-| **Auth Controller** | `authController.js` | User registration, login, JWT management, password reset | `/api/auth/*` |
-| **Extension Token Controller** | `extensionTokenController.js` | Generate, list, revoke extension tokens | `/api/extension-tokens/*` |
-| **Class Controller** | `classController.js` | Class CRUD, meeting links, exempted accounts | `/api/classes/*` |
-| **Student Controller** | `studentController.js` | Student CRUD, CSV import, duplicate detection | `/api/students/*` |
-| **Student Tag Controller** | `studentTagController.js` | Tag management and assignments | `/api/classes/:id/tags/*` |
-| **Student Note Controller** | `studentNoteController.js` | Timestamped notes per student | `/api/students/:id/notes/*` |
-| **Session Controller** | `sessionController.js` | Session lifecycle, attendance retrieval | `/api/sessions/*` |
-| **Participation Controller** | `participationController.js` | Log and retrieve participation events | `/api/participation/*` |
-| **Socket Handler** | `socketHandler.js` | WebSocket room management, event broadcasting | Socket.io events |
-| **Auth Middleware** | `authMiddleware.js` | JWT verification, flexible auth (JWT or extension token) | Middleware |
+| Module Group | Representative Files | Responsibility |
+|-------------|----------------------|----------------|
+| Routes | `backend/src/routes/auth.js`, `classes.js`, `sessions.js`, `participation.js`, `extensionTokens.js` | Exposed API surface |
+| Controllers | `backend/src/controllers/*` | Auth, classes/students/tags/notes, sessions, participation, extension token logic |
+| Middleware | `backend/src/middleware/auth.js`, `flexibleAuth.js`, `extensionAuth.js` | JWT and extension-token authorization paths |
+| Realtime | `backend/src/socket/socketHandler.js` | Socket authentication, room joins/leaves, event broadcast |
+| Services | `backend/src/services/emailService.js` | Password reset email workflows |
 
 ### B.3.3 Frontend Modules
 
-| Module | File(s) | Responsibility |
-|--------|---------|----------------|
-| **Auth Context** | `AuthContext.jsx` | Authentication state, token management, login/logout |
-| **WebSocket Context** | `WebSocketContext.jsx` | Socket.io connection, room subscription, event handlers |
-| **Landing Page** | `LandingPage.jsx` | Public page with login/register links |
-| **Home Dashboard** | `Home.jsx` | Overview with statistics and recent activity |
-| **My Classes** | `MyClasses.jsx` | Class list, create/edit/archive classes |
-| **Class Details** | `ClassDetailsPage.jsx` | Student roster, sessions, settings for a class |
-| **Sessions** | `Sessions.jsx` | Session history, calendar view |
-| **Session Detail** | `SessionDetailPage.jsx` | Attendance and participation for a session |
-| **Live Feed** | `LiveFeed.jsx` | Real-time event stream during active sessions |
-| **Analytics** | `Analytics.jsx` | Participation metrics and summaries |
-| **Settings** | `Settings.jsx` | Profile management, extension tokens |
+| Module Group | Representative Files | Responsibility |
+|-------------|----------------------|----------------|
+| Routing shell | `frontend/src/App.jsx`, `frontend/src/main.jsx` | Public/protected routing and app bootstrap |
+| Contexts | `frontend/src/contexts/AuthContext.jsx`, `WebSocketContext.jsx` | Auth state and realtime state orchestration |
+| Pages | `frontend/src/pages/*` including `Home.jsx`, `LiveFeed.jsx`, `MyClasses.jsx`, `ClassDetailsPage.jsx`, `Sessions.jsx`, `SessionDetailPage.jsx`, `BundledSessionDetailPage.jsx`, `Analytics.jsx`, `Settings.jsx`, `ZoomIframeBridge.jsx`, `ZoomOAuthCallback.jsx` | Instructor operations, live views, analytics, Zoom bridge flow |
+| Services/components | `frontend/src/services/*`, `frontend/src/components/*` | API wrappers, Zoom bridge integration, view-layer composition |
 
 ---
 
 ## B.4 Browser Extension Architecture
 
-The browser extension is built using Chrome Extension Manifest V3 and consists of multiple interconnected components.
+The extension uses Manifest V3 service-worker architecture and targets Google Meet.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                       BROWSER EXTENSION ARCHITECTURE                             │
-└─────────────────────────────────────────────────────────────────────────────────┘
+### Runtime Structure
 
-    ┌─────────────────────────────────────────────────────────────────────────────┐
-    │                              CHROME BROWSER                                  │
-    │                                                                              │
-    │  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────────────┐ │
-    │  │      POPUP UI      │  │    OPTIONS PAGE    │  │    GOOGLE MEET TAB     │ │
-    │  │                    │  │                    │  │                        │ │
-    │  │  • Start Session   │  │  • Login/Connect   │  │  ┌──────────────────┐  │ │
-    │  │  • End Session     │  │  • Class Mapping   │  │  │  CONTENT SCRIPTS │  │ │
-    │  │  • View Status     │  │  • Settings        │  │  │                  │  │ │
-    │  │  • Quick Actions   │  │  • Debug Panel     │  │  │  • participant-  │  │ │
-    │  │                    │  │                    │  │  │    detector.js   │  │ │
-    │  └─────────┬──────────┘  └─────────┬──────────┘  │  │  • chat-         │  │ │
-    │            │                       │             │  │    monitor.js    │  │ │
-    │            │   chrome.runtime.     │             │  │  • reaction-     │  │ │
-    │            │   sendMessage()       │             │  │    detector.js   │  │ │
-    │            └───────────┬───────────┘             │  │  • hand-raise-   │  │ │
-    │                        │                         │  │    detector.js   │  │ │
-    │                        │                         │  │  • media-state-  │  │ │
-    │                        ▼                         │  │    detector.js   │  │ │
-    │           ┌────────────────────────┐             │  │                  │  │ │
-    │           │     SERVICE WORKER     │             │  └────────┬─────────┘  │ │
-    │           │                        │             │           │            │ │
-    │           │  ┌──────────────────┐  │             └───────────┼────────────┘ │
-    │           │  │ Session Manager  │  │                         │              │
-    │           │  └──────────────────┘  │◄────────────────────────┘              │
-    │           │  ┌──────────────────┐  │       Message Passing                  │
-    │           │  │ API Client       │  │                                        │
-    │           │  └──────────────────┘  │                                        │
-    │           │  ┌──────────────────┐  │                                        │
-    │           │  │ Socket Client    │  │                                        │
-    │           │  └──────────────────┘  │                                        │
-    │           │  ┌──────────────────┐  │                                        │
-    │           │  │ Sync Queue       │  │                                        │
-    │           │  └──────────────────┘  │                                        │
-    │           │  ┌──────────────────┐  │                                        │
-    │           │  │ IndexedDB (idb)  │  │                                        │
-    │           │  └──────────────────┘  │                                        │
-    │           │                        │                                        │
-    │           └───────────┬────────────┘                                        │
-    │                       │                                                     │
-    └───────────────────────┼─────────────────────────────────────────────────────┘
-                            │
-                            │ HTTP + X-Extension-Token
-                            ▼
-                     ┌──────────────┐
-                     │   Backend    │
-                     │   Server     │
-                     └──────────────┘
-```
+1. Content modules detect and normalize meeting events.
+2. Events are passed to the background runtime.
+3. Background runtime writes immediately when possible and queues on failure.
+4. Queued events are retried and synchronized to backend APIs.
 
-**Communication Flow:**
+### Manifest Scope
 
-1. **Content Scripts → Service Worker**: Content scripts detect DOM events and send messages via `chrome.runtime.sendMessage()`
-2. **Service Worker → Backend**: Service worker batches events and sends HTTP requests with `X-Extension-Token` header
-3. **Service Worker → Popup/Options**: State updates are shared via Chrome storage and message passing
-4. **Offline Handling**: Failed requests are queued in IndexedDB and retried when connectivity is restored
+- Content script match pattern: `https://meet.google.com/*-*-*`
+- Web-accessible resources match pattern: `https://meet.google.com/*`
+- No Zoom meeting content script path in extension implementation.
 
-**Detection Methods:**
+### Detection Coverage
 
-| Event Type | Detection Source | Method |
-|------------|------------------|--------|
-| Participant Join/Leave | People Panel | MutationObserver on participant list |
-| Chat Messages | Chat Panel | MutationObserver on message container |
-| Reactions | Toast Notifications | MutationObserver on toast container |
-| Hand Raises | People Panel "Raised hands" section | MutationObserver |
-| Microphone Unmute | People Panel button states | Attribute observation |
+| Event Type | Detection Path |
+|-----------|----------------|
+| Join/Leave | Participant + people panel detectors |
+| Chat | Chat detector |
+| Reactions | Reaction detector |
+| Hand raises | Raised-hand detector |
+| Mic toggle | Mic-toggle detector |
+| Meeting exit | Meeting-exit detector |
 
 ---
 
-## B.5 API Structure and Endpoints
+## B.5 Zoom Bridge Architecture
 
-The backend exposes a RESTful API organized by resource. All protected endpoints require authentication via JWT Bearer token (dashboard) or X-Extension-Token header (extension).
+The Zoom bridge provides an alternative pathway to Google Meet integration via Zoom Apps SDK. However, it operates under fundamental constraints that differ substantially from the extension model.
 
-### B.5.1 Authentication Endpoints
+### Runtime Structure
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | Create new user account |
-| POST | `/api/auth/login` | Authenticate and receive tokens |
-| POST | `/api/auth/refresh` | Refresh access token |
-| POST | `/api/auth/logout` | Invalidate refresh token |
-| POST | `/api/auth/forgot-password` | Request password reset email |
-| POST | `/api/auth/reset-password` | Reset password with token |
-| GET | `/api/auth/profile` | Get current user profile |
-| PUT | `/api/auth/profile` | Update user profile |
+1. Web application routes handle Zoom OAuth flow and session initialization.
+2. Zoom Apps SDK client loads an embedded iframe within the Zoom meeting context.
+3. Meeting data is retrieved via @zoom/appssdk SDK methods and REST API calls.
+4. Data is transmitted to the backend via standard REST endpoints (authenticated as instructor).
+5. Realtime updates propagate through Socket.io like other clients.
 
-### B.5.2 Extension Token Endpoints
+### Zoom Apps SDK Scope
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/extension-tokens/generate` | Generate new extension token |
-| GET | `/api/extension-tokens` | List user's extension tokens |
-| DELETE | `/api/extension-tokens/:id` | Revoke specific token |
-| DELETE | `/api/extension-tokens` | Revoke all tokens |
+- Web-accessible URL pattern: `frontend/src/pages/ZoomIframeBridge.jsx` serving embedded iframe content.
+- SDK version: `@zoom/appssdk@^0.16.37`.
+- OAuth flow: `ZoomOAuthCallback.jsx` handles Zoom OAuth redirect.
+- Participant data source: Zoom API calls through SDK context; no direct DOM access to meeting client.
 
-### B.5.3 Class Management Endpoints
+### Data Access Capabilities
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/classes` | List instructor's classes |
-| POST | `/api/classes` | Create new class |
-| GET | `/api/classes/:id` | Get class details |
-| PUT | `/api/classes/:id` | Update class |
-| DELETE | `/api/classes/:id` | Delete class |
-| PUT | `/api/classes/:id/archive` | Archive/activate class |
-| GET | `/api/classes/:id/stats` | Get class statistics |
-| GET | `/api/classes/:id/links` | Get meeting links |
-| POST | `/api/classes/:id/links` | Add meeting link |
-| PUT | `/api/classes/:id/links/:linkId` | Update meeting link |
-| DELETE | `/api/classes/:id/links/:linkId` | Delete meeting link |
+The Zoom Apps SDK provides reliable event listeners for core participation signals within security boundaries. The following table compares capture methods:
 
-### B.5.4 Student Management Endpoints
+| Data Type | Extension (GMeet) | Zoom Apps SDK | Implementation Note |
+|-----------|-------------------|---------------|-------------------|
+| Join/Leave events | ✅ DOM detectors (MutationObserver) | ✅ **Event listeners** (`onParticipantJoined`, `onParticipantLeft`) | SDK events are reliable and low-latency |
+| Attendance intervals | ✅ Precise with detector coverage | ✅ Derived from join/leave events | Full interval tracking available |
+| Hand raises | ✅ DOM-based detection | ✅ **Feedback events** (`onFeedbackReaction` with hand signal inference) | SDK reliably detects raise/lower through feedback pipeline |
+| Reactions | ✅ Chat/reaction panel detection | ✅ **Reaction events** (`onReaction` with emoji/unicode/name) | SDK provides full reaction metadata |
+| Chat content/participation | ✅ Chat panel text capture | ❌ **Not accessible** | Zoom Apps SDK restricts direct chat content access for privacy |
+| Chat activity detection (no content) | ✅ Chat panel mutations | ❌ **Not accessible** | SDK does not expose chat event stream or activity indicators |
+| Mic toggles | ✅ Icon state detection | ❌ **Not accessible** | Zoom Apps SDK does not expose real-time mic-state API |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/classes/:id/students` | List students in class |
-| POST | `/api/classes/:id/students` | Add student |
-| POST | `/api/classes/:id/students/import` | CSV import |
-| PUT | `/api/students/:id` | Update student |
-| DELETE | `/api/students/:id` | Delete student |
-| POST | `/api/classes/:id/students/bulk-delete` | Bulk delete |
+### Architectural Alternatives and Trade-offs
 
-### B.5.5 Session Endpoints
+While the Zoom Apps SDK provides event listeners for joins/leaves, hand raises, and reactions, it does not expose chat content or real-time audio-state signals. This creates a capture gap compared to the Google Meet extension:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/sessions` | List sessions (with filters) |
-| POST | `/api/sessions/start` | Start new session |
-| POST | `/api/sessions/:id/end` | End session |
-| GET | `/api/sessions/:id` | Get session details |
-| GET | `/api/sessions/:id/attendance` | Get attendance records |
-| POST | `/api/sessions/:id/live-event` | Submit live event (extension) |
+**Limitations requiring architectural choices:**
 
-### B.5.6 Participation Endpoints
+1. **Chat content access** – Zoom Apps SDK does not expose message text (privacy-by-design restriction).
+2. **Chat activity detection** – No API available to detect "participant posted message" events without exposing content.
+3. **Real-time mic-state tracking** – Zoom Apps SDK does not provide `onMicToggle` or equivalent listener.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/participation/session/:id` | Get participation logs for session |
-| POST | `/api/participation` | Log participation event |
-| GET | `/api/participation/student/:id` | Get student's participation history |
+**Option 1: Zoom RTMS SDK (Premium Path)**
+- Use Zoom Real-Time Messaging SDK (premium tier, additional licensing required).
+- Provides access to participant metadata including real-time audio/video state and chat streams (if approved).
+- Cost: Premium subscription + compliance overhead.
+- Feasibility: Supported by Zoom but significantly increases deployment cost and requires additional permissions.
 
-### B.5.7 WebSocket Events
+**Option 2: Architectural Redesign (Server-Side Recording)**
+- Implement server-side meeting recording and signal extraction.
+- Extract mic/state from audio streams or request meeting server logs.
+- Cost: Significant infrastructure (video processing, storage, bandwidth, legal/privacy compliance).
+- Feasibility: Technically possible but prohibitive for single-instructor deployment.
 
-| Event | Direction | Description |
-|-------|-----------|-------------|
-| `join_instructor_room` | Client → Server | Subscribe to instructor updates |
-| `join_session` | Client → Server | Subscribe to session updates |
-| `leave_session` | Client → Server | Unsubscribe from session |
-| `session:started` | Server → Client | New session notification |
-| `session:ended` | Server → Client | Session ended notification |
-| `participation:logged` | Server → Client | New participation event |
-| `attendance:updated` | Server → Client | Attendance change |
-| `participant:joined` | Server → Client | New participant |
-| `participant:left` | Server → Client | Participant left |
+**Option 3: Hybrid Client Agent (Zoom Client Plugin)**
+- Extend Zoom client itself via native Zoom plugin APIs (if available).
+- Requires Zoom client installation and plugin certification.
+- Cost: Client-side distribution complexity; native development required.
+- Feasibility: Limited by Zoom's plugin ecosystem and approval process.
+
+**Current Implementation Choice**
+
+ENGAGIUM uses **Option 1 (Zoom Apps SDK without premium extensions)** for the following reasons:
+
+1. **Comprehensive event coverage**: The SDK provides event listeners for joins/leaves, hand raises, and reactions—capturing the majority of participation signals reliably.
+2. **Web-first deployment simplicity**: No additional licensing tier or client-side agent required; remains browser-based like the extension model.
+3. **Known and acceptable gaps**: Chat content and real-time mic-state are the primary gaps; these can be documented as limitation scope in research findings.
+4. **Future upgrade path**: Can migrate to RTMS SDK (premium) or hybrid agent if research scope expands to require chat/mic data in future work.
+
+### Capture Strategy for Zoom Bridge
+
+Participation signals are captured via the following mechanisms:
+
+- **Attendance**: Join/leave events from `onParticipantJoined` and `onParticipantLeft` listeners, with deduplication and lifecycle tracking.
+- **Hand raises**: Detected via `onFeedbackReaction` feedback signal analysis with hand-action inference (raised/lowered state).
+- **Reactions**: Captured via `onReaction` listener with full emoji/unicode/name metadata extraction.
+- **Session metadata**: Start/end timestamps and class/student linkage via standard APIs.
+
+**SDK Limitations (Not Captured)**:
+- **Chat content**: Text messages are not accessible via Zoom Apps SDK due to privacy restrictions.
+- **Chat activity indicators**: No API to detect chat participation without exposing message content.
+- **Mic toggles**: Real-time mic-state changes are not exposed by the Zoom Apps SDK.
+
+These limitations are documented as Known Limitations in Chapter 4 and represent the architectural boundary of the web-based Zoom Apps SDK model.
 
 ---
 
-## B.6 Database Schema (ERD + Table Definitions)
+## B.6 API Structure and Endpoints
 
-### B.6.1 Entity-Relationship Diagram
+ENGAGIUM exposes REST endpoints grouped by domain.
+
+### B.6.1 Authentication Endpoints
+
+| Method | Endpoint |
+|--------|----------|
+| POST | `/api/auth/register` |
+| POST | `/api/auth/login` |
+| POST | `/api/auth/refresh-token` |
+| POST | `/api/auth/forgot-password` |
+| POST | `/api/auth/reset-password` |
+| GET | `/api/auth/profile` |
+| PUT | `/api/auth/profile` |
+| PUT | `/api/auth/change-password` |
+| POST | `/api/auth/logout` |
+| POST | `/api/auth/generate-extension-token` |
+
+### B.6.2 Extension Token Endpoints
+
+| Method | Endpoint |
+|--------|----------|
+| POST | `/api/extension-tokens/generate` |
+| GET | `/api/extension-tokens` |
+| DELETE | `/api/extension-tokens/revoke-all` |
+| DELETE | `/api/extension-tokens/:id` |
+| POST | `/api/extension-tokens/verify` |
+
+### B.6.3 Class, Student, Tag, and Note Endpoints (Representative)
+
+| Method | Endpoint |
+|--------|----------|
+| GET | `/api/classes` |
+| GET | `/api/classes/stats` |
+| GET | `/api/classes/:id` |
+| POST | `/api/classes` |
+| PUT | `/api/classes/:id` |
+| DELETE | `/api/classes/:id` |
+| PATCH | `/api/classes/:id/status` |
+| PATCH | `/api/classes/:id/schedule` |
+| GET | `/api/classes/:id/links` |
+| POST | `/api/classes/:id/links` |
+| PUT | `/api/classes/:id/links/:linkId` |
+| DELETE | `/api/classes/:id/links/:linkId` |
+| GET | `/api/classes/:id/exemptions` |
+| POST | `/api/classes/:id/exemptions` |
+| DELETE | `/api/classes/:id/exemptions/:exemptionId` |
+| GET | `/api/classes/:classId/students` |
+| POST | `/api/classes/:classId/students` |
+| POST | `/api/classes/:classId/students/import` |
+| POST | `/api/classes/:classId/students/merge` |
+| GET | `/api/classes/:classId/tags` |
+| POST | `/api/classes/:classId/tags` |
+| GET | `/api/classes/:classId/students/:studentId/notes` |
+| POST | `/api/classes/:classId/students/:studentId/notes` |
+
+### B.6.4 Session Endpoints (Representative)
+
+| Method | Endpoint |
+|--------|----------|
+| GET | `/api/sessions` |
+| GET | `/api/sessions/stats` |
+| GET | `/api/sessions/date-range` |
+| GET | `/api/sessions/calendar` |
+| GET | `/api/sessions/active` |
+| POST | `/api/sessions/start-from-meeting` |
+| PUT | `/api/sessions/:id/end-with-timestamp` |
+| POST | `/api/sessions/live-event` |
+| POST | `/api/sessions/:id/attendance/join` |
+| POST | `/api/sessions/:id/attendance/leave` |
+| GET | `/api/sessions/:id/attendance/full` |
+| POST | `/api/sessions/:id/attendance/link` |
+| POST | `/api/sessions/:id/attendance/bulk` |
+| POST | `/api/sessions/:id/participation/bulk` |
+| POST | `/api/sessions/attendance/full/bulk` |
+
+### B.6.5 Participation Endpoints
+
+| Method | Endpoint |
+|--------|----------|
+| POST | `/api/participation/sessions/:sessionId/logs` |
+| POST | `/api/participation/sessions/:sessionId/logs/bulk` |
+| POST | `/api/participation/sessions/logs/bulk` |
+| GET | `/api/participation/sessions/:sessionId/logs` |
+| GET | `/api/participation/sessions/:sessionId/summary` |
+| GET | `/api/participation/sessions/:sessionId/recent` |
+
+### B.6.6 Realtime Events
+
+| Event | Direction |
+|-------|-----------|
+| `join_instructor_room` | Client -> Server |
+| `join:session` | Client -> Server |
+| `leave:session` | Client -> Server |
+| `participation:update` | Client -> Server |
+| `session:status` | Client -> Server |
+| `session:status_response` | Server -> Client |
+| `session:joined` | Server -> Client |
+| `session:left` | Server -> Client |
+| `user:joined` | Server -> Client |
+| `user:left` | Server -> Client |
+| `participation:live_update` | Server -> Client |
+
+---
+
+## B.7 Database Schema (ERD + Table Definitions)
+
+### B.7.1 Current Core Tables
+
+| Domain | Tables |
+|-------|--------|
+| Identity/Auth | `users`, `refresh_token_sessions`, `extension_tokens` |
+| Class/Roster | `classes`, `students`, `session_links`, `exempted_accounts` |
+| Session/Attendance | `sessions`, `attendance_records`, `attendance_intervals` |
+| Participation | `participation_logs` |
+| Student metadata | `student_tags`, `student_tag_assignments`, `student_notes` |
+
+### B.7.2 Relational Structure (Simplified)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         ENGAGIUM DATABASE ERD (SIMPLIFIED)                       │
-└─────────────────────────────────────────────────────────────────────────────────┘
-
-    ┌─────────────┐       1:N        ┌─────────────┐       1:N        ┌─────────────┐
-    │    USERS    │─────────────────►│   CLASSES   │─────────────────►│  STUDENTS   │
-    │             │                  │             │                  │             │
-    │ id (PK)     │                  │ id (PK)     │                  │ id (PK)     │
-    │ email       │                  │ instructor_ │                  │ class_id(FK)│
-    │ password    │                  │   id (FK)   │                  │ full_name   │
-    │ first_name  │                  │ name        │                  │ student_id  │
-    │ last_name   │                  │ subject     │                  └──────┬──────┘
-    │ role        │                  │ section     │                         │
-    └─────────────┘                  │ schedule    │                         │
-                                     └──────┬──────┘                         │
-                                            │                                │
-                                       1:N  │                                │
-                                            ▼                                │
-                                     ┌─────────────┐                         │
-                                     │  SESSIONS   │                         │
-                                     │             │                         │
-                                     │ id (PK)     │                         │
-                                     │ class_id(FK)│                         │
-                                     │ title       │                         │
-                                     │ status      │                         │
-                                     │ started_at  │                         │
-                                     │ ended_at    │                         │
-                                     └──────┬──────┘                         │
-                                            │                                │
-                          ┌─────────────────┼─────────────────┐              │
-                          │                 │                 │              │
-                     1:N  ▼            1:N  ▼            1:N  ▼              │
-               ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐│
-               │   ATTENDANCE_    │ │   ATTENDANCE_    │ │  PARTICIPATION_  ││
-               │     RECORDS      │ │    INTERVALS     │ │      LOGS        ││
-               │                  │ │                  │ │                  ││
-               │ id (PK)          │ │ id (PK)          │ │ id (PK)          ││
-               │ session_id (FK)  │ │ session_id (FK)  │ │ session_id (FK)  ││
-               │ student_id (FK)◄─┼─│ student_id (FK)  │ │ student_id (FK)◄─┼┘
-               │ participant_name │ │ participant_name │ │ interaction_type │
-               │ status           │ │ joined_at        │ │ interaction_value│
-               │ total_duration   │ │ left_at          │ │ timestamp        │
-               └──────────────────┘ └──────────────────┘ └──────────────────┘
+users (1) -> (N) classes
+classes (1) -> (N) students
+classes (1) -> (N) sessions
+classes (1) -> (N) session_links
+classes (1) -> (N) exempted_accounts
+classes (1) -> (N) student_tags
+students (N) <-> (N) student_tags via student_tag_assignments
+students (1) -> (N) student_notes
+sessions (1) -> (N) attendance_records
+sessions (1) -> (N) attendance_intervals
+sessions (1) -> (N) participation_logs
+students (0..1) -> (N) attendance_records / attendance_intervals / participation_logs
 ```
 
-### B.6.2 Core Table Definitions
+### B.7.3 Enumerations
 
-| Table | Purpose | Key Columns |
-|-------|---------|-------------|
-| **users** | Instructor/admin accounts | id, email, password_hash, first_name, last_name, role, refresh_token |
-| **classes** | Course/class information | id, instructor_id, name, subject, section, schedule (JSONB), status |
-| **students** | Enrolled students per class | id, class_id, full_name, student_id |
-| **sessions** | Class meeting sessions | id, class_id, title, meeting_link, status, started_at, ended_at |
-| **attendance_records** | Final attendance per participant | id, session_id, student_id, participant_name, status, total_duration_minutes |
-| **attendance_intervals** | Individual join/leave cycles | id, session_id, student_id, participant_name, joined_at, left_at |
-| **participation_logs** | Interaction events | id, session_id, student_id, interaction_type, interaction_value, timestamp |
-| **session_links** | Meeting links per class | id, class_id, link_url, link_type, is_primary |
-| **exempted_accounts** | Accounts excluded from tracking | id, class_id, account_identifier, reason |
-| **student_tags** | Custom tags for students | id, class_id, tag_name, tag_color |
-| **student_tag_assignments** | Tag-student relationships | id, student_id, tag_id |
-| **student_notes** | Notes per student | id, student_id, note_text, created_by, created_at |
-| **notifications** | System notifications | id, user_id, type, title, message, read |
-| **extension_tokens** | Extension authentication tokens | id, user_id, token_hash, name, last_used_at |
+| Enum | Values |
+|------|--------|
+| `user_role` | `instructor`, `admin` |
+| `session_status` | `scheduled`, `active`, `ended` |
+| `interaction_type` | `manual_entry`, `chat`, `reaction`, `mic_toggle`, `camera_toggle`, `hand_raise`, `join`, `leave` |
 
-### B.6.3 Custom ENUM Types
+### B.7.4 Key Schema Rules
 
-| Type | Values | Purpose |
-|------|--------|---------|
-| `user_role` | 'instructor', 'admin' | User account roles |
-| `session_status` | 'scheduled', 'active', 'ended' | Session lifecycle states |
-| `interaction_type` | 'chat', 'reaction', 'mic_toggle', 'hand_raise', 'manual_entry' | Participation event types |
+- Student records support soft delete via `students.deleted_at`.
+- Attendance duration is interval-derived using `attendance_intervals` and reflected in `attendance_records`.
+- Participation can be stored even when student linkage is unresolved (`student_id` nullable in logs/attendance records).
+- Token tables support revocation and expiry semantics.
 
 ---
 
-## B.7 Technology Stack Summary
+## B.8 Technology Stack Summary
 
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **Frontend** | React 18 | Component-based UI |
-| | Vite | Fast build tool and dev server |
-| | Tailwind CSS | Utility-first styling |
-| | React Query | Server state management |
-| | React Hook Form | Form handling and validation |
-| | React Router | Client-side routing |
-| | Socket.io Client | Real-time updates |
-| **Backend** | Node.js | JavaScript runtime |
-| | Express.js | Web framework |
-| | Socket.io | WebSocket server |
-| | JWT (jsonwebtoken) | Token-based authentication |
-| | bcrypt | Password hashing |
-| | Nodemailer | Email sending |
-| | pg (node-postgres) | PostgreSQL client |
-| **Database** | PostgreSQL | Relational database |
-| | UUID | Primary key generation |
-| | JSONB | Flexible JSON storage |
-| | ENUM | Type-safe status fields |
-| **Extension** | Chrome Extension (Manifest V3) | Browser extension platform |
-| | Service Worker | Background script |
-| | IndexedDB (idb) | Local data persistence |
-| | Chrome Storage API | Settings and token storage |
-| | MutationObserver | DOM change detection |
+### B.8.1 Backend
+
+| Technology | Version |
+|-----------|---------|
+| Node.js | >=20.19.0 |
+| express | 4.22.1 |
+| socket.io | ^4.8.3 |
+| jsonwebtoken | ^9.0.3 |
+| bcrypt (bcryptjs alias) | npm:bcryptjs@^2.4.3 |
+| helmet | ^6.0.0 |
+| express-rate-limit | ^6.7.0 |
+| pg | ^8.8.0 |
+| multer | ^2.1.1 |
+| csv-parser | ^3.0.0 |
+| nodemailer | ^8.0.5 |
+
+### B.8.2 Frontend
+
+| Technology | Version |
+|-----------|---------|
+| react / react-dom | ^18.2.0 |
+| vite | ^7.3.2 |
+| react-router-dom | ^6.30.3 |
+| @tanstack/react-query | ^4.24.0 |
+| axios | ^1.15.0 |
+| socket.io-client | ^4.8.1 |
+| recharts | ^3.5.1 |
+| @zoom/appssdk | ^0.16.37 |
+
+### B.8.3 Extension
+
+| Technology | Version |
+|-----------|---------|
+| Manifest | v3 |
+| react / react-dom | ^18.2.0 |
+| vite | ^7.3.2 |
+| idb | ^7.1.1 |
+| date-fns | ^2.30.0 |
+| uuid | ^9.0.0 |
 
 ---
 
-## B.8 Development Progress (Agile Iterations)
+## B.9 Development Progress (Implementation Status)
 
-ENGAGIUM was developed using an Agile SDLC methodology with iterative development cycles.
+Current implementation status reflects a deployed architecture direction rather than an early prototype state.
 
-| Iteration | Focus | Key Deliverables |
-|-----------|-------|------------------|
-| **1. Foundation** | Project setup, database, authentication | PostgreSQL schema, Express server, JWT auth, user registration/login |
-| **2. Core CRUD** | Class and student management | Class CRUD, student CRUD, CSV import, React dashboard setup |
-| **3. Extension Core** | Browser extension foundation | Manifest V3 structure, meeting detection, participant tracking, extension token auth |
-| **4. Attendance** | Attendance tracking system | Two-table attendance model (records + intervals), duration calculation, student matching |
-| **5. Real-Time** | WebSocket integration | Socket.io server, room-based broadcasting, live feed page, real-time dashboard updates |
-| **6. Participation** | Participation event detection | Chat monitor, reaction detector, hand raise detector, mic toggle detector, deduplication |
-| **7. Polish** | Refinement and documentation | Error handling, UX improvements, technical documentation, thesis documentation |
+### Completed Implementation Areas
 
-**Development Status Summary:**
+- Authentication and profile flows for dashboard users.
+- Extension token lifecycle management.
+- Comprehensive class/student/tag/note/link/exemption workflows.
+- Meeting-driven session lifecycle and attendance interval tracking.
+- Participation logging, summaries, and recent activity retrieval.
+- Realtime dashboard synchronization via Socket.io rooms/events.
+- Zoom bridge routing and service integration in frontend.
 
-| Category | Count | Status |
-|----------|-------|--------|
-| Completed Components | 15 | Production-ready |
-| Under Development | 4 | Code exists, needs field validation |
-| Planned Enhancements | 8 | Future roadmap |
+### Validation Focus Areas
 
-**Completed Features:**
-- Authentication & Authorization (JWT + Extension Tokens)
-- Class Management (CRUD, meeting links, exempted accounts)
-- Student Management (CRUD, CSV import, tags, notes)
-- Session Lifecycle (start, end, status tracking)
-- Attendance Tracking (join/leave, intervals, duration calculation)
-- Real-Time Communication (WebSocket broadcasting)
-- Browser Extension Core (Manifest V3, all detectors)
-- Web Dashboard (all pages, responsive design)
+- Ongoing detector robustness against Google Meet DOM changes.
+- End-to-end regression coverage for meeting-side ingestion and realtime updates.
+- Continued documentation synchronization with route/schema/module changes.
 
-**Under Validation:**
-- Chat message detection accuracy
-- Reaction detection completeness
-- Hand raise detection reliability
-- Microphone toggle detection accuracy
+### Architectural Direction Statement
+
+ENGAGIUM has moved beyond thesis-era assumptions of a single integration path. The present system uses a split integration model:
+
+- Google Meet via extension runtime.
+- Zoom via web bridge and Zoom Apps SDK services.
+- Shared backend APIs and shared relational schema for both pathways.
+

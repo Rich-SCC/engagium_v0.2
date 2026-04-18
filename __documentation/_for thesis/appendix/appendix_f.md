@@ -1,7 +1,7 @@
 # APPENDIX F  
-SURVEY INSTRUMENT
+SURVEY INSTRUMENTS
 
-This appendix contains the survey instruments used to gather data for the ENGAGIUM study. The surveys are divided into pre-development (baseline) and post-development (evaluation) phases.
+This appendix presents the survey instruments used in the ENGAGIUM study. The instruments are organized into pre-development (baseline) and post-development (evaluation) phases.
 
 ---
 
@@ -11,13 +11,13 @@ This appendix contains the survey instruments used to gather data for the ENGAGI
 
 **Target Respondents:** Professors at St. Clare College of Caloocan
 
-**Purpose:** To gather baseline data validating the problem, feasibility, and expected usability of ENGAGIUM prior to system development.
+**Purpose:** To establish baseline data on participation-tracking challenges, technology acceptance, feasibility, and usability expectations prior to system development.
 
 ---
 
 ### SECTION A — Respondent Profile (Demographic Information)
 
-*(Multiple choice / short answer)*
+*(Multiple-choice and short-answer items)*
 
 1. **Department**
    - SHS
@@ -56,7 +56,7 @@ This appendix contains the survey instruments used to gather data for the ENGAGI
 
 ### SECTION 1 — Problem Validation: Current Practices and Difficulties
 
-*(5-Point Likert Scale: 1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree)*
+*(5-point Likert scale: 1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree)*
 
 | Code | Item |
 |------|------|
@@ -75,7 +75,7 @@ This appendix contains the survey instruments used to gather data for the ENGAGI
 
 ### SECTION 2 — Technology Acceptance & Feasibility (TAM-Based)
 
-*(5-Point Likert Scale: 1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree)*
+*(5-point Likert scale: 1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree)*
 
 #### 2.1 Perceived Usefulness (PU)
 
@@ -121,7 +121,7 @@ This appendix contains the survey instruments used to gather data for the ENGAGI
 
 ### SECTION 3 — Usability Expectations for ENGAGIUM
 
-*(5-Point Likert Scale: 1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree)*
+*(5-point Likert scale: 1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree)*
 
 #### 3.1 Dashboard & Interface Expectations (DIE)
 
@@ -157,7 +157,7 @@ This appendix contains the survey instruments used to gather data for the ENGAGI
 
 ### SECTION 4 — Data Privacy and Ethical Expectations (DP)
 
-*(5-Point Likert Scale: 1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree)*
+*(5-point Likert scale: 1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree)*
 
 | Code | Item |
 |------|------|
@@ -211,9 +211,9 @@ This appendix contains the survey instruments used to gather data for the ENGAGI
 
 ---
 
-## F.2 Item Summary by Construct
+## F.2 Pre-Development Item Summary by Construct
 
-The following table summarizes all Likert-scale items organized by construct:
+The following table summarizes the pre-development Likert-scale items organized by construct:
 
 | Construct | Code | # Items | Scale |
 |-----------|------|---------|-------|
@@ -238,27 +238,160 @@ The following table summarizes all Likert-scale items organized by construct:
 
 ## F.3 Post-Development Survey Instrument
 
-> **[PLACEHOLDER]**
->
-> This section will contain the post-development evaluation instruments to be administered after system implementation and testing. The following instruments are planned:
->
-> **F.3.1 System Usability Scale (SUS)**
-> - 10-item standardized usability questionnaire
-> - Adapted from Brooke (1996)
->
-> **F.3.2 Post-Deployment TAM Evaluation**
-> - Perceived Usefulness (actual use)
-> - Perceived Ease of Use (actual use)
-> - Behavioral Intention (continued use)
->
-> **F.3.3 Accuracy Feedback Questionnaire**
-> - User perception of detection accuracy
-> - False positive/negative observations
-> - Feature reliability ratings
->
-> **F.3.4 Open-Ended Feedback**
-> - Strengths observed during use
-> - Areas for improvement
-> - Feature requests
->
-> *To be developed and administered during the closed beta testing phase.*
+**Title:** ENGAGIUM Post-Development Survey Questionnaire (Closed Beta Testing)
+
+**Target Respondents:** Professors at St. Clare College of Caloocan who participated in the closed beta testing
+
+**Purpose:** To evaluate the usability, effectiveness, performance, and overall user experience of ENGAGIUM after prototype testing.
+
+---
+
+### SECTION 1 — Usage Context
+
+1. **How many sessions did you test using ENGAGIUM?** *(Multiple-choice item)*
+   - 1–3
+   - 4–6
+   - 7–9
+   - 10 or more
+
+2. **Which meeting platform did you use with ENGAGIUM?** *(Checkbox item)*
+   - Google Meet
+   - Zoom
+
+---
+
+### SECTION 2 — System Usability Scale (SUS)
+
+**Instructions:** Please indicate your level of agreement with the following statements.
+
+**Response format for all items:** 5-point Likert scale (1-5)
+
+Scale anchors:
+- 1 = Strongly Disagree
+- 5 = Strongly Agree
+
+| Code | SUS Item |
+|------|----------|
+| SUS1 | I think that I would like to use this system frequently. |
+| SUS2 | I found the system unnecessarily complex. |
+| SUS3 | I thought the system was easy to use. |
+| SUS4 | I think that I would need technical support to use this system. |
+| SUS5 | I found the various functions in this system were well integrated. |
+| SUS6 | I thought there was too much inconsistency in this system. |
+| SUS7 | I would imagine that most people would learn to use this system very quickly. |
+| SUS8 | I found the system very cumbersome to use. |
+| SUS9 | I felt very confident using the system. |
+| SUS10 | I needed to learn a lot of things before I could get going with this system. |
+
+---
+
+### SECTION 3 — Perceived Effectiveness
+
+**Response format:** 5-point Likert scale presented as a multiple-choice grid (one response per item)
+
+**Columns (all rows):**
+- Strongly Disagree
+- Disagree
+- Neutral
+- Agree
+- Strongly Agree
+
+| Code | Item |
+|------|----------|
+| EFF1 | ENGAGIUM helped me track student participation more accurately. |
+| EFF2 | The system reduced my need for manual monitoring. |
+| EFF3 | The system helped me recognize different forms of participation (chat, reactions, etc.). |
+| EFF4 | The participation data generated by the system is useful for grading. |
+| EFF5 | ENGAGIUM improved fairness in evaluating participation. |
+
+---
+
+### SECTION 4 — System Performance & Reliability
+
+**Response format:** 5-point Likert scale presented as a multiple-choice grid (one response per item)
+
+**Columns (all rows):**
+- Strongly Disagree
+- Disagree
+- Neutral
+- Agree
+- Strongly Agree
+
+| Code | Item |
+|------|----------|
+| PR1 | The system responds quickly during use. |
+| PR2 | Participation events are recorded correctly. |
+| PR3 | Real-time updates are accurate. |
+| PR4 | The system performs consistently without errors. |
+| PR5 | I trust the data generated by the system. |
+
+---
+
+### SECTION 5 — Interface & Dashboard Evaluation
+
+**Response format:** 5-point Likert scale presented as a multiple-choice grid (one response per item)
+
+**Columns (all rows):**
+- Strongly Disagree
+- Disagree
+- Neutral
+- Agree
+- Strongly Agree
+
+| Code | Item |
+|------|----------|
+| UI1 | The dashboard is easy to understand. |
+| UI2 | The data visualization (graphs/charts) is helpful. |
+| UI3 | The system provides clear participation summaries. |
+| UI4 | Reports are easy to interpret. |
+| UI5 | Navigation within the system is intuitive. |
+
+---
+
+### SECTION 6 — Overall Satisfaction & Adoption
+
+**Response format:** 5-point Likert scale presented as a multiple-choice grid (one response per item)
+
+**Columns (all rows):**
+- Strongly Disagree
+- Disagree
+- Neutral
+- Agree
+- Strongly Agree
+
+| Code | Item |
+|------|----------|
+| SAT1 | I am satisfied with the ENGAGIUM system. |
+| SAT2 | I would use ENGAGIUM in my actual classes. |
+| SAT3 | I would recommend ENGAGIUM to other instructors. |
+| SAT4 | ENGAGIUM is a valuable tool for online teaching. |
+
+---
+
+### SECTION 7 — Open-Ended Feedback
+
+1. **What did you like most about ENGAGIUM?** *(Paragraph)*
+
+2. **What problems or issues did you encounter?** *(Paragraph)*
+
+3. **What improvements would you suggest?** *(Paragraph)*
+
+---
+
+## F.4 Post-Development Item Summary by Construct
+
+The following table summarizes the post-development survey items organized by construct:
+
+| Construct | Code | # Items | Scale |
+|-----------|------|---------|-------|
+| **System Usability Scale** | SUS | 10 | 5-point Likert scale |
+| **Perceived Effectiveness** | EFF | 5 | 5-point Likert scale |
+| **System Performance & Reliability** | PR | 5 | 5-point Likert scale |
+| **Interface & Dashboard Evaluation** | UI | 5 | 5-point Likert scale |
+| **Overall Satisfaction & Adoption** | SAT | 4 | 5-point Likert scale |
+| **Total Likert Items** | — | **29** | — |
+
+**Notes on Item Development:**
+- The SUS items are adapted from Brooke (1996)
+- Effectiveness, performance, interface, and satisfaction items are researcher-made based on the post-development evaluation objectives
+- All evaluative items use a 5-point Likert scale

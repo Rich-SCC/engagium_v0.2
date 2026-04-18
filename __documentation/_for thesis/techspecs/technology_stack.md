@@ -1,253 +1,101 @@
 # Technology Stack
-## Engagium System - Chapter 3.3.4 Reference
+## Engagium System - Current Stack and Versions
 
-This document details the complete technology stack used in the Engagium system, organized by architectural layer.
-
----
-
-## Overview
-
-| Layer | Primary Technologies |
-|-------|---------------------|
-| **Frontend** | React 18.2, Vite 6.1, Tailwind CSS 3.3 |
-| **Backend** | Node.js, Express 4.18, Socket.io 4.6 |
-| **Database** | PostgreSQL with pg 8.8 driver |
-| **Extension** | Chrome Manifest V3, React 18.2, Vite 7.2 |
+**Last Updated:** April 18, 2026  
+**Source of truth:** `backend/package.json`, `frontend/package.json`, `_extension/package.json`
 
 ---
 
-## 1. Backend Technologies
+## 1. Backend Stack
 
-The backend serves as the central API and real-time communication hub.
-
-### Core Runtime & Framework
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **Node.js** | 18.x+ | JavaScript runtime environment |
-| **Express.js** | 4.18.0 | REST API web framework |
-| **Socket.io** | 4.6.0 | Real-time bidirectional WebSocket communication |
-
-### Security & Authentication
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **JSON Web Tokens (jsonwebtoken)** | 9.0.0 | Token-based authentication (access + refresh tokens) |
-| **bcrypt** | 5.1.0 | Password hashing with salt rounds |
-| **Helmet** | 6.0.0 | HTTP security headers (XSS, CSRF protection) |
-| **express-rate-limit** | 6.7.0 | API rate limiting to prevent abuse |
-| **CORS** | 2.8.5 | Cross-Origin Resource Sharing configuration |
-
-### Database & Data Handling
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **pg (node-postgres)** | 8.8.0 | PostgreSQL database driver |
-| **Multer** | 2.0.2 | Multipart form data handling (CSV uploads) |
-| **csv-parser** | 3.0.0 | CSV file parsing for student imports |
-| **uuid** | 9.0.0 | UUID generation for database records |
-
-### Utilities
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **Nodemailer** | 7.0.10 | Email sending (password reset functionality) |
-| **dotenv** | 16.0.0 | Environment variable management |
-| **nodemon** | 3.0.0 | Development auto-restart (dev dependency) |
+| Layer | Technology | Version (Current) | Notes |
+|------|------------|-------------------|------|
+| Runtime | Node.js | >=20.19.0 | Enforced in engines |
+| HTTP API | express | 4.22.1 | Core REST framework |
+| Realtime | socket.io | ^4.8.3 | Live dashboard updates |
+| Database driver | pg | ^8.8.0 | PostgreSQL access |
+| Auth | jsonwebtoken | ^9.0.3 | Access/refresh JWT flows |
+| Password hashing | bcryptjs via alias | npm:bcryptjs@^2.4.3 | Installed as `bcrypt` alias |
+| Security | helmet | ^6.0.0 | Security headers |
+| Rate limiting | express-rate-limit | ^6.7.0 | `/api/*` limiter |
+| Uploads | multer | ^2.1.1 | CSV ingestion |
+| CSV parser | csv-parser | ^3.0.0 | Student import parsing |
+| Email | nodemailer | ^8.0.5 | Password reset emails |
+| Env config | dotenv | ^16.0.0 | Runtime configuration |
+| IDs | uuid | ^9.0.0 | UUID generation |
 
 ---
 
-## 2. Frontend Technologies
+## 2. Frontend Stack
 
-The frontend provides the instructor dashboard and analytics interface.
-
-### Core Framework
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **React** | 18.2.0 | Component-based UI library |
-| **React DOM** | 18.2.0 | React rendering for web browsers |
-| **Vite** | 6.1.0 | Fast build tool and development server |
-
-### Routing & State Management
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **React Router DOM** | 6.8.0 | Client-side routing and navigation |
-| **React Context API** | (built-in) | Global state management (Auth, WebSocket) |
-| **TanStack React Query** | 4.24.0 | Server state management, caching, synchronization |
-
-### Forms & HTTP
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **React Hook Form** | 7.43.0 | Performant form handling with validation |
-| **Axios** | 1.3.0 | HTTP client for API requests |
-| **Socket.io Client** | 4.8.1 | WebSocket client for real-time updates |
-
-### Styling & UI
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **Tailwind CSS** | 3.3.0 | Utility-first CSS framework |
-| **PostCSS** | 8.4.24 | CSS transformation and processing |
-| **Autoprefixer** | 10.4.14 | Automatic vendor prefixing |
-| **Heroicons React** | 2.0.18 | SVG icon library |
+| Layer | Technology | Version (Current) | Notes |
+|------|------------|-------------------|------|
+| UI framework | react | ^18.2.0 | Dashboard app |
+| Renderer | react-dom | ^18.2.0 | Browser rendering |
+| Build tool | vite | ^7.3.2 | Dev/build |
+| Router | react-router-dom | ^6.30.3 | Public + protected routes |
+| Data fetching | @tanstack/react-query | ^4.24.0 | Server-state caching |
+| Forms | react-hook-form | ^7.43.0 | Form state and validation |
+| HTTP client | axios | ^1.15.0 | API requests |
+| Realtime client | socket.io-client | ^4.8.1 | Live updates |
+| Charts | recharts | ^3.5.1 | Analytics visualizations |
+| Icons | @heroicons/react | ^2.0.18 | UI iconography |
+| Zoom SDK | @zoom/appssdk | ^0.16.37 | Zoom bridge integration |
+| Reports | jspdf / jspdf-autotable | ^4.2.1 / ^5.0.7 | PDF export features |
 
 ---
 
-## 3. Browser Extension Technologies
+## 3. Extension Stack
 
-The Chrome extension interfaces with Google Meet for participation tracking.
-
-### Core Framework
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **Chrome Extension Manifest V3** | 3 | Latest Chrome extension platform |
-| **React** | 18.2.0 | UI for popup and options pages |
-| **React DOM** | 18.2.0 | React rendering |
-| **Vite** | 7.2.4 | Extension bundling and build |
-
-### Data & Storage
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **idb (IndexedDB)** | 7.1.1 | Local offline data persistence |
-| **uuid** | 9.0.0 | Unique identifier generation |
-| **Chrome Storage API** | (built-in) | Extension settings and token storage |
-
-### Utilities
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **date-fns** | 2.30.0 | Date formatting and manipulation |
-| **@types/chrome** | 0.0.254 | TypeScript definitions for Chrome APIs |
-
-### Extension Components
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **Service Worker** | Manifest V3 | Background script for session coordination |
-| **Content Scripts** | Vanilla JS + Modules | Google Meet DOM interaction |
-| **Popup** | React | Quick session control interface |
-| **Options Page** | React | Authentication and class mapping |
+| Layer | Technology | Version (Current) | Notes |
+|------|------------|-------------------|------|
+| Platform | Chrome Extension Manifest | v3 | Service worker model |
+| UI runtime | react / react-dom | ^18.2.0 | Popup and options pages |
+| Build tool | vite | ^7.3.2 | Extension bundling |
+| Offline store | idb | ^7.1.1 | IndexedDB wrapper |
+| Date utils | date-fns | ^2.30.0 | Date formatting |
+| IDs | uuid | ^9.0.0 | Local identifiers |
+| Chrome typings | @types/chrome | ^0.0.254 | Tooling support |
 
 ---
 
-## 4. Database Technologies
+## 4. Database Stack
 
-### Database Engine
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **PostgreSQL** | 14+ | Relational database management system |
-| **uuid-ossp** | (extension) | Native UUID generation in PostgreSQL |
-
-### Database Features Used
-
-| Feature | Purpose |
-|---------|---------|
-| **ENUM Types** | Type-safe status fields (user_role, session_status, interaction_type) |
-| **JSONB** | Flexible storage for schedules and additional data |
-| **Foreign Keys** | Referential integrity with CASCADE deletes |
-| **Triggers** | Automatic `updated_at` timestamp management |
-| **Indexes** | Query performance optimization |
-| **Unique Constraints** | Data integrity (e.g., one attendance record per participant per session) |
+| Item | Technology |
+|------|------------|
+| Database engine | PostgreSQL |
+| UUID support | `uuid-ossp` extension |
+| Schema style | Migration-safe SQL with `IF NOT EXISTS` |
+| Data integrity | Foreign keys, unique constraints, enum types |
+| Performance | Indexed lookup fields and trigger-based `updated_at` maintenance |
 
 ---
 
-## 5. Development Tools
+## 5. Tooling and Operations
 
-### Version Control & Collaboration
-
-| Tool | Purpose |
-|------|---------|
-| **Git** | Version control system |
-| **GitHub** | Repository hosting and collaboration |
-
-### Development Environment
-
-| Tool | Purpose |
-|------|---------|
-| **Visual Studio Code** | Primary code editor |
-| **Node Package Manager (npm)** | Package management |
-| **Chrome DevTools** | Extension debugging |
-
-### API Testing
-
-| Tool | Purpose |
-|------|---------|
-| **Postman / Thunder Client** | API endpoint testing |
-| **Browser DevTools** | Network request inspection |
+| Tooling | Current Use |
+|--------|-------------|
+| Docker Compose | Local and production service orchestration |
+| VS Code | Primary development environment |
+| Chrome DevTools | Extension debugging and DOM tracing |
+| Postman / Thunder Client | Route and payload verification |
+| Nginx configs | Frontend/backend reverse-proxy deployment paths |
 
 ---
 
-## 6. Technology Selection Rationale
+## 6. Compatibility Baseline
 
-### Why Node.js + Express?
-- **JavaScript Ecosystem**: Unified language across frontend, backend, and extension
-- **Non-blocking I/O**: Efficient handling of real-time WebSocket connections
-- **Rich Package Ecosystem**: npm provides extensive library support
-- **Easy Integration**: Native JSON handling for API responses
-
-### Why React?
-- **Component Reusability**: Modular UI development across dashboard and extension
-- **Virtual DOM**: Efficient updates for real-time data displays
-- **Strong Community**: Extensive documentation and third-party libraries
-- **React Query**: Simplified server state management and caching
-
-### Why PostgreSQL?
-- **ACID Compliance**: Reliable transactions for attendance data integrity
-- **Complex Queries**: Efficient joins for analytics and reporting
-- **JSONB Support**: Flexible storage for variable data structures
-- **Scalability**: Handles growing data volumes as usage increases
-
-### Why Socket.io?
-- **Real-time Updates**: Instant event propagation to dashboard
-- **Room-based Architecture**: Efficient targeted broadcasts per instructor/session
-- **Automatic Reconnection**: Handles network interruptions gracefully
-- **Fallback Support**: Works even when WebSockets are blocked
-
-### Why Chrome Extension Manifest V3?
-- **Modern Standard**: Google's required format for new extensions
-- **Service Workers**: Efficient background processing
-- **Enhanced Security**: Stricter permission model
-- **Performance**: Reduced memory footprint compared to Manifest V2
+| Component | Baseline |
+|----------|----------|
+| Node.js | 20.19+ |
+| Chrome | Current stable (Manifest V3 support required) |
+| PostgreSQL | Current schema compatible with modern 12+ environments |
 
 ---
 
-## 7. Version Compatibility Matrix
+## 7. Notes on Direction
 
-| Component | Minimum Version | Recommended Version |
-|-----------|-----------------|---------------------|
-| Node.js | 16.x | 18.x or 20.x LTS |
-| npm | 8.x | 9.x or 10.x |
-| Chrome Browser | 120+ | Latest stable |
-| PostgreSQL | 12 | 14+ |
+- Extension scope is Google Meet only.
+- Zoom support follows the Zoom Apps SDK bridge model in frontend services/routes.
+- Shared backend APIs and schema power both meeting integrations.
 
----
-
-## 8. Dependency Summary
-
-### Backend (15 production dependencies)
-```
-express, socket.io, pg, jsonwebtoken, bcrypt, helmet, 
-cors, express-rate-limit, multer, csv-parser, uuid, 
-nodemailer, dotenv, crypto, autoprefixer
-```
-
-### Frontend (8 production dependencies)
-```
-react, react-dom, react-router-dom, @tanstack/react-query,
-react-hook-form, axios, socket.io-client, @heroicons/react
-```
-
-### Extension (5 production dependencies)
-```
-react, react-dom, date-fns, idb, uuid
-```
-
----
-
-*This document reflects the technology stack as of December 2025, based on the actual package.json files and codebase implementation.*

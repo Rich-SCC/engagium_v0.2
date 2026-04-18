@@ -10,7 +10,7 @@
 
 This study employed a **quantitative-descriptive research methodology**. The quantitative component focused on measuring faculty perceptions through structured survey responses, while the descriptive component focused on presenting the current conditions of participation tracking in synchronous online classes, including the challenges encountered in monitoring different forms of student engagement (Creswell & Creswell, 2018).
 
-This approach allowed the researchers to **describe the instructional problem using measurable indicators** and **evaluate user perceptions of the proposed solution** within an educational context.
+This approach enabled the systematic description of the instructional problem using measurable indicators and the evaluation of user perceptions of the proposed solution within an educational context.
 
 ---
 
@@ -26,7 +26,7 @@ The **post-production survey** functioned as an outcome-evaluation instrument ad
 
 ### 3.1.3 Methodological Rationale
 
-The use of a two-phase survey design ensured that the study remained **evidence-based throughout its progression**, from problem validation to post-production evaluation. This structure also enabled alignment between the needs identified during pre-production and the evaluative criteria applied during post-production.
+The use of a two-phase survey design ensured that the study remained **evidence-based throughout its progression**, from problem validation to post-production evaluation. This structure ensured alignment between the needs identified during pre-production and the evaluative criteria applied during post-production.
 
 ---
 
@@ -34,7 +34,7 @@ The use of a two-phase survey design ensured that the study remained **evidence-
 
 ### 3.2.1 Sequential Survey Design
 
-The study followed a **sequential survey design** within a quantitative-descriptive framework. Data collection was conducted in two stages (Fink, 2017):
+The study adopted a **sequential two-phase survey design**, structured within a quantitative-descriptive methodology. Data collection was conducted in two stages (Fink, 2017):
 (1) identification and validation of the instructional problem, and
 (2) evaluation of the developed intervention.
 
@@ -61,6 +61,31 @@ Open-ended responses were also collected to capture detailed feedback and sugges
 ### 3.2.4 Conceptual Considerations
 
 The research design was guided by established perspectives in educational technology, particularly the view that **perceived usefulness and perceived ease of use influence technology adoption** (Quiban, 2024; Porto, 2025). These concepts informed the interpretation of faculty responses, especially in evaluating acceptance and usability, without introducing technical system-level discussion into the chapter.
+
+---
+
+### 3.2.5 Variables of the Study
+
+The study measured the following variables across the two survey phases:
+
+Pre-Production Variables:
+
+* Participation-tracking challenges
+* Perceived usefulness
+* Perceived ease of use
+* Behavioral intention to use
+* Usability expectations
+* Data privacy concerns
+
+Post-Production Variables:
+
+* System usability (SUS score)
+* Perceived effectiveness
+* System reliability
+* Interface clarity
+* Report usability
+* User satisfaction
+* Adoption intention
 
 ---
 
@@ -140,7 +165,7 @@ Data gathering was conducted in two major phases using structured survey instrum
 
 During the **pre-production phase**, the survey was administered to eligible faculty respondents following institutional coordination. Respondents were provided with an informed consent statement detailing the purpose of the study, voluntary participation, confidentiality, and data handling procedures. Only those who consented proceeded with the survey.
 
-During the **post-production phase**, respondents who were exposed to the developed prototype completed the evaluation survey. Adequate time was provided for system interaction prior to data collection to ensure informed responses.
+During the **post-production phase**, respondents who were exposed to the developed prototype completed the evaluation survey. Respondents were given sufficient time to interact with the system prior to evaluation to ensure informed responses.
 
 ---
 
@@ -157,15 +182,15 @@ For the post-production phase, weighted means were used to summarize researcher-
 
 ---
 
-### 3.9.2 Qualitative Analysis
+### 3.9.2 SUS Scoring and Interpretation
 
-Responses from open-ended questions were analyzed using **thematic grouping** to identify recurring patterns, concerns, and suggestions. This served as a supplementary interpretive layer to support the primary quantitative-descriptive findings.
+SUS responses were scored using the standard Brooke computation method and converted into a 0-100 scale. The resulting scores were interpreted using established usability categories to determine the overall acceptability of the system.
 
 ---
 
-### 3.9.3 SUS Scoring and Interpretation
+### 3.9.3 Qualitative Analysis
 
-SUS responses were scored using the standard Brooke computation method and converted into a 0-100 scale. The resulting scores were interpreted using established usability categories to determine the overall acceptability of the system.
+Responses from open-ended questions were analyzed using **thematic grouping** to identify recurring patterns, concerns, and suggestions. This served as a supplementary interpretive layer to support the primary quantitative-descriptive findings.
 
 ---
 
@@ -183,7 +208,7 @@ Participation was **voluntary**, and respondents were informed of their right to
 
 All collected data were treated with strict confidentiality and were used solely for academic purposes. No personally identifiable information was disclosed in the reporting of results.
 
-The study also considered compliance with the **Data Privacy Act of 2012**, ensuring that only necessary data were collected and that respondents were fully informed about how their data would be handled and protected (Foronda et al., 2023; Miano, 2025).
+The study adhered to the provisions of the **Data Privacy Act of 2012**, ensuring that only necessary data were collected and that respondents were fully informed about how their data would be handled and protected (Foronda et al., 2023; Miano, 2025).
 
 ---
 

@@ -1,249 +1,146 @@
 # Risk Assessment and Mitigation
-## Engagium System - Chapter 3.12 Reference
+## Engagium System - Current Risk Profile
 
-This document identifies potential risks during development and testing of the Engagium system, along with mitigation strategies.
-
----
-
-## Risk Assessment Matrix
-
-| Risk ID | Risk Description | Likelihood | Impact | Risk Level | Mitigation Strategy |
-|---------|------------------|------------|--------|------------|---------------------|
-| R01 | Google Meet UI/DOM changes | High | High | **Critical** | Modular DOM selectors in config file; regular monitoring of Google Meet updates; fallback detection methods |
-| R02 | Chrome extension API changes | Medium | High | **High** | Use stable Manifest V3 APIs; avoid deprecated features; monitor Chrome release notes |
-| R03 | Browser throttling of background scripts | Medium | Medium | **Medium** | Implement keep-alive mechanisms; use service worker efficiently; batch API calls |
-| R04 | Internet connectivity issues | Medium | Medium | **Medium** | Offline-first architecture with IndexedDB; sync queue for failed requests; automatic retry with exponential backoff |
-| R05 | Incomplete participation detection | High | Medium | **High** | Clearly document detection requirements (panels must be open); provide user guidance; mark as "under development" features |
-| R06 | Name matching inaccuracies | Medium | Low | **Low** | Fuzzy matching algorithm; manual correction UI in dashboard; student roster management |
-| R07 | Database performance degradation | Low | High | **Medium** | Proper indexing; query optimization; pagination for large datasets |
-| R08 | Authentication token compromise | Low | High | **Medium** | Short-lived access tokens; secure token storage; HTTPS enforcement; token revocation capability |
-| R09 | WebSocket connection instability | Medium | Medium | **Medium** | Automatic reconnection logic; fallback to HTTP polling; connection status indicators |
-| R10 | Limited testing sample size | High | Medium | **High** | Maximize faculty participation; document limitations; use statistical methods appropriate for sample size |
-| R11 | Time constraints for development | Medium | Medium | **Medium** | Prioritize core features (MVP approach); iterative development; clear scope boundaries |
-| R12 | Cross-browser compatibility issues | Medium | Low | **Low** | Focus on Chrome (primary target); document browser requirements; test on latest stable versions |
+**Last Updated:** April 18, 2026  
+**Scope:** Risks tied to currently implemented architecture
 
 ---
 
-## Detailed Risk Analysis
+## 1. Risk Matrix
 
-### R01: Google Meet UI/DOM Changes
-
-**Description:** Google frequently updates the Google Meet interface, which may change the DOM structure that the extension relies on for detecting participants and events.
-
-**Impact:** Detection of participants, chat messages, reactions, and hand raises may fail completely or produce inaccurate results.
-
-**Mitigation Strategies:**
-1. **Centralized Selectors:** All DOM selectors are stored in `config.js` for easy updates
-2. **ARIA-based Detection:** Use accessibility attributes (role, aria-label) which are more stable than class names
-3. **Multiple Detection Methods:** Implement fallback detection strategies (e.g., toast notifications + panel monitoring)
-4. **Monitoring:** Regular testing against live Google Meet to catch changes early
-5. **Graceful Degradation:** System continues to function with reduced features if some detection fails
+| ID | Risk | Likelihood | Impact | Mitigation Status |
+|----|------|------------|--------|-------------------|
+| R1 | Google Meet DOM changes break detectors | High | High | Active mitigation in modular detector architecture |
+| R2 | Meeting-side event loss during network interruptions | Medium | High | IndexedDB queue and retry logic implemented |
+| R3 | Token misuse (JWT or extension token) | Low | High | JWT validation + hashed extension tokens + revocation |
+| R4 | Realtime disconnects causing stale live UI | Medium | Medium | Socket reconnect behavior + API refresh paths |
+| R5 | Name matching inaccuracies for roster linkage | Medium | Medium | Linking endpoints and manual correction workflows |
+| R6 | Data drift between docs and implementation | Medium | Medium | Source-of-truth architecture docs and audit updates |
+| R7 | Query latency growth with long-term data accumulation | Medium | Medium | Indexed schema + aggregation endpoints + optimization review |
+| R8 | Zoom bridge integration dependency changes | Medium | Medium | Keep Zoom path isolated in dedicated bridge services |
 
 ---
 
-### R02: Chrome Extension API Changes
+## 2. Detailed Risks and Controls
 
-**Description:** Chrome may deprecate or modify extension APIs, particularly as Manifest V3 evolves.
+### R1. Google Meet DOM volatility
 
-**Impact:** Extension may stop functioning or require significant refactoring.
+Risk:
 
-**Mitigation Strategies:**
-1. **Manifest V3 Compliance:** Already using the latest manifest version
-2. **Stable APIs Only:** Avoid experimental or deprecated APIs
-3. **Documentation Review:** Monitor Chrome developer documentation for announcements
-4. **Modular Architecture:** Service worker and content scripts are decoupled for easier updates
+- DOM selectors and accessibility attributes can change without notice.
 
----
+Controls in codebase:
 
-### R03: Browser Throttling of Background Scripts
+- Detector modules are separated by event type for targeted fixes.
+- Shared selector/config utilities reduce blast radius of DOM updates.
+- Tracking failures can degrade to partial mode instead of complete failure.
 
-**Description:** Chrome aggressively suspends service workers to conserve resources, which may interrupt tracking during long sessions.
+### R2. Offline/unstable network during active sessions
 
-**Impact:** Events may be missed if service worker is suspended at critical moments.
+Risk:
 
-**Mitigation Strategies:**
-1. **Keep-alive Mechanisms:** Periodic alarms to prevent suspension
-2. **Content Script Primary:** Critical detection runs in content scripts (not affected by service worker suspension)
-3. **Local Storage:** IndexedDB stores events before service worker processes them
-4. **Event Batching:** Batch events to reduce wake-up frequency
+- Event writes can fail while classes are live.
 
----
+Controls in codebase:
 
-### R04: Internet Connectivity Issues
+- Extension stores failed work locally (IndexedDB via sync queue).
+- Retry logic replays queued events after connectivity recovery.
 
-**Description:** Users may experience network interruptions during online classes.
+### R3. Authentication/token compromise
 
-**Impact:** Participation events may fail to sync to the backend.
+Risk:
 
-**Mitigation Strategies:**
-1. **Offline-First Design:** All events stored locally in IndexedDB first
-2. **Sync Queue:** Failed API requests are queued for retry
-3. **Exponential Backoff:** Retry logic prevents overwhelming the server
-4. **Status Indicators:** UI shows sync status to user
-5. **Session Recovery:** Events are preserved even if browser closes unexpectedly
+- Unauthorized access if tokens leak.
 
----
+Controls in codebase:
 
-### R05: Incomplete Participation Detection
+- JWT verification and refresh flow separation.
+- Extension token hashes persisted server-side (not plaintext).
+- Token revocation endpoints including revoke-all support.
+- Rate limiting with identity-aware key generation in backend.
 
-**Description:** Some participation types (chat, reactions, hand raises, mic toggles) require specific UI panels to be open and may not detect all events accurately.
+### R4. Realtime sync inconsistency
 
-**Impact:** Participation data may be incomplete, affecting accuracy metrics.
+Risk:
 
-**Mitigation Strategies:**
-1. **Clear Documentation:** User guide explains requirements (e.g., "Keep People Panel open")
-2. **Visual Indicators:** Extension shows what is being tracked
-3. **Attendance Priority:** Focus on attendance (join/leave) as primary, most reliable metric
-4. **Status Labeling:** Mark participation features as "Beta" or "Under Development"
-5. **User Feedback:** Provide mechanism for users to report detection issues
+- Users may temporarily see stale live feed/session state when sockets drop.
 
----
+Controls in codebase:
 
-### R06: Name Matching Inaccuracies
+- Socket room model isolates updates by instructor/session.
+- Frontend can rehydrate state from REST endpoints.
+- Session status request/response events support quick sync checks.
 
-**Description:** Participant display names in Google Meet may not exactly match student roster names.
+### R5. Participant-to-student matching errors
 
-**Impact:** Attendance records may not link to correct students, requiring manual correction.
+Risk:
 
-**Mitigation Strategies:**
-1. **Fuzzy Matching:** Algorithm tolerates minor variations (extra spaces, nicknames)
-2. **Manual Linking:** Dashboard allows instructor to manually link participants to students
-3. **Learning:** System can remember previous name mappings
-4. **Unmatched Tracking:** Unmatched participants are still tracked, just not linked to roster
+- Display names in meetings may not exactly match roster names.
 
----
+Controls in codebase:
 
-### R07: Database Performance Degradation
+- Student matching utilities on extension side.
+- Link participant-to-student endpoint in sessions API.
+- Student merge/from-participant workflows in class APIs.
 
-**Description:** As data accumulates over time, database queries may slow down.
+### R6. Documentation drift
 
-**Impact:** Dashboard loading times increase, affecting user experience.
+Risk:
 
-**Mitigation Strategies:**
-1. **Proper Indexing:** All foreign keys and frequently queried columns are indexed
-2. **Pagination:** Large result sets are paginated
-3. **Query Optimization:** Use efficient JOIN patterns and avoid N+1 queries
-4. **Archival:** Old sessions can be archived to separate tables (future enhancement)
+- Thesis docs become inconsistent with active code.
 
----
+Controls in process:
 
-### R08: Authentication Token Compromise
+- Architecture/framework docs treated as canonical overviews.
+- Route/schema/module audits performed during doc updates.
 
-**Description:** Access tokens or extension tokens could be intercepted or stolen.
+### R7. Data volume and performance pressure
 
-**Impact:** Unauthorized access to instructor's class and student data.
+Risk:
 
-**Mitigation Strategies:**
-1. **Short-lived Tokens:** Access tokens expire in 15 minutes
-2. **HTTPS Only:** All API communication encrypted
-3. **Token Revocation:** Users can revoke extension tokens from dashboard
-4. **Secure Storage:** Tokens stored in Chrome's secure storage API
-5. **No Sensitive Data in Tokens:** JWTs contain only user ID, not sensitive information
+- Growing participation and attendance logs can affect response times.
+
+Controls in codebase:
+
+- Indexed query columns across session/attendance/participation tables.
+- Dedicated summary endpoints reduce expensive frontend-side aggregation.
+
+### R8. External Zoom platform dependency
+
+Risk:
+
+- Zoom Apps SDK behavior or requirements can change.
+
+Controls in codebase:
+
+- Zoom functionality isolated to bridge pages/services.
+- Shared backend contract allows Zoom-specific changes without redesigning core schema.
 
 ---
 
-### R09: WebSocket Connection Instability
+## 3. Contingency Plans
 
-**Description:** WebSocket connections may drop due to network issues or server restarts.
+1. Detector break from Meet DOM update:
+- Freeze broken detector path.
+- Patch selectors/config in detector module.
+- Validate with controlled test meeting before release.
 
-**Impact:** Real-time updates stop appearing in dashboard.
+2. Token compromise response:
+- Revoke token(s) through existing API endpoints.
+- Rotate secrets where applicable.
+- Re-authenticate affected clients.
 
-**Mitigation Strategies:**
-1. **Auto-Reconnection:** Socket.io automatically attempts to reconnect
-2. **Connection Status:** UI indicates connection state
-3. **Data Refresh:** Dashboard can manually refresh data if connection issues persist
-4. **Graceful Fallback:** Core functionality works without real-time updates (just delayed)
-
----
-
-### R10: Limited Testing Sample Size
-
-**Description:** Small number of faculty testers may limit statistical validity of usability findings.
-
-**Impact:** Survey results may not be generalizable; may not discover all usability issues.
-
-**Mitigation Strategies:**
-1. **Maximize Participation:** Coordinate with institution to encourage faculty participation
-2. **Appropriate Statistics:** Use statistical methods suitable for small samples
-3. **Qualitative Data:** Supplement quantitative data with qualitative feedback
-4. **Document Limitations:** Clearly state sample size limitations in findings
-5. **Multiple Testing Rounds:** If possible, conduct multiple testing sessions
+3. Realtime outage:
+- Rely on REST polling/refresh for critical views.
+- Restore socket service and rejoin instructor/session rooms.
 
 ---
 
-### R11: Time Constraints for Development
+## 4. Monitoring Focus
 
-**Description:** Academic timeline may not allow completion of all planned features.
+- Extension queue backlog size and retry success rates.
+- Session/attendance API error rates.
+- Socket connection churn and reconnect frequency.
+- Token verification failures and suspicious auth patterns.
+- Slow query hotspots in session/participation endpoints.
 
-**Impact:** Some features may be incomplete or untested.
-
-**Mitigation Strategies:**
-1. **MVP Approach:** Prioritize core features (attendance tracking) over advanced features
-2. **Feature Prioritization:** Clear categorization of must-have vs nice-to-have
-3. **Iterative Development:** Deliver working increments rather than big-bang release
-4. **Scope Management:** Document planned vs implemented features clearly
-5. **Technical Debt Tracking:** Acknowledge and document incomplete items
-
----
-
-### R12: Cross-Browser Compatibility Issues
-
-**Description:** Extension may not work correctly on browsers other than Chrome.
-
-**Impact:** Users on other browsers cannot use the extension.
-
-**Mitigation Strategies:**
-1. **Primary Target:** Focus on Chrome as the primary supported browser
-2. **Clear Requirements:** Document Chrome as required browser
-3. **Standard APIs:** Use standard web APIs where possible for potential future porting
-4. **Version Requirements:** Specify minimum Chrome version (120+)
-
----
-
-## Risk Response Summary
-
-| Response Type | Risks |
-|---------------|-------|
-| **Mitigate** | R01, R02, R03, R04, R05, R06, R07, R08, R09 |
-| **Accept** | R10, R11, R12 |
-| **Transfer** | None |
-| **Avoid** | None |
-
----
-
-## Contingency Plans
-
-### If Google Meet DOM Changes Significantly
-1. Pause tracking features temporarily
-2. Analyze new DOM structure
-3. Update selectors in config.js
-4. Test thoroughly before re-enabling
-5. Notify users of temporary service interruption
-
-### If Extension Token is Compromised
-1. User revokes all tokens from Settings page
-2. Generate new extension token
-3. Re-authenticate extension
-4. Review access logs if available
-
-### If Participation Detection Fails
-1. Fall back to attendance-only tracking
-2. Document which features are affected
-3. Provide manual participation entry option
-4. Work on updated detection logic
-
----
-
-## Monitoring and Review
-
-| Activity | Frequency |
-|----------|-----------|
-| Test extension against live Google Meet | Before each release |
-| Review Chrome extension documentation | Monthly |
-| Check database query performance | After significant data growth |
-| Review error logs | Weekly during active testing |
-| User feedback collection | Ongoing during testing phase |
-
----
-
-*This risk assessment is based on the Engagium system architecture and development context as of December 2025.*

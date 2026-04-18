@@ -1,463 +1,158 @@
 # Module Descriptions
-## Engagium System - Chapter 3.3.2 Reference
+## Engagium System - Current Module Inventory
 
-This document provides detailed descriptions of each core component/module in the Engagium system.
-
----
-
-## Module Overview
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                            ENGAGIUM SYSTEM MODULES                               │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│   ┌───────────────────┐                                                         │
-│   │ 1. BROWSER        │  Chrome extension for Google Meet participation          │
-│   │    EXTENSION      │  tracking with offline support                           │
-│   └───────────────────┘                                                         │
-│            │                                                                     │
-│            ▼                                                                     │
-│   ┌───────────────────┐                                                         │
-│   │ 2. API SERVICES   │  REST endpoints for CRUD operations and                  │
-│   │    (Backend)      │  real-time WebSocket communication                       │
-│   └───────────────────┘                                                         │
-│            │                                                                     │
-│            ▼                                                                     │
-│   ┌───────────────────┐                                                         │
-│   │ 3. PARTICIPATION  │  Event detection, processing, and storage                │
-│   │    LOGGING ENGINE │  for attendance and interaction tracking                 │
-│   └───────────────────┘                                                         │
-│            │                                                                     │
-│            ▼                                                                     │
-│   ┌───────────────────┐                                                         │
-│   │ 4. ANALYTICS      │  Attendance rates, duration calculations,                │
-│   │    ENGINE         │  and participation metrics                               │
-│   └───────────────────┘                                                         │
-│            │                                                                     │
-│            ▼                                                                     │
-│   ┌───────────────────┐                                                         │
-│   │ 5. WEB DASHBOARD  │  React-based interface for instructors                   │
-│   │                   │  to view and manage class data                           │
-│   └───────────────────┘                                                         │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+**Last Updated:** April 18, 2026  
+**Status:** Synced with active repository modules
 
 ---
 
-## 1. Browser Extension
+## 1. System Module Groups
 
-### Purpose
-The browser extension serves as the primary data collection interface, detecting and capturing participation events directly from Google Meet sessions. It runs as a Chrome extension using Manifest V3.
+1. Browser extension (Google Meet tracking).
+2. Backend API and realtime services.
+3. Frontend dashboard and bridge pages.
+4. Shared persistence model (PostgreSQL schema).
 
-### Components
+---
 
-#### 1.1 Service Worker (Background Script)
-**Location:** `_extension/background/`
+## 2. Browser Extension Modules
+
+### 2.1 Core runtime
+
+Location: `_extension/background/`
 
 | File | Responsibility |
 |------|----------------|
-| `service-worker.js` | Main coordinator; handles message routing between content scripts, popup, and options page; manages extension lifecycle |
-| `session-manager.js` | Manages active session state; coordinates session start/end; handles participant matching |
-| `api-client.js` | HTTP communication with backend API; handles request formatting and error handling |
-| `socket-client.js` | WebSocket connection to backend; emits real-time events |
-| `sync-queue.js` | Offline support; queues failed requests for retry; implements exponential backoff |
+| `service-worker.js` | Extension runtime coordinator and message orchestration |
+| `session-manager.js` | Session state lifecycle in extension runtime |
+| `api-client.js` | Authenticated backend requests |
+| `socket-client.js` | Socket connectivity from extension side |
+| `sync-queue.js` | Offline queue and retry behavior |
+| `handlers/participant-handler.js` | Participant-specific handling pipeline |
 
-#### 1.2 Content Scripts (Google Meet Integration)
-**Location:** `_extension/content/google-meet/`
+### 2.2 Google Meet content modules
 
-| File | Responsibility |
-|------|----------------|
-| `index.js` | Entry point; initializes all detectors when meeting is detected |
-| `participant-detector.js` | **Primary detector**: Monitors People Panel for join/leave events; extracts participant names |
-| `chat-monitor.js` | Monitors Chat Panel for new messages; extracts sender and message text |
-| `reaction-detector.js` | Detects emoji reactions via toast notifications and video tile overlays |
-| `hand-raise-detector.js` | Monitors Raised Hands section; detects hand raise/lower events |
-| `media-state-detector.js` | Detects microphone unmute events via People Panel button states |
-| `screen-share-detector.js` | Detects screen sharing (auxiliary, not a participation type) |
-| `url-monitor.js` | Monitors URL changes to detect meeting entry/exit |
-| `event-emitter.js` | Queues detected events and sends to service worker |
-| `config.js` | DOM selectors, patterns, and constants for Google Meet's ARIA-based structure |
-| `state.js` | Shared state object for tracking status |
-| `utils.js` | Helper functions for ID generation, logging, name cleaning |
-| `people-panel.js` | People panel DOM queries and participant extraction |
-| `tracking-indicator.js` | Visual indicator showing tracking is active |
+Location: `_extension/content/google-meet/`
 
-#### 1.3 Popup Interface
-**Location:** `_extension/popup/`
+| Group | Representative files |
+|------|-----------------------|
+| Detection | `participant-detector.js`, `chat-detector.js`, `reaction-detector.js`, `raised-hand-detector.js`, `mic-toggle-detector.js`, `meeting-exit-detector.js`, `url-monitor.js`, `people-panel.js` |
+| Core | `core/config.js`, `core/state.js`, `core/event-emitter.js`, `core/utils.js` |
+| DOM | `dom/dom-manager.js`, `dom/panel-manager.js` |
+| UI | `ui/tracking-indicator.js`, `ui/meeting-notifications.js` |
+| Entry | `index.js` |
 
-| File | Responsibility |
-|------|----------------|
-| `popup.jsx` | React component for quick session control |
-| `popup.css` | Styling for popup interface |
-| `index.html` | HTML entry point |
+### 2.3 Extension UI modules
 
-**Features:**
-- Start/stop session tracking
-- View current session status
-- See active participant count
-- Quick navigation to dashboard
+| Surface | Entry files |
+|--------|-------------|
+| Popup | `popup/index.html`, `popup/popup.jsx` |
+| Options | `options/index.html`, `options/options.jsx`, `options/callback.html`, `options/callback.js` |
 
-#### 1.4 Options Page
-**Location:** `_extension/options/`
+### 2.4 Extension utility modules
 
-| File | Responsibility |
-|------|----------------|
-| `options.jsx` | React component for extension settings |
-| `callback.js` | OAuth callback handler for authentication |
-| `options.css` | Styling for options interface |
-| `index.html`, `callback.html` | HTML entry points |
+Location: `_extension/utils/`
 
-**Features:**
-- Connect extension to Engagium account
-- Map meeting links to classes
-- Configure tracking preferences
-- Debug panel for troubleshooting
-
-#### 1.5 Utilities
-**Location:** `_extension/utils/`
-
-| File | Responsibility |
-|------|----------------|
-| `constants.js` | Message types, event types, configuration constants |
-| `storage.js` | Chrome storage API wrappers |
-| `debug-logger.js` | Logging utilities with levels |
-| `date-utils.js` | Date/time formatting helpers |
-| `student-matcher.js` | Algorithm for matching participant names to enrolled students |
+- `auth.js`
+- `class-formatter.js`
+- `constants.js`
+- `date-utils.js`
+- `debug-logger.js`
+- `logger.js`
+- `storage.js`
+- `string-utils.js`
+- `student-matcher.js`
+- `url-utils.js`
 
 ---
 
-## 2. API Services (Backend)
+## 3. Backend Modules
 
-### Purpose
-The backend provides RESTful API endpoints for all system operations and manages real-time communication via WebSocket.
+### 3.1 Route modules
 
-### Controllers
-**Location:** `backend/src/controllers/`
+Location: `backend/src/routes/`
 
-| Controller | Endpoints | Responsibility |
-|------------|-----------|----------------|
-| `authController.js` | `/auth/*` | User registration, login, logout, password reset, profile management, token refresh |
-| `classController.js` | `/classes/*` | Class CRUD, meeting links, exempted accounts |
-| `sessionController.js` | `/sessions/*` | Session lifecycle (start/end), live events, attendance queries |
-| `studentController.js` | `/classes/:id/students/*` | Student CRUD, CSV import, bulk operations, duplicate detection |
-| `participationController.js` | `/participation/*` | Log and retrieve participation events |
-| `studentTagController.js` | `/classes/:id/tags/*` | Tag management for student organization |
-| `studentNoteController.js` | `/classes/:id/students/:id/notes/*` | Timestamped notes per student |
-| `notificationController.js` | `/notifications/*` | System notification management |
-| `extensionTokenController.js` | `/extension-tokens/*` | Extension token generation and revocation |
+- `auth.js`
+- `classes.js`
+- `sessions.js`
+- `participation.js`
+- `extensionTokens.js`
 
-### Route Files
-**Location:** `backend/src/routes/`
+### 3.2 Controller modules
 
-| Route File | Base Path | Purpose |
-|------------|-----------|---------|
-| `authRoutes.js` | `/api/auth` | Authentication endpoints |
-| `classRoutes.js` | `/api/classes` | Class and student management |
-| `sessionRoutes.js` | `/api/sessions` | Session operations |
-| `participationRoutes.js` | `/api/participation` | Participation logging |
-| `notificationRoutes.js` | `/api/notifications` | Notification operations |
-| `extensionTokenRoutes.js` | `/api/extension-tokens` | Token management |
+Location: `backend/src/controllers/`
 
-### Services
-**Location:** `backend/src/services/`
+- `authController.js`
+- `classController.js`
+- `studentController.js`
+- `sessionController.js`
+- `participationController.js`
+- `studentTagController.js`
+- `studentNoteController.js`
+- `extensionTokenController.js`
 
-| Service | Responsibility |
-|---------|----------------|
-| `emailService.js` | Password reset emails via Nodemailer |
+### 3.3 Middleware modules
 
-### Middleware
-**Location:** `backend/src/middleware/`
+Location: `backend/src/middleware/`
 
-| Middleware | Responsibility |
-|------------|----------------|
-| `authMiddleware.js` | JWT verification, extension token verification, flexible auth |
-| `errorHandler.js` | Centralized error handling and formatting |
+- `auth.js`
+- `flexibleAuth.js`
+- `extensionAuth.js`
 
-### Socket Handler
-**Location:** `backend/src/socket/`
+### 3.4 Service and socket modules
 
-| File | Responsibility |
-|------|----------------|
-| `socketHandler.js` | WebSocket event handling, room management, broadcast logic |
-
-### Key API Endpoints
-
-#### Authentication
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| POST | `/auth/register` | Create new user account |
-| POST | `/auth/login` | Authenticate and receive tokens |
-| POST | `/auth/refresh-token` | Get new access token |
-| POST | `/auth/logout` | Invalidate refresh token |
-| POST | `/auth/forgot-password` | Request password reset |
-| POST | `/auth/reset-password` | Reset password with token |
-| GET | `/auth/profile` | Get current user profile |
-| PUT | `/auth/profile` | Update user profile |
-
-#### Sessions (Extension-focused)
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| POST | `/sessions/start-from-meeting` | Start session from extension |
-| POST | `/sessions/:id/live-event` | Send real-time participation event |
-| PUT | `/sessions/:id/end-with-timestamp` | End session with precise timestamp |
-| POST | `/sessions/:id/attendance/join` | Record participant join |
-| POST | `/sessions/:id/attendance/leave` | Record participant leave |
+- Service: `backend/src/services/emailService.js`
+- Socket handler: `backend/src/socket/socketHandler.js`
+- Server entry: `backend/server.js`
 
 ---
 
-## 3. Participation Logging Engine
+## 4. Frontend Modules
 
-### Purpose
-Detects, processes, and stores participation events during live sessions. Operates across extension and backend.
+### 4.1 Top-level app/router
 
-### Participation Event Types
+- `frontend/src/App.jsx`
+- `frontend/src/main.jsx`
 
-| Type | Code | Detection Source | Storage Field |
-|------|------|------------------|---------------|
-| **Attendance (Join/Leave)** | `attendance` | People Panel | `attendance_records`, `attendance_intervals` |
-| **Chat Messages** | `chat` | Chat Panel | `participation_logs` |
-| **Reactions** | `reaction` | Toast notifications | `participation_logs` |
-| **Hand Raises** | `hand_raise` | Raised Hands section | `participation_logs` |
-| **Mic Unmute** | `mic_toggle` | People Panel buttons | `participation_logs` |
+### 4.2 Pages
 
-### Event Detection Flow
+Location: `frontend/src/pages/`
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                        PARTICIPATION EVENT DETECTION                             │
-└─────────────────────────────────────────────────────────────────────────────────┘
+- `LandingPage.jsx`
+- `ForgotPassword.jsx`
+- `ResetPassword.jsx`
+- `ZoomIframeBridge.jsx`
+- `ZoomOAuthCallback.jsx`
+- `Home.jsx`
+- `LiveFeed.jsx`
+- `MyClasses.jsx`
+- `ClassDetailsPage.jsx`
+- `Sessions.jsx`
+- `SessionDetailPage.jsx`
+- `BundledSessionDetailPage.jsx`
+- `Analytics.jsx`
+- `Settings.jsx`
 
-    Google Meet DOM
-          │
-          │ MutationObserver
-          ▼
-    ┌──────────────────┐
-    │ Detector Module  │  (participant-detector, chat-monitor, etc.)
-    │                  │
-    │ - Parse DOM      │
-    │ - Extract data   │
-    │ - Validate       │
-    │ - Deduplicate    │
-    └────────┬─────────┘
-             │
-             │ queueEvent()
-             ▼
-    ┌──────────────────┐
-    │ Event Emitter    │
-    │                  │
-    │ - Queue locally  │
-    │ - Batch if needed│
-    │ - Send message   │
-    └────────┬─────────┘
-             │
-             │ chrome.runtime.sendMessage()
-             ▼
-    ┌──────────────────┐
-    │ Service Worker   │
-    │                  │
-    │ - Store in IDB   │
-    │ - Call API       │
-    └────────┬─────────┘
-             │
-             │ POST /sessions/:id/live-event
-             ▼
-    ┌──────────────────┐
-    │ Backend          │
-    │                  │
-    │ - Validate       │
-    │ - Store in DB    │
-    │ - Broadcast WS   │
-    └──────────────────┘
-```
+### 4.3 Context and service modules
 
-### Attendance Tracking Details
-
-Attendance uses a two-table approach for precision:
-
-1. **`attendance_records`**: Final status per participant per session
-   - Status: present, absent, late
-   - Total duration in minutes
-   - First join and last leave timestamps
-
-2. **`attendance_intervals`**: Each join/leave pair
-   - Precise `joined_at` and `left_at` timestamps
-   - Allows calculation of actual time in meeting
-   - Handles multiple join/leave cycles
-
-### Data Stored Per Event Type
-
-| Event Type | Data Captured |
-|------------|---------------|
-| **Attendance** | participant_name, joined_at, left_at, duration_minutes |
-| **Chat** | participant_name, message_text, timestamp |
-| **Reaction** | participant_name, emoji/reaction_type, timestamp |
-| **Hand Raise** | participant_name, timestamp |
-| **Mic Unmute** | participant_name, timestamp, state (on) |
+- Contexts: `AuthContext.jsx`, `WebSocketContext.jsx` (in `frontend/src/contexts/`)
+- Services: API and Zoom bridge services (in `frontend/src/services/`)
+- Components: class/session/student/participation analytics components (in `frontend/src/components/`)
 
 ---
 
-## 4. Analytics Engine
+## 5. Module Interaction Summary
 
-### Purpose
-Calculates metrics and aggregates data for instructor insights. Operates primarily in the backend with display in the frontend.
-
-### Metrics Calculated
-
-#### Attendance Metrics
-| Metric | Calculation | Location |
-|--------|-------------|----------|
-| **Attendance Rate** | (Present + Late) / Total Students × 100 | Session detail, class summary |
-| **Average Duration** | Sum(duration_minutes) / Count(participants) | Session detail |
-| **On-time Rate** | Present / (Present + Late) × 100 | Session detail |
-| **Class Attendance Trend** | Attendance rate over multiple sessions | Class analytics |
-
-#### Participation Metrics
-| Metric | Calculation | Location |
-|--------|-------------|----------|
-| **Total Interactions** | Count of all participation_logs | Session detail |
-| **Interactions per Student** | Count grouped by student_id | Student detail |
-| **Interaction by Type** | Count grouped by interaction_type | Session analytics |
-| **Active Participation Rate** | Students with ≥1 interaction / Total present | Session summary |
-
-### Backend Endpoints for Analytics
-
-| Endpoint | Data Returned |
-|----------|---------------|
-| `GET /classes/:id/stats` | Class-level statistics |
-| `GET /sessions/:id/stats` | Session-level statistics |
-| `GET /sessions/:id/attendance` | Detailed attendance with intervals |
-| `GET /participation/:sessionId/summary` | Participation summary by type |
-| `GET /participation/:sessionId/recent` | Recent activity feed |
-
-### Frontend Analytics Pages
-
-| Page | Analytics Displayed |
-|------|---------------------|
-| `Home.jsx` | Dashboard overview with class stats |
-| `Analytics.jsx` | Trend charts and comparisons |
-| `SessionDetailPage.jsx` | Per-session attendance and participation |
-| `ClassDetailsPage.jsx` | Class-level metrics and student list |
+- Extension detectors gather meeting events and send them to the background runtime.
+- Background runtime authenticates with extension tokens and submits session/attendance/participation updates.
+- Backend persists data, enforces ownership rules, and emits live updates via Socket.io.
+- Frontend reads REST state and reacts to socket events for live dashboard behavior.
+- Zoom bridge pages use frontend services to route Zoom context actions into the same backend session model.
 
 ---
 
-## 5. Web Dashboard
+## 6. Implementation Notes
 
-### Purpose
-Provides instructors with a comprehensive interface to manage classes, view attendance data, and monitor participation in real-time.
+- Do not document `notifications` backend modules/routes in current-state sections; those files are not part of the active backend route/controller inventory.
+- Use current route filenames (`auth.js`, `classes.js`, etc.), not older `*Routes.js` names.
 
-### Page Structure
-**Location:** `frontend/src/pages/`
-
-| Page | Route | Purpose |
-|------|-------|---------|
-| `LandingPage.jsx` | `/` | Public landing page with login/register |
-| `Home.jsx` | `/home` | Dashboard overview with stats and quick actions |
-| `LiveFeed.jsx` | `/live-feed` | Real-time session monitoring |
-| `MyClasses.jsx` | `/classes` | Class list and management |
-| `ClassDetailsPage.jsx` | `/classes/:id` | Individual class view with students, sessions |
-| `Sessions.jsx` | `/sessions` | Session history and calendar |
-| `SessionDetailPage.jsx` | `/sessions/:id` | Session attendance and participation details |
-| `Analytics.jsx` | `/analytics` | Attendance trends and participation metrics |
-| `Settings.jsx` | `/settings` | User profile and extension tokens |
-| `Notifications.jsx` | `/notifications` | System notification center |
-| `ForgotPassword.jsx` | `/forgot-password` | Password reset request |
-| `ResetPassword.jsx` | `/reset-password` | Password reset form |
-
-### Component Structure
-**Location:** `frontend/src/components/`
-
-```
-components/
-├── common/           # Shared UI components (buttons, modals, inputs)
-├── layout/           # Page layout (header, sidebar, navigation)
-├── class/            # Class-specific components
-├── session/          # Session-specific components
-├── student/          # Student management components
-├── attendance/       # Attendance display components
-└── participation/    # Participation log components
-```
-
-### Context Providers
-**Location:** `frontend/src/contexts/`
-
-| Context | Purpose |
-|---------|---------|
-| `AuthContext.jsx` | Authentication state, login/logout, token management |
-| `WebSocketContext.jsx` | Socket.io connection, event handling, room management |
-
-### Services
-**Location:** `frontend/src/services/`
-
-| Service | Purpose |
-|---------|---------|
-| `api.js` | Axios instance with interceptors for auth headers |
-| `authService.js` | Authentication API calls |
-| `classService.js` | Class management API calls |
-| `sessionService.js` | Session management API calls |
-| `studentService.js` | Student management API calls |
-| `participationService.js` | Participation data API calls |
-
-### Key Features
-
-#### Real-time Updates
-- WebSocket connection established on login
-- Joins instructor room for broadcast events
-- Live feed page shows events as they occur
-- Session detail page updates attendance in real-time
-
-#### Class Management
-- Create/edit/delete classes
-- Configure class schedule (days, time)
-- Add multiple meeting links per class
-- Archive/activate classes
-- Manage exempted accounts (TAs, observers)
-
-#### Student Management
-- Manual add/edit/delete students
-- CSV import with validation
-- Bulk operations (delete, update)
-- Duplicate detection and merging
-- Tagging system for organization
-- Timestamped notes per student
-
-#### Session Management
-- View session history
-- Calendar view of sessions
-- Start sessions from extension (auto-created)
-- View detailed attendance with intervals
-- View participation logs by type
-
----
-
-## Module Interaction Summary
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                          MODULE INTERACTION DIAGRAM                              │
-└─────────────────────────────────────────────────────────────────────────────────┘
-
-    ┌─────────────┐          ┌─────────────┐          ┌─────────────┐
-    │  EXTENSION  │          │   BACKEND   │          │  DASHBOARD  │
-    │             │          │             │          │             │
-    │ Detects     │  HTTP    │ Processes   │  HTTP    │ Displays    │
-    │ events in   ├─────────►│ and stores  │◄─────────┤ data to     │
-    │ Google Meet │          │ data        │          │ instructor  │
-    │             │          │             │  WS      │             │
-    │             │          │ Broadcasts  ├─────────►│ Updates     │
-    │             │          │ via Socket  │          │ in real-time│
-    └─────────────┘          └──────┬──────┘          └─────────────┘
-                                    │
-                                    │
-                             ┌──────▼──────┐
-                             │  DATABASE   │
-                             │             │
-                             │ Persists    │
-                             │ all data    │
-                             └─────────────┘
-```
-
----
-
-*This document describes the module structure as implemented in the Engagium codebase as of December 2025.*

@@ -60,7 +60,7 @@ Scale labels:
 
 **(Section Title: “System Effectiveness”)**
 
-**Type: Multiple Choice Grid**
+**Type: Multiple-choice grid (one response per row)**
 
 **Rows:**
 
@@ -84,7 +84,7 @@ Scale labels:
 
 **(Section Title: “System Performance”)**
 
-**Type: Multiple Choice Grid**
+**Type: Multiple-choice grid (one response per row)**
 
 **Rows:**
 
@@ -108,7 +108,7 @@ Scale labels:
 
 **(Section Title: “Interface Evaluation”)**
 
-**Type: Multiple Choice Grid**
+**Type: Multiple-choice grid (one response per row)**
 
 **Rows:**
 
@@ -132,7 +132,7 @@ Scale labels:
 
 **(Section Title: “User Satisfaction”)**
 
-**Type: Multiple Choice Grid**
+**Type: Multiple-choice grid (one response per row)**
 
 **Rows:**
 

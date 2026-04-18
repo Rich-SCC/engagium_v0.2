@@ -1,11 +1,7 @@
 # APPENDIX D  
 PROGRAM LISTING
 
-> ⚠️ **DRAFT** — This appendix is subject to change as development continues. To be finalized before final submission when the codebase is frozen.
-
-This appendix provides summaries of the key source code files in the ENGAGIUM system. Full source code is available in the project repository. Only major modules and their responsibilities are described here.
-
-> **Note:** Complete source code listings are available upon request or in the accompanying digital submission.
+This appendix provides a comprehensive overview of the key source code files and modules in the ENGAGIUM system. Only major modules and their core responsibilities are described here. Complete source code is available in the project repository and accompanying digital submission.
 
 ---
 
@@ -440,3 +436,298 @@ Allows instructors to associate Google Meet URLs with specific classes for autom
 2. Compare against enrolled student names
 3. Use Levenshtein distance for fuzzy matching
 4. Return best match above confidence threshold
+
+---
+
+## D.4 Backend Data Models and Database
+
+### D.4.1 Core Data Models
+
+**File:** `backend/src/models/`
+
+The data layer uses Sequelize ORM for PostgreSQL with the following key models:
+
+| Model | Purpose | Key Fields |
+|-------|---------|-----------|
+| **User** | System user (instructor) | id, email, password_hash, name, created_at, updated_at |
+| **Class** | Course/section taught by instructor | id, instructor_id, name, subject, section, schedule, is_archived |
+| **Student** | Enrolled student in a class | id, class_id, full_name, student_id, enrollment_status, notes |
+| **Session** | Classroom meeting session | id, class_id, start_time, ended_at, status (active/ended), participant_count |
+| **AttendanceRecord** | Student presence in a session | id, session_id, student_id, status (present/late/absent), total_duration_minutes |
+| **AttendanceInterval** | Join/leave timestamps for a student in a session | id, attendance_record_id, joined_at, left_at |
+| **ParticipationLog** | Individual participation event | id, session_id, student_id, event_type (chat/reaction/hand_raise/mic_toggle), value, timestamp |
+| **SessionLink** | Meeting platform URLs associated with class | id, class_id, platform (google_meet/zoom/teams), meeting_url, name |
+| **ExtensionToken** | Long-lived auth token for browser extension | id, user_id, token_hash, created_at, expires_at, is_revoked |
+| **StudentTag** | Custom labels for organizing students | id, class_id, tag_name, color |
+| **StudentNote** | Instructor notes on student participation | id, student_id, content, created_at, updated_at |
+| **ExemptedAccount** | Accounts excluded from tracking (admin accounts, test accounts) | id, class_id, account_name, reason |
+
+### D.4.2 Database Schema Highlights
+
+**Key Relationships:**
+```
+User (1) ──→ (∞) Class
+Class (1) ──→ (∞) Student
+Class (1) ──→ (∞) Session
+Class (1) ──→ (∞) SessionLink
+Class (1) ──→ (∞) StudentTag
+Student (1) ──→ (∞) AttendanceRecord
+Student (1) ──→ (∞) ParticipationLog
+Student (1) ──→ (∞) StudentNote
+Session (1) ──→ (∞) AttendanceRecord
+Session (1) ──→ (∞) ParticipationLog
+AttendanceRecord (1) ──→ (∞) AttendanceInterval
+User (1) ──→ (∞) ExtensionToken
+```
+
+---
+
+### D.4.3 Backend API Routes
+
+**File:** `backend/src/routes/`
+
+| Route | Method | Purpose | Auth |
+|-------|--------|---------|------|
+| `/auth/register` | POST | User registration | Public |
+| `/auth/login` | POST | User login | Public |
+| `/auth/refresh-token` | POST | Refresh access token | Public |
+| `/auth/logout` | POST | Logout and invalidate refresh token | JWT |
+| `/auth/profile` | GET | Get user profile | JWT |
+| `/auth/profile` | PUT | Update user profile | JWT |
+| `/auth/forgot-password` | POST | Request password reset | Public |
+| `/auth/reset-password` | POST | Reset password with token | Public |
+| **Classes Routes** |
+| `/classes` | GET | List all classes for user | JWT |
+| `/classes` | POST | Create new class | JWT |
+| `/classes/:id` | GET | Get class details with stats | JWT |
+| `/classes/:id` | PUT | Update class | JWT |
+| `/classes/:id` | DELETE | Delete class | JWT |
+| `/classes/:id/archive` | PATCH | Toggle archive status | JWT |
+| `/classes/:id/stats` | GET | Get class statistics | JWT |
+| **Links Routes** |
+| `/classes/:classId/links` | GET | Get meeting links for class | JWT |
+| `/classes/:classId/links` | POST | Add meeting link | JWT |
+| `/classes/:classId/links/:linkId` | PUT | Update link | JWT |
+| `/classes/:classId/links/:linkId` | DELETE | Delete link | JWT |
+| **Exempted Accounts Routes** |
+| `/classes/:classId/exempted` | GET | Get exempted accounts | JWT |
+| `/classes/:classId/exempted` | POST | Add exempted account | JWT |
+| `/classes/:classId/exempted/:id` | DELETE | Remove exempted account | JWT |
+| **Students Routes** |
+| `/classes/:classId/students` | GET | List students in class | JWT |
+| `/classes/:classId/students` | POST | Add student | JWT |
+| `/classes/:classId/students/import` | POST | Bulk import from CSV | JWT |
+| `/students/:id` | GET | Get student details | JWT |
+| `/students/:id` | PUT | Update student | JWT |
+| `/students/:id` | DELETE | Remove student | JWT |
+| `/students/bulk-delete` | POST | Delete multiple students | JWT |
+| `/students/check-duplicates` | POST | Find potential duplicates | JWT |
+| **Sessions Routes** |
+| `/sessions` | GET | List sessions with filters | JWT |
+| `/sessions` | POST | Create session | JWT/Extension |
+| `/sessions/:id` | GET | Get session with attendance summary | JWT |
+| `/sessions/:id/start` | PATCH | Start session | JWT/Extension |
+| `/sessions/:id/end` | PATCH | End session | JWT/Extension |
+| `/sessions/:id/attendance` | GET | Get attendance records | JWT |
+| `/sessions/:id/attendance-intervals` | GET | Get join/leave intervals | JWT |
+| **Participation Routes** |
+| `/sessions/:sessionId/participation` | GET | Get all participation logs | JWT |
+| `/sessions/:sessionId/participation` | POST | Log participation event | Extension |
+| `/students/:studentId/participation` | GET | Get student's participation history | JWT |
+| `/participation/stats` | GET | Aggregated participation statistics | JWT |
+| **Extension Token Routes** |
+| `/extension-tokens` | GET | List extension tokens | JWT |
+| `/extension-tokens` | POST | Generate new token | JWT |
+| `/extension-tokens/:id` | DELETE | Revoke token | JWT |
+| `/extension-tokens/revoke-all` | POST | Revoke all tokens | JWT |
+
+---
+
+## D.5 Frontend Component Hierarchy
+
+### D.5.1 Participation Tracking Components
+
+Located in `frontend/src/components/Participation/`
+
+| Component | Purpose |
+|-----------|---------|
+| **ParticipationSummary.jsx** | Statistics cards (total events, event type breakdown, top student) |
+| **ParticipationLogsList.jsx** | Scrollable chronological list of all participation events |
+| **InteractionTypeBadge.jsx** | Visual badges for event types (Chat 💬, Reaction 😊, Hand ✋, Mic 🎤, Attendance 📍) |
+| **ParticipationFilters.jsx** | Filters by date range, event type, student name |
+
+### D.5.2 Student Management Components
+
+Located in `frontend/src/components/Students/`
+
+| Component | Purpose |
+|-----------|---------|
+| **StudentRosterToolbar.jsx** | Action buttons (Create, Import, Merge, Export) and search bar |
+| **StudentTableRow.jsx** | Individual row showing student name, ID, tags, status, actions |
+| **StudentFormModal.jsx** | Modal for creating/editing single student |
+| **StudentImportModal.jsx** | CSV upload and preview UI |
+| **StudentMergeModal.jsx** | Interface for merging duplicate student records |
+| **StudentBulkActionsBar.jsx** | Multi-select toolbar (delete, add tags, export selected) |
+| **StudentNotesModal.jsx** | Notes editor for student |
+| **TagManagementModal.jsx** | Create/edit/assign student tags |
+
+### D.5.3 Session Management Components
+
+Located in `frontend/src/components/Sessions/`
+
+| Component | Purpose |
+|-----------|---------|
+| **SessionCalendarView.jsx** | Calendar visualization of sessions by date |
+| **SessionFormModal.jsx** | Create/edit session with time, class, meeting link selection |
+| **AttendanceRoster.jsx** | Table showing attendance status for all students (Present/Late/Absent) |
+
+### D.5.4 Class Management Components
+
+Located in `frontend/src/components/ClassDetails/`
+
+| Component | Purpose |
+|-----------|---------|
+| **ClassFormModal.jsx** | Create/edit class with name, subject, section, schedule |
+| **SessionLinksModal.jsx** | Manage meeting links (Google Meet, Zoom URLs) |
+| **ExemptionListModal.jsx** | Add/remove exempted accounts (admin accounts, test users) |
+
+### D.5.5 Analytics Components
+
+| Component | Purpose |
+|-----------|---------|
+| **ClassAnalytics.jsx** | Class-level participation trends and statistics |
+| **StudentAnalytics.jsx** | Individual student engagement metrics and history |
+| **DateRangePicker.jsx** | Reusable date range selector with presets |
+
+### D.5.6 Utility Components
+
+| Component | Purpose |
+|-----------|---------|
+| **Layout.jsx** | Main page wrapper with sidebar navigation and header |
+| **ActiveSessionCard.jsx** | Display of currently active session with participant count |
+| **LiveEventFeed.jsx** | Real-time event stream display with auto-scroll |
+
+---
+
+## D.6 Zoom Bridge (Zoom Apps SDK) Architecture
+
+### D.6.1 Zoom Apps SDK Implementation
+
+**File:** `frontend/src/pages/ZoomIframeBridge.jsx`
+
+**Purpose:** Embedded interface within Zoom meetings using Zoom Apps SDK for real-time participation monitoring.
+
+**Key Capabilities:**
+- Access Zoom meeting metadata (meeting ID, participants, duration)
+- Real-time participant join/leave events via Zoom API
+- Display live participation feed from backend
+- Communicate with backend using authenticated API calls
+- Sidebar/widget display within meeting interface
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────┐
+│  Zoom Meeting (Browser)                          │
+│                                                  │
+│  ┌────────────────────────────────────────────┐ │
+│  │  Zoom Apps SDK Iframe (ZoomIframeBridge)  │ │
+│  │                                            │ │
+│  │  ┌──────────────────────────────────────┐ │ │
+│  │  │ Real-time Participation Feed          │ │ │
+│  │  │ - Chat events                         │ │ │
+│  │  │ - Reactions                           │ │ │
+│  │  │ - Hand raises                         │ │ │
+│  │  │ - Participant list                    │ │ │
+│  │  └──────────────────────────────────────┘ │ │
+│  │                                            │ │
+│  │  ┌──────────────────────────────────────┐ │ │
+│  │  │ Session Controls                      │ │ │
+│  │  │ - End session                         │ │ │
+│  │  │ - View analytics                      │ │ │
+│  │  └──────────────────────────────────────┘ │ │
+│  └────────────────────────────────────────────┘ │
+│                                                  │
+│  ┌────────────────────────────────────────────┐ │
+│  │  Zoom Meeting Main Area                    │ │
+│  │  (Video, Screen Share, Participants)       │ │
+│  └────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────┘
+         ↓ (WebSocket events)
+┌─────────────────────────────────────────────────┐
+│  Backend Socket Server                          │
+│  - Room: session:{sessionId}                    │
+│  - Events: participation:logged, participant   │
+└─────────────────────────────────────────────────┘
+```
+
+### D.6.2 Service Modules for Zoom Integration
+
+| File | Purpose |
+|------|---------|
+| `frontend/src/services/zoomSdkBridge.js` | Bridge between Zoom SDK and React components; initializes Zoom context |
+| `frontend/src/services/zoomIframeApi.js` | API client with Zoom context authentication |
+| `frontend/src/pages/ZoomOAuthCallback.jsx` | OAuth flow handler for Zoom authorization |
+
+---
+
+## D.7 Development Technology Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Backend Runtime** | Node.js 18+ | JavaScript runtime |
+| **Framework** | Express.js 4.x | HTTP server and routing |
+| **Database** | PostgreSQL 13+ | Data persistence |
+| **ORM** | Sequelize 6.x | Database abstraction and models |
+| **Real-time** | Socket.io 4.x | WebSocket server for live events |
+| **Authentication** | JWT (jsonwebtoken) | Token-based auth |
+| **Password Hashing** | bcrypt | Secure password storage |
+| **Email** | Nodemailer | Sending password reset emails |
+| **Frontend Framework** | React 18+ | Component-based UI |
+| **Build Tool** | Vite | Fast build and dev server |
+| **Styling** | Tailwind CSS 3.x | Utility-first CSS framework |
+| **State Management** | React Context API | App-level state |
+| **HTTP Client** | Axios | HTTP requests with interceptors |
+| **Date Handling** | date-fns | Date manipulation utilities |
+| **CSV Generation** | papaparse | CSV export functionality |
+| **Extension Manifest** | Manifest V3 | Chrome extension standard |
+| **Zoom Integration** | Zoom Apps SDK | In-meeting embedded app |
+| **Storage** | chrome.storage API | Extension local/sync storage |
+
+---
+
+## D.8 Configuration and Environment
+
+### D.8.1 Key Environment Variables
+
+**Backend (`backend/.env`):**
+```
+PORT=5000
+DATABASE_URL=postgresql://user:pass@localhost:5432/engagium
+JWT_SECRET=your-secret-key
+JWT_REFRESH_SECRET=your-refresh-secret
+REDIS_URL=redis://localhost:6379
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=app-specific-password
+CLIENT_URL=http://localhost:5173
+```
+
+**Frontend (`frontend/.env`):**
+```
+VITE_API_URL=http://localhost:5000
+VITE_ZOOM_CLIENT_ID=your-zoom-client-id
+```
+
+**Extension (`_extension/.env`):**
+```
+VITE_API_URL=http://localhost:5000
+```
+
+### D.8.2 Dockerfile Configuration
+
+- **Backend:** Node.js base image, npm install, Express server on port 5000
+- **Frontend:** Node.js build stage, Vite production build, Nginx serving on port 80
+- **Nginx:** Reverse proxy routing frontend and backend
+
+Development compose uses `docker-compose.dev.yml`; production uses `docker-compose.prod.yml` with secrets management.
