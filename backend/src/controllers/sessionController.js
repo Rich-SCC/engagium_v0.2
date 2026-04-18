@@ -401,6 +401,13 @@ const getSession = async (req, res) => {
   try {
     const { id } = req.params;
 
+    if (!UUID_REGEX.test(String(id || ''))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid session id'
+      });
+    }
+
     const session = await Session.findById(id);
 
     if (!session) {
@@ -640,11 +647,37 @@ const submitBulkAttendance = async (req, res) => {
     const { id } = req.params;
     const { attendance } = req.body;
 
+    if (!UUID_REGEX.test(String(id || ''))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid session id'
+      });
+    }
+
     // Validate input
     if (!attendance || !Array.isArray(attendance)) {
       return res.status(400).json({
         success: false,
         error: 'Attendance array is required'
+      });
+    }
+
+    const invalidRecord = attendance.find((record) => {
+      if (!record || typeof record !== 'object') {
+        return true;
+      }
+
+      const participantName = typeof record.participant_name === 'string'
+        ? record.participant_name.trim()
+        : '';
+
+      return participantName.length === 0;
+    });
+
+    if (invalidRecord) {
+      return res.status(400).json({
+        success: false,
+        error: 'Each attendance record must include a non-empty participant_name'
       });
     }
 
@@ -1611,18 +1644,41 @@ const linkParticipantToStudent = async (req, res) => {
   try {
     const { id: sessionId } = req.params;
     const { participant_name, student_id, create_student = false } = req.body;
+    const normalizedParticipantName = String(participant_name || '').trim();
+    const normalizedStudentId = student_id ? String(student_id).trim() : null;
 
     debugLog('[API] linkParticipantToStudent called:', {
       sessionId,
-      participant_name,
-      student_id,
+      participant_name: normalizedParticipantName,
+      student_id: normalizedStudentId,
       create_student
     });
 
-    if (!participant_name) {
+    if (!UUID_REGEX.test(String(sessionId || ''))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid session id'
+      });
+    }
+
+    if (!normalizedParticipantName) {
       return res.status(400).json({
         success: false,
         error: 'participant_name is required'
+      });
+    }
+
+    if (normalizedParticipantName.length > 255) {
+      return res.status(400).json({
+        success: false,
+        error: 'participant_name must be 255 characters or fewer'
+      });
+    }
+
+    if (normalizedStudentId && !UUID_REGEX.test(normalizedStudentId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid student id'
       });
     }
 
@@ -1642,15 +1698,15 @@ const linkParticipantToStudent = async (req, res) => {
       });
     }
 
-    let targetStudentId = student_id;
+    let targetStudentId = normalizedStudentId;
     let createdNew = false;
     let studentRecord = null;
 
     // Create new student from participant if requested
-    if (create_student && !student_id) {
-      debugLog('[API] Creating student from participant:', participant_name);
+    if (create_student && !normalizedStudentId) {
+      debugLog('[API] Creating student from participant:', normalizedParticipantName);
       
-      const result = await Student.createFromParticipant(session.class_id, participant_name);
+      const result = await Student.createFromParticipant(session.class_id, normalizedParticipantName);
       
       // Handle the return structure: { created: boolean, student: object }
       studentRecord = result.student || result;
@@ -1674,25 +1730,25 @@ const linkParticipantToStudent = async (req, res) => {
     // Link attendance record to student
     debugLog('[API] Linking attendance record:', {
       sessionId,
-      participant_name,
+      participant_name: normalizedParticipantName,
       targetStudentId
     });
     
-    const attendanceRecord = await AttendanceRecord.linkToStudent(sessionId, participant_name, targetStudentId);
+    const attendanceRecord = await AttendanceRecord.linkToStudent(sessionId, normalizedParticipantName, targetStudentId);
     
     if (!attendanceRecord) {
-      console.warn('[API] No attendance record found for participant:', participant_name);
+      console.warn('[API] No attendance record found for participant:', normalizedParticipantName);
     }
 
     // Link all intervals to student
     debugLog('[API] Linking intervals to student');
-    await AttendanceInterval.linkToStudent(sessionId, participant_name, targetStudentId);
+    await AttendanceInterval.linkToStudent(sessionId, normalizedParticipantName, targetStudentId);
 
     // Backfill participation logs for this participant so analytics can map activity to the student.
     debugLog('[API] Linking participation logs to student');
     const linkedLogsCount = await ParticipationLog.linkParticipantLogsToStudent(
       sessionId,
-      participant_name,
+      normalizedParticipantName,
       targetStudentId
     );
 
@@ -1702,7 +1758,7 @@ const linkParticipantToStudent = async (req, res) => {
     }
 
     const message = create_student && createdNew
-      ? `Created student "${participant_name}" and linked attendance`
+      ? `Created student "${normalizedParticipantName}" and linked attendance`
       : `Linked attendance to student "${studentRecord.full_name}"`;
 
     debugLog('[API] ✅ Successfully linked participant to student:', message);

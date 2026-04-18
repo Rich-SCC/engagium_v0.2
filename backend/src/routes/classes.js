@@ -72,7 +72,7 @@ router.get('/:classId/students/:studentId/analytics', instructorAuth, getStudent
 router.get('/', flexibleAuth, getClasses);
 router.get('/:id', flexibleAuth, getClass);
 router.get('/:classId/students', flexibleAuth, getStudents);
-router.get('/:classId/students/:studentId', flexibleAuth, getStudentDetails);
+router.get('/:classId/students/:studentId([0-9a-fA-F-]{36})', flexibleAuth, getStudentDetails);
 
 // Extension-compatible route for adding unmapped participants as students
 router.post('/:classId/students/bulk', flexibleAuth, bulkAddStudents);

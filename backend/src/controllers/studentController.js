@@ -5,6 +5,10 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const { Readable } = require('stream');
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuid = (value) => UUID_REGEX.test(String(value || '').trim());
+
 // Configure multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -33,6 +37,13 @@ const getStudents = async (req, res) => {
       limit,
       offset
     } = req.query;
+
+    if (!isUuid(classId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid class id'
+      });
+    }
 
     // Verify class exists and user has access
     const classData = await Class.findById(classId);
@@ -87,6 +98,13 @@ const addStudent = async (req, res) => {
   try {
     const { classId } = req.params;
     const { full_name } = req.body;
+
+    if (!isUuid(classId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid class id'
+      });
+    }
 
     // Verify class exists and user has access
     const classData = await Class.findById(classId);
@@ -370,10 +388,28 @@ const bulkDeleteStudents = async (req, res) => {
     const { classId } = req.params;
     const { student_ids } = req.body;
 
+    if (!isUuid(classId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid class id'
+      });
+    }
+
     if (!student_ids || !Array.isArray(student_ids) || student_ids.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'student_ids array is required'
+      });
+    }
+
+    const sanitizedStudentIds = student_ids
+      .map((id) => String(id || '').trim())
+      .filter((id) => isUuid(id));
+
+    if (sanitizedStudentIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'student_ids must contain valid UUIDs'
       });
     }
 
@@ -393,7 +429,7 @@ const bulkDeleteStudents = async (req, res) => {
       });
     }
 
-    const deletedCount = await Student.bulkDelete(student_ids);
+    const deletedCount = await Student.bulkDelete(sanitizedStudentIds);
 
     res.json({
       success: true,

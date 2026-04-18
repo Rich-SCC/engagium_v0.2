@@ -2,6 +2,26 @@ import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { authAPI } from '@/services/api';
 import { getToken, getRefreshToken, setTokens, removeTokens, isTokenValid } from '@/utils/auth';
 
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 5000;
+
+const unwrapAuthResponse = (response) => response?.data ?? response;
+
+const extractAuthPayload = (response) => unwrapAuthResponse(response)?.data ?? unwrapAuthResponse(response);
+
+const withTimeout = (promise, timeoutMs, timeoutMessage) => {
+  let timeoutId;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  });
+};
+
 // Auth context
 const AuthContext = createContext();
 
@@ -134,25 +154,34 @@ export const AuthProvider = ({ children }) => {
       if (token && isTokenValid()) {
         try {
           // Verify token by fetching user profile
-          const response = await authAPI.getProfile();
+          const response = await withTimeout(
+            authAPI.getProfile(),
+            AUTH_BOOTSTRAP_TIMEOUT_MS,
+            'Auth bootstrap timed out'
+          );
+          const payload = extractAuthPayload(response);
 
           dispatch({
             type: 'LOGIN_SUCCESS',
             payload: {
-              user: response.data.user,
+              user: payload?.user,
               token,
             },
           });
         } catch (error) {
           // Token/profile verification failed.
           removeTokens();
-          dispatch({ type: 'INIT_COMPLETE' });
         }
       } else if (refreshToken) {
         try {
-          const refreshResponse = await authAPI.refreshToken(refreshToken);
-          const newAccessToken = refreshResponse?.data?.accessToken;
-          const newRefreshToken = refreshResponse?.data?.refreshToken || refreshToken;
+          const refreshResponse = await withTimeout(
+            authAPI.refreshToken(refreshToken),
+            AUTH_BOOTSTRAP_TIMEOUT_MS,
+            'Auth refresh timed out'
+          );
+          const refreshPayload = extractAuthPayload(refreshResponse);
+          const newAccessToken = refreshPayload?.accessToken;
+          const newRefreshToken = refreshPayload?.refreshToken || refreshToken;
 
           if (!newAccessToken) {
             throw new Error('Missing access token from refresh response');
@@ -160,25 +189,30 @@ export const AuthProvider = ({ children }) => {
 
           setTokens(newAccessToken, newRefreshToken);
 
-          const profileResponse = await authAPI.getProfile();
+          const profileResponse = await withTimeout(
+            authAPI.getProfile(),
+            AUTH_BOOTSTRAP_TIMEOUT_MS,
+            'Profile verification timed out'
+          );
+          const profilePayload = extractAuthPayload(profileResponse);
           dispatch({
             type: 'LOGIN_SUCCESS',
             payload: {
-              user: profileResponse.data.user,
+              user: profilePayload?.user,
               token: newAccessToken,
             },
           });
         } catch (error) {
           removeTokens();
-          dispatch({ type: 'INIT_COMPLETE' });
         }
       } else {
         // No token or invalid token
         if (token) {
           removeTokens();
         }
-        dispatch({ type: 'INIT_COMPLETE' });
       }
+
+      dispatch({ type: 'INIT_COMPLETE' });
     };
 
     initializeAuth();
@@ -190,7 +224,7 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const response = await authAPI.login(credentials);
-      const { user, accessToken, refreshToken } = response.data;
+      const { user, accessToken, refreshToken } = extractAuthPayload(response);
 
       setTokens(accessToken, refreshToken);
       dispatch({
@@ -214,7 +248,7 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const response = await authAPI.register(userData);
-      const { user, accessToken, refreshToken } = response.data;
+      const { user, accessToken, refreshToken } = extractAuthPayload(response);
 
       setTokens(accessToken, refreshToken);
       dispatch({
@@ -251,10 +285,11 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const response = await authAPI.updateProfile(userData);
+      const payload = extractAuthPayload(response);
 
       dispatch({
         type: 'UPDATE_PROFILE_SUCCESS',
-        payload: response.data.user,
+        payload: payload?.user,
       });
 
       return { success: true };
