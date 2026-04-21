@@ -94,9 +94,8 @@ G.5 Summary of Statistical Treatment by Data Type
 H.1 Pre-Development Survey Results  
 H.2 Post-Development Survey Results  
 H.3 SUS Score Summary  
-H.4 Accuracy Testing Results  
-H.5 Thematic Analysis Summary  
-H.6 Reliability Analysis
+H.4 Thematic Analysis Summary  
+H.5 Reliability Analysis
 
 ---
 

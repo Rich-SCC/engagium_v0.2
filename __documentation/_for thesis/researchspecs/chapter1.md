@@ -6,7 +6,7 @@
 The global transition to online and blended learning has profoundly reshaped higher education, especially synchronous instruction delivered through platforms such as Google Meet and Zoom. These tools ensured instructional continuity but exposed persistent difficulties in monitoring student engagement during live sessions. Studies confirm that student participation is a key determinant of academic success, as it enhances collaboration, motivation, and deeper comprehension (Martin & Bolliger, 2018). Yet, in virtual classrooms, participation can appear in multiple forms-speaking, chatting, raising a hand, reacting, or toggling the microphone-that instructors often fail to capture consistently (Simon et al., 2025).
 
 Recent research emphasizes that participation, when properly monitored and acknowledged, directly contributes to improved performance and sustained motivation in online learning (Fu et al., 2024; Karmini, Yudabakti, Seniwati, Makulua, & Burnama, 2024). The challenge lies in the absence of tools that fairly represent student contributions across modalities. At St. Clare College of Caloocan, professors who conduct blended classes still need a consistent way to capture engagement during synchronous online meetings. Without reliable data, instructors may unintentionally overlook students who participate through less visible means, such as chat messages or reactions, resulting in perceptions of bias and inequitable grading.
-To address this instructional gap, the researchers propose ENGAGIUM: Class Participation Tracker for Online Learning, a web-based system with a Google Meet extension and a Zoom extension designed to assist professors in monitoring synchronous participation objectively. ENGAGIUM automatically captures participation events such as microphone activity, chat interactions, reactions, and hand-raise actions, then visualizes them through instructor-facing dashboards and reports. By transforming participation into measurable data, the system promotes transparency, fairness, and more consistent grading in virtual classrooms.
+To address this instructional gap, the researchers propose ENGAGIUM: Class Participation Tracker for Online Learning, a web-based system with a Google Meet extension and a Zoom integration pathway (via Zoom Apps SDK) designed to assist professors in monitoring synchronous participation objectively. ENGAGIUM automatically captures participation events such as microphone activity, chat interactions, reactions, and hand-raise actions, then visualizes them through instructor-facing dashboards and reports, subject to platform-level capability boundaries. By transforming participation into measurable data, the system promotes transparency, fairness, and more consistent grading in virtual classrooms.
 
 Therefore, this study aims to design and develop ENGAGIUM, integrating educational theory and technology to create an equitable, data-driven approach to participation assessment in synchronous online and blended learning environments.
 
@@ -20,7 +20,7 @@ How can professors of St. Clare College of Caloocan fairly and consistently trac
 2.	How can a system be designed to automatically recognize and categorize participation events such as join/leave, chat, reactions, hand raises, and microphone activity?
 3.	How can the system generate instructor-facing participation summaries and class-level reports that professors can use for grading and feedback?
 4.	How can the system minimize grading bias by replacing manual observation with recorded participation data and session logs?
-5.	How can the developed system be integrated into the current workflow through a Google Meet extension and a Zoom extension?
+5.	How can the developed system be integrated into the current workflow through a Google Meet extension and a Zoom integration pathway?
 6.	How can the usability, reliability, and accuracy of the system be evaluated in terms of event capture, data recording, and dashboard reporting?
 
 ### Objective of the Study
@@ -53,7 +53,7 @@ The study focuses on the design, development, and evaluation of ENGAGIUM, a prof
 
 - Tracks real-time participation events such as join/leave activity, microphone activity, chat messages, reaction use, and hand-raise actions.
 - Generates instructor-facing dashboards and participation summaries for individual classes.
-- Uses a Google Meet extension and a Zoom extension for online class participation tracking.
+- Uses a Google Meet extension and a Zoom integration pathway (Zoom Apps SDK bridge) for online class participation tracking.
 - Stores participation metadata and text-based content only, excluding audio and video recordings.
 - Supports meeting-driven session creation, tracking, and closure for professor-owned classes.
 - Utilizes the Agile Software Development Life Cycle (SDLC) methodology for iterative design, testing, and improvement.
