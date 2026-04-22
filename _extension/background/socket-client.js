@@ -5,16 +5,13 @@
  * Connection is ONLY active during live tracking sessions.
  */
 
-import { API_BASE_URL, STORAGE_KEYS } from '../utils/constants.js';
+import { STORAGE_KEYS } from '../utils/constants.js';
 import { debug } from '../utils/debug-logger.js';
-import { getAuthToken } from '../utils/auth.js';
+import { getAuthToken, getApiBaseUrl } from '../utils/auth.js';
 import { now } from '../utils/date-utils.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('Socket');
-
-// Socket.io client for service workers (using polling since WebSocket isn't available in service workers)
-const SOCKET_URL = API_BASE_URL.replace('/api', '');
 
 class SocketClient {
   constructor() {
@@ -26,6 +23,7 @@ class SocketClient {
     this.reconnectDelay = 1000;
     this.eventHandlers = new Map();
     this.pendingEvents = [];
+    this.apiBaseUrl = null;
   }
 
   /**
@@ -54,6 +52,8 @@ class SocketClient {
         logger.error(' No auth token available');
         return false;
       }
+
+      this.apiBaseUrl = await getApiBaseUrl();
 
       // For service workers, we use Server-Sent Events (SSE) or polling
       // since native WebSocket isn't reliably available
@@ -202,7 +202,8 @@ class SocketClient {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/sessions/live-event`, {
+      const apiBaseUrl = this.apiBaseUrl || await getApiBaseUrl();
+      const response = await fetch(`${apiBaseUrl}/sessions/live-event`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

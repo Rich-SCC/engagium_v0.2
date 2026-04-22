@@ -64,6 +64,7 @@ export const INTERACTION_TYPES = {
 export const STORAGE_KEYS = {
   AUTH_TOKEN: 'auth_token',
   USER_INFO: 'user_info',
+  API_BASE_URL: 'api_base_url',
   MEETING_MAPPINGS: 'meeting_mappings',
   LAST_SYNC: 'last_sync',
   AUTO_OPEN_POPUP: 'auto_open_popup',

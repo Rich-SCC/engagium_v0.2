@@ -5,6 +5,85 @@
 
 import { STORAGE_KEYS } from './constants.js';
 
+const API_BASE_URL_CANDIDATES = [
+  'https://engagium.app/api',
+  'https://dev.engagium.app/api'
+];
+
+let cachedApiBaseUrl = null;
+
+function normalizeApiBaseUrl(baseUrl) {
+  return typeof baseUrl === 'string' ? baseUrl.replace(/\/+$/, '') : null;
+}
+
+async function readStoredApiBaseUrl() {
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEYS.API_BASE_URL);
+    return normalizeApiBaseUrl(result[STORAGE_KEYS.API_BASE_URL]);
+  } catch (error) {
+    console.error('[Auth] Failed to get API base URL:', error);
+    return null;
+  }
+}
+
+async function storeApiBaseUrl(baseUrl) {
+  const normalized = normalizeApiBaseUrl(baseUrl);
+
+  if (!normalized) {
+    return;
+  }
+
+  cachedApiBaseUrl = normalized;
+
+  try {
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.API_BASE_URL]: normalized
+    });
+  } catch (error) {
+    console.error('[Auth] Failed to store API base URL:', error);
+  }
+}
+
+async function verifyTokenAgainstBaseUrl(baseUrl, token) {
+  const response = await fetch(`${baseUrl}/extension-tokens/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token })
+  });
+
+  if (!response.ok) {
+    return { valid: false };
+  }
+
+  const data = await response.json();
+  return {
+    valid: true,
+    user: data?.data?.user || null
+  };
+}
+
+async function discoverApiBaseUrl(token) {
+  const storedBaseUrl = cachedApiBaseUrl || await readStoredApiBaseUrl();
+  const candidates = [storedBaseUrl, ...API_BASE_URL_CANDIDATES]
+    .map(normalizeApiBaseUrl)
+    .filter(Boolean);
+  const uniqueCandidates = [...new Set(candidates)];
+
+  for (const baseUrl of uniqueCandidates) {
+    try {
+      const result = await verifyTokenAgainstBaseUrl(baseUrl, token);
+      if (result.valid) {
+        await storeApiBaseUrl(baseUrl);
+        return { baseUrl, ...result };
+      }
+    } catch (error) {
+      // Try the next known host.
+    }
+  }
+
+  return null;
+}
+
 /**
  * Check if running in development environment
  * @returns {boolean} True if in development mode
@@ -14,13 +93,21 @@ export function isDevEnvironment() {
 }
 
 /**
- * Get the API base URL based on environment
+ * Get the currently selected API base URL
  * @returns {string} API base URL
  */
-export function getApiBaseUrl() {
-  return isDevEnvironment() 
-    ? 'https://dev.engagium.app'
-    : 'https://engagium.app';
+export async function getApiBaseUrl() {
+  if (cachedApiBaseUrl) {
+    return cachedApiBaseUrl;
+  }
+
+  const storedBaseUrl = await readStoredApiBaseUrl();
+  if (storedBaseUrl) {
+    cachedApiBaseUrl = storedBaseUrl;
+    return storedBaseUrl;
+  }
+
+  return API_BASE_URL_CANDIDATES[0];
 }
 
 /**
@@ -71,19 +158,13 @@ export async function clearAuthToken() {
  */
 export async function verifyAuthToken(token) {
   try {
-    const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}/api/extension-tokens/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token })
-    });
+    const discovered = await discoverApiBaseUrl(token);
 
-    if (!response.ok) {
+    if (!discovered) {
       return { valid: false };
     }
 
-    const data = await response.json();
-    return { valid: true, user: data.user };
+    return { valid: true, user: discovered.user };
   } catch (error) {
     console.error('[Auth] Token verification failed:', error);
     return { valid: false };

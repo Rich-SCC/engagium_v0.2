@@ -3,9 +3,9 @@
  * Handles all API calls with authentication
  */
 
-import { API_BASE_URL, PLATFORMS } from '../utils/constants.js';
+import { PLATFORMS } from '../utils/constants.js';
 import { formatGoogleMeetUrl } from '../utils/url-utils.js';
-import { getAuthToken, clearAuthToken, verifyAuthToken } from '../utils/auth.js';
+import { getAuthToken, clearAuthToken, verifyAuthToken, getApiBaseUrl } from '../utils/auth.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('API');
@@ -25,7 +25,8 @@ async function apiRequest(endpoint, options = {}) {
     throw new Error('Not authenticated. Please login in extension options.');
   }
 
-  const url = `${API_BASE_URL}${endpoint}`;
+  const baseUrl = await getApiBaseUrl();
+  const url = `${baseUrl}${endpoint}`;
   const headers = {
     'Content-Type': 'application/json',
     'X-Extension-Token': token,
@@ -89,7 +90,8 @@ export async function getUserInfo() {
     if (!token) throw new Error('Not authenticated');
     
     // Verify token and get user info in one call
-    const url = `${API_BASE_URL}/extension-tokens/verify`;
+    const baseUrl = await getApiBaseUrl();
+    const url = `${baseUrl}/extension-tokens/verify`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {

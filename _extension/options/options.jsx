@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { STORAGE_KEYS } from '../utils/constants.js';
 import { formatClassDisplay } from '../utils/class-formatter.js';
-import { getApiBaseUrl, verifyAuthToken, clearAuthToken } from '../utils/auth.js';
+import { verifyAuthToken, clearAuthToken } from '../utils/auth.js';
 import './options.css';
 
 function OptionsApp() {
@@ -119,32 +119,22 @@ function OptionsApp() {
       }
 
       // Validate token using the new extension token verification endpoint
-      const baseUrl = getApiBaseUrl();
-      
-      const response = await fetch(`${baseUrl}/api/extension-tokens/verify`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ token })
-      });
+      const result = await verifyAuthToken(token);
 
-      const data = await response.json();
-
-      if (!data.success) {
-        showMessage('error', data.error || 'Invalid or expired token');
+      if (!result.valid) {
+        showMessage('error', 'Invalid or expired token');
         return;
       }
 
       // Store token and user info
       await chrome.storage.local.set({
         [STORAGE_KEYS.AUTH_TOKEN]: token,
-        [STORAGE_KEYS.USER_INFO]: data.data.user
+        [STORAGE_KEYS.USER_INFO]: result.user
       });
 
       setAuthToken(token);
       setIsAuthenticated(true);
-      setUserInfo(data.data.user);
+      setUserInfo(result.user);
       
       // Load classes
       await loadClasses();
