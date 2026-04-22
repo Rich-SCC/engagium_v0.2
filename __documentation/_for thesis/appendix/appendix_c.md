@@ -112,19 +112,20 @@ This appendix presents screenshots of the key user interface screens in the ENGA
 
 ---
 
-## C.7 Sessions (Calendar View)
+## C.7 Sessions Overview
 
-**Purpose:** Displays all sessions for the instructor in a calendar format for easy browsing and session management.
+**Purpose:** Displays all sessions in a grouped overview table, letting instructors review bundled session records first and then open individual session fragment details when needed.
 
 **Key Elements:**
-- Calendar view (month/week/day options)
-- Create Session button
-- Session indicators on calendar with class name and time
-- Click to view session details
-- Session status color coding (scheduled, active, completed)
-- Navigate between months/periods
+- Mode toggle between `Session` and `Session Fragments`
+- Class and timespan filters with a reset control
+- Grouped session rows organized by date
+- Summary columns for planned window, actual window, window drift, fragment count, break time, and attendance rate
+- Expand/collapse controls for viewing the fragments inside each grouped session
+- Links to open the bundled session view or an individual fragment detail page
+- Cleanup modal for unassigned fragments that need review, assignment, dismissal, or deletion
 
-[Screenshot: Sessions Calendar View - TBD]
+[Screenshot: Sessions Overview - TBD]
 
 ---
 
@@ -226,17 +227,20 @@ This appendix presents screenshots of the key user interface screens in the ENGA
 
 ---
 
-## C.13 Zoom OAuth Callback Page
+## C.13 Extension Popup UI
 
-**Purpose:** Handles authentication callback after Zoom OAuth login flow.
+**Purpose:** Provides the main compact extension interface from the browser action popup, where instructors can monitor active sessions, respond to meeting detection, and open extension settings.
 
 **Key Elements:**
-- Loading indicator during authentication processing
-- Success message upon completion
-- Automatic redirect to dashboard
-- Error message if authentication fails with troubleshooting guidance
+- Engagium Tracker header with branding and settings button
+- Loading state and inline error message display
+- Meeting Detected banner with platform information
+- Session status summary showing active session state, participants, and duration
+- Start Session and End Session actions
+- Participant list with current session details
+- Controls for class mapping and remembering meeting links when a meeting is detected
 
-[Screenshot: Zoom OAuth Callback Page - TBD]
+[Screenshot: Extension Popup UI - TBD]
 
 ---
 
