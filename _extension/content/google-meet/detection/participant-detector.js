@@ -384,9 +384,9 @@ function setupToastObserver(state) {
         }
 
         // Track reactions from toasts with 5s per-participant debounce
-        if (textLower.includes(CONFIG.PATTERNS.reactedWith)) {
+        if (textLower.includes(CONFIG.PATTERNS.reactedWith) || /\breacted\b/i.test(text)) {
           const reaction = extractReactionFromToast(text);
-          const name = extractNameFromToast(text, CONFIG.PATTERNS.reactedWith);
+          const name = extractNameFromReactionToast(text);
           if (name && reaction && !isInvalidParticipant(name, CONFIG) && isValidToastName(name)) {
             const normalized = name.toLowerCase().trim();
             const lastSeen = reactionDebounceByParticipant.get(normalized) || 0;
@@ -416,6 +416,50 @@ function setupToastObserver(state) {
   });
   
   log('Toast observer active for join/leave notifications');
+}
+
+/**
+ * Extract participant name from a reaction toast.
+ * Handles variants like "Name reacted 👍" and "Name reacted with 👍".
+ * @param {string} text - Toast text content
+ * @returns {string|null}
+ */
+function extractNameFromReactionToast(text) {
+  if (!text) return null;
+
+  const patterns = [
+    /^(.*?)\s+reacted\s+with\b/i,
+    /^(.*?)\s+reacted\b/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const cleaned = cleanReactionToastName(match[1]);
+      if (cleaned && cleaned !== 'keep_outline') {
+        return cleaned;
+      }
+    }
+  }
+
+  const cleanedFallback = cleanReactionToastName(text);
+  return cleanedFallback && cleanedFallback !== 'keep_outline' ? cleanedFallback : null;
+}
+
+/**
+ * Remove UI prefixes/suffixes from a reaction toast sender candidate.
+ * @param {string} value - Raw sender candidate
+ * @returns {string}
+ */
+function cleanReactionToastName(value) {
+  return (value || '')
+    .replace(/^keep_outline$/i, '')
+    .replace(/^keep_outline\s+/i, '')
+    .replace(/^person\s+/i, '')
+    .replace(/^account_circle\s+/i, '')
+    .replace(/\s*reacted.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
