@@ -5,7 +5,7 @@
  * a fallback when reaction toast text is unavailable in newer Meet variants.
  */
 
-import { isInvalidParticipant } from '../core/utils.js';
+import { debounce, isInvalidParticipant } from '../core/utils.js';
 import { queueEvent } from '../core/event-emitter.js';
 import { now } from '../../../utils/date-utils.js';
 import { MESSAGE_TYPES, PLATFORMS } from '../../../utils/constants.js';
@@ -31,8 +31,6 @@ const NOISE_TOKENS = new Set([
 ]);
 
 let reactionObserver = null;
-let reactionScanTimeout = null;
-let pendingReactionRoots = new Set();
 let recentReactionByParticipant = new Map();
 
 /**
@@ -42,33 +40,20 @@ let recentReactionByParticipant = new Map();
 export function startReactionMonitoring(state) {
   stopReactionMonitoring();
 
+  const debouncedProcess = debounce((node) => {
+    if (!state.isTracking) return;
+    processNode(state, node);
+  }, SCAN_DEBOUNCE_MS);
+
   reactionObserver = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       if (mutation.type !== 'childList') continue;
 
       for (const node of mutation.addedNodes) {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
-        pendingReactionRoots.add(node);
+        debouncedProcess(node);
       }
     }
-
-    if (reactionScanTimeout) return;
-
-    reactionScanTimeout = setTimeout(() => {
-      reactionScanTimeout = null;
-
-      if (!state.isTracking) {
-        pendingReactionRoots.clear();
-        return;
-      }
-
-      const roots = [...pendingReactionRoots];
-      pendingReactionRoots.clear();
-
-      for (const rootNode of roots) {
-        processNode(state, rootNode);
-      }
-    }, SCAN_DEBOUNCE_MS);
   });
 
   reactionObserver.observe(document.body, {
@@ -85,13 +70,6 @@ export function stopReactionMonitoring() {
     reactionObserver.disconnect();
     reactionObserver = null;
   }
-
-  if (reactionScanTimeout) {
-    clearTimeout(reactionScanTimeout);
-    reactionScanTimeout = null;
-  }
-
-  pendingReactionRoots.clear();
 
   recentReactionByParticipant.clear();
 }
@@ -153,11 +131,11 @@ function processNode(state, rootNode) {
 function collectReactionImages(rootNode) {
   const images = [];
 
-  if (rootNode.hasAttribute?.('aria-label')) {
+  if (rootNode.tagName === 'IMG' && rootNode.hasAttribute('aria-label')) {
     images.push(rootNode);
   }
 
-  const descendants = rootNode.querySelectorAll?.('img[aria-label], [role="img"][aria-label], [aria-label]') || [];
+  const descendants = rootNode.querySelectorAll?.('img[aria-label]') || [];
   descendants.forEach((img) => images.push(img));
 
   return images;
