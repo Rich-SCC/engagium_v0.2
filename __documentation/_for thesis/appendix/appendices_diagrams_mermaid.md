@@ -11,70 +11,133 @@ This file consolidates the thesis appendix diagrams and provides Mermaid source 
 ```mermaid
 ---
 config:
-  layout: dagre
+  layout: elk
 ---
-flowchart TB
-    I["INSTRUCTOR<br>Primary User"] --> WD["Web Dashboard<br>(React App)"] & CE["Chrome Extension<br>(Google Meet)"] & CSV["CSV Roster Data<br>(Import Flow)"]
-    WD --> SYS["ENGAGIUM<br>Participation Tracking System"]
-    CE --> SYS
-    CSV --> SYS
-    SYS --> GM["Google Meet<br>(DOM Event Source via Extension)"] & ZM["Zoom Meeting Context<br>(Zoom Apps SDK Bridge)"] & EM["Email Service<br>(Password Reset)"]
-    SYS <--> DB[("PostgreSQL DB<br>(System of Record)")]
+flowchart LR
+    INS["Instructor"] -- credentials, commands, edits --> P0["0.0 ENGAGIUM\nParticipation Tracking System"]
+    P0 -- dashboards, analytics, exports, live feed --> INS
+    P0 -- validation feedback, live status --> INS
+
+    GME["Google Meet"] -- join/leave events --> P0
+    GME -- chat, reaction, hand, mic signals --> P0
+    P0 -- live session prompts, participant status --> GME
+
+    ZOOM["Zoom"] -- meeting context --> P0
+    ZOOM -- participant data, bridge events --> P0
+    P0 -- authenticated session actions --> ZOOM
+    P0 -- live status, control responses --> ZOOM
 ```
 
 ---
 
 ## A.2 Level-0 Data Flow Diagram (Exploded Diagram)
 
-```mermaid
----
-config:
-  layout: dagre
----
-flowchart TB
-    IN["Instructor"] -- Credentials and commands --> P1["1.0 Authenticate and Authorize"]
-    P1 -- User context --> P2["2.0 Manage Classes Students Tags Notes Links"]
-    P2 --> P3["3.0 Manage Session Lifecycle"]
-    GM["Google Meet"] -- DOM events --> P4["4.0 Detect Meeting Events Extension"]
-    ZC["Zoom Context"] -- Bridge context --> P5["5.0 Process Bridge Events Zoom"]
-    P4 -- Normalized events --> P6["6.0 Process and Store Session Attendance Participation"]
-    P5 -- Normalized events --> P6
-    P3 --> P6
-    P6 <--> D1[("D1 Database<br>users <br>refresh_tokens <br>extension_tokens<br>classes <br>students <br>sessions <br>attendance<br>participation logs <br>links <br>tags <br>notes")]
-    P6 --> P7["7.0 Generate Live Views and Reports"]
-    P7 --> OUT["Live feed session detail analytics exports"]
+```plantuml
+@startuml
+!theme plain
+top to bottom direction
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ArrowColor Black
+skinparam ArrowThickness 1
+skinparam nodesep 70
+skinparam ranksep 70
+
+' Gane-Sarson style approximation
+skinparam rectangle {
+  BackgroundColor White
+  BorderColor Black
+  RoundCorner 18
+}
+
+skinparam rectangle<<entity>> {
+  RoundCorner 0
+}
+
+skinparam rectangle<<datastore>> {
+  RoundCorner 0
+  BackgroundColor #FAFAFA
+}
+
+rectangle "Instructor" as IN <<entity>>
+rectangle "Google Meet" as GM <<entity>>
+rectangle "Zoom Context" as ZC <<entity>>
+rectangle "Live feed, session detail, analytics, exports" as OUT <<entity>>
+
+rectangle "1.0\nAuthenticate and Authorize" as P1
+rectangle "2.0\nManage Classes, Students,\nTags, Notes, Links" as P2
+rectangle "3.0\nManage Session Lifecycle" as P3
+rectangle "4.0\nDetect Meeting Events\n(Extension)" as P4
+rectangle "5.0\nProcess Bridge Events\n(Zoom)" as P5
+rectangle "6.0\nProcess and Store Session,\nAttendance, Participation Data" as P6
+rectangle "7.0\nGenerate Live Views\nand Reports" as P7
+
+rectangle "D1 Data Store\nusers, refresh_tokens, extension_tokens\nclasses, students, sessions, attendance\nparticipation_logs, links, tags, notes" as D1 <<datastore>>
+
+IN --> P1 : credentials, commands
+P1 --> P2 : user context
+P2 --> P3 : class/session setup
+
+GM --> P4 : DOM events
+ZC --> P5 : bridge context
+
+P4 --> P6 : normalized events
+P5 --> P6 : normalized events
+P3 --> P6 : active session context
+
+P6 --> D1 : writes/updates
+D1 --> P6 : reads/lookups
+
+P6 --> P7 : processed attendance\nand participation data
+P7 --> OUT : dashboard and export outputs
+@enduml
 ```
 
 ---
 
-## A.3 Program Flowchart
+## A.3 User Decision Tree (ISO 5807 — professor-only)
+
+Notation: Follows ISO-5807 conventions for user-facing flows — decisions are binary (Yes/No) and explicit. See: https://cdn.standards.iteh.ai/samples/11955/1b7dd254a2a54fd7a89d616dc0570e18/ISO-5807-1985.pdf
+
+Note: Engagium is professor-only. There is no student or participant login surface. This tree shows the instructor workflow only.
 
 ```mermaid
 ---
 config:
-  layout: dagre
+  layout: elk
 ---
 flowchart TB
-    S(["Start"]) --> Ctx["Instructor enters meeting context<br>Meet or Zoom"]
-    Ctx --> Split{"Entry path"}
-    Split -- Google Meet --> MeetPath["Extension path"]
-    Split -- Zoom --> ZoomPath["Zoom bridge path"]
-    MeetPath --> StartSession["POST /sessions/start-from-meeting"]
-    ZoomPath --> StartSession
-    StartSession --> Active["Backend creates or updates<br>active session"]
-    Active --> Loop{"Session live?"}
-    Loop -- Yes --> EventFork{"Incoming event type"}
-    EventFork --> AJ["Attendance join"] & AL["Attendance leave"] & PE["Participation event<br>chat reaction hand mic"]
-    AJ --> AWrite["Attendance endpoints and interval writes"]
-    AL --> AWrite
-    PE --> PWrite["Live-event or bulk participation writes"]
-    AWrite --> Realtime["Socket.io emits updates<br>to instructor and session rooms"]
-    PWrite --> Realtime
-    Realtime --> UI["Dashboard live feed and session views update"]
-    UI --> Loop
-    Loop -- No --> EndReq["PUT /sessions/:id/end-with-timestamp"]
-    EndReq --> Finalize["Finalize intervals and attendance totals"]
-    Finalize --> E(["End"])
+    Start(["Start"]) --> InputCreds["Input: Credentials<br>(email, password)"]
+    InputCreds --> Login["Log in"]
+    Login --> SelectOrCreate{"Class exists?"}
+    SelectOrCreate -- Yes --> SelectClass["Select class"]
+    SelectOrCreate -- No --> CreateClass["Create class"]
+    CreateClass --> InputRoster["Input: Roster data<br>(CSV or manual entry)"]
+    InputRoster --> ImportRoster["Import/manage roster"]
+    SelectClass --> OpenMeeting["Open meeting<br>(Google Meet or Zoom)"]
+    ImportRoster --> OpenMeeting
+    OpenMeeting --> InputMeeting["Input: Meeting context<br>(URL, participant data)"]
+    InputMeeting --> StartTracking["Start session tracking"]
+    StartTracking --> DuringSession["During session: monitor<br>attendance, participation, live feed"]
+    DuringSession --> ContinueTracking{"Continue session?"}
+    ContinueTracking -- Yes --> DuringSession
+    ContinueTracking -- No --> EndSession["End session"]
+    EndSession --> ViewAnalytics{"View analytics now?"}
+    ViewAnalytics -- Yes --> OutputAnalytics["Output: Session/class analytics<br>(reports, export data)"]
+    ViewAnalytics -- No --> Done(["Done"])
+    OutputAnalytics --> Done
+
+    InputRoster@{ shape: lean-r}
+    InputMeeting@{ shape: lean-r}
+    OutputAnalytics@{ shape: lean-r}
+    style InputCreds stroke-width:2px
+    style SelectOrCreate stroke:#333,stroke-width:1.5px
+    style InputRoster stroke-width:2px
+    style InputMeeting stroke-width:2px
+    style ContinueTracking stroke:#333,stroke-width:1.5px
+    style ViewAnalytics stroke:#333,stroke-width:1.5px
+    style OutputAnalytics stroke-width:2px
 ```
 
 ---
@@ -134,95 +197,181 @@ flowchart LR
 ```mermaid
 ---
 config:
-  layout: dagre
----
-flowchart TB
- subgraph P["Presentation Tier"]
-        EXT["Chrome Extension<br>Google Meet"]
-        APP["Web Application<br>React Dashboard and Zoom Bridge"]
-  end
- subgraph A["Application Tier"]
-        BE["Node.js Express Socket.io Backend<br>Auth Classes Sessions Participation Extension Tokens"]
-  end
- subgraph D["Data Tier"]
-        PG[("PostgreSQL<br>Auth Class Session Attendance Participation Tables")]
-  end
-    EXT --> BE
-    APP --> BE
-    BE --> PG
-```
-
----
-
-## B.4 Browser Extension Architecture
-
-```mermaid
----
-config:
-  layout: dagre
----
-flowchart TB
-    D1["Meet detectors<br>participant chat reaction hand mic exit"] --> N1["Normalize events"]
-    N1 --> BG["Background service worker runtime"]
-    BG -- API available --> APIWrite["Immediate REST write"]
-    BG -- API unavailable --> Queue["Sync queue persists event"]
-    Queue --> Retry["Retry scheduler"]
-    Retry --> APIWrite
-    APIWrite --> BE["Backend API endpoints"]
-    BE --> DB[("PostgreSQL")]
-```
-
----
-
-## B.5 Zoom Bridge Architecture
-
-```mermaid
----
-config:
-  layout: dagre
----
-flowchart TB
-    UI["Zoom route in web app<br>ZoomIframeBridge"] --> SDK["zoom/appssdk client"]
-    SDK --> Ctx["Meeting context and participant data"]
-    Ctx --> Build["Normalize Zoom events"]
-    Build --> Rest["REST calls as authenticated instructor"]
-    Rest --> BE["Backend APIs"]
-    BE --> DB[("PostgreSQL")] & SO["Socket.io broadcast"]
-    SO --> DASH["Instructor dashboard live views"]
-    Lim["Known SDK limits<br>No chat content<br>No chat activity stream<br>No mic toggle stream"] -. constrains .-> Build
-```
-
----
-
-## B.7 Database Schema (ERD + Table Definitions)
-
-```mermaid
----
-config:
+  theme: neutral
+  look: classic
   layout: elk
+  fontFamily: '''Recursive Variable'', sans-serif'
+  themeVariables:
+    fontFamily: '''Recursive Variable'', sans-serif'
 ---
 erDiagram
-    USERS ||--o{ CLASSES : owns
-    CLASSES ||--o{ STUDENTS : contains
-    CLASSES ||--o{ SESSIONS : schedules
-    CLASSES ||--o{ SESSION_LINKS : has
-    CLASSES ||--o{ EXEMPTED_ACCOUNTS : has
-    CLASSES ||--o{ STUDENT_TAGS : defines
+	direction TB
+	USERS {
+		uuid id PK ""  
+		string email UK ""  
+		string password_hash  ""  
+		string first_name  ""  
+		string last_name  ""  
+		user_role role  ""  
+		string reset_token  ""  
+		timestamp reset_token_expires  ""  
+		text refresh_token  ""  
+		timestamp created_at  ""  
+		timestamp updated_at  ""  
+	}
 
-    STUDENTS ||--o{ STUDENT_NOTES : has
-    STUDENTS ||--o{ STUDENT_TAG_ASSIGNMENTS : tagged_with
-    STUDENT_TAGS ||--o{ STUDENT_TAG_ASSIGNMENTS : assigned_to
+	CLASSES {
+		uuid id PK ""  
+		uuid instructor_id FK ""  
+		string name  ""  
+		string subject  ""  
+		string section  ""  
+		text description  ""  
+		jsonb schedule  ""  
+		string status  ""  
+		timestamp created_at  ""  
+		timestamp updated_at  ""  
+	}
 
-    SESSIONS ||--o{ ATTENDANCE_RECORDS : records
-    SESSIONS ||--o{ ATTENDANCE_INTERVALS : intervals
-    SESSIONS ||--o{ PARTICIPATION_LOGS : logs
+	REFRESH_TOKEN_SESSIONS {
+		uuid id PK ""  
+		uuid user_id FK ""  
+		string token_hash UK ""  
+		timestamp expires_at  ""  
+		string device_id  ""  
+		text user_agent  ""  
+		string ip_address  ""  
+		boolean revoked  ""  
+		timestamp created_at  ""  
+		timestamp last_used_at  ""  
+	}
 
-    STUDENTS o|--o{ ATTENDANCE_RECORDS : may_link
-    STUDENTS o|--o{ ATTENDANCE_INTERVALS : may_link
-    STUDENTS o|--o{ PARTICIPATION_LOGS : may_link
+	EXTENSION_TOKENS {
+		uuid id PK ""  
+		uuid user_id FK ""  
+		string token_hash UK ""  
+		string token_preview  ""  
+		timestamp expires_at  ""  
+		timestamp last_used_at  ""  
+		boolean revoked  ""  
+		timestamp created_at  ""  
+	}
 
-    USERS ||--o{ REFRESH_TOKEN_SESSIONS : has
-    USERS ||--o{ EXTENSION_TOKENS : has
+	STUDENT_NOTES {
+		uuid id PK ""  
+		uuid student_id FK ""  
+		text note_text  ""  
+		uuid created_by FK ""  
+		timestamp created_at  ""  
+	}
+
+	STUDENTS {
+		uuid id PK ""  
+		uuid class_id FK ""  
+		string full_name  ""  
+		string student_id  ""  
+		timestamp deleted_at  ""  
+		timestamp created_at  ""  
+	}
+
+	SESSIONS {
+		uuid id PK ""  
+		uuid class_id FK ""  
+		string title  ""  
+		string meeting_link  ""  
+		timestamp started_at  ""  
+		timestamp ended_at  ""  
+		session_status status  ""  
+		timestamp created_at  ""  
+	}
+
+	SESSION_LINKS {
+		uuid id PK ""  
+		uuid class_id FK ""  
+		string link_url  ""  
+		string link_type  ""  
+		string label  ""  
+		string zoom_meeting_id  ""  
+		string zoom_passcode  ""  
+		boolean is_primary  ""  
+		timestamp created_at  ""  
+		timestamp updated_at  ""  
+	}
+
+	EXEMPTED_ACCOUNTS {
+		uuid id PK ""  
+		uuid class_id FK ""  
+		string account_identifier  ""  
+		string reason  ""  
+		timestamp created_at  ""  
+	}
+
+	STUDENT_TAGS {
+		uuid id PK ""  
+		uuid class_id FK ""  
+		string tag_name  ""  
+		string tag_color  ""  
+		timestamp created_at  ""  
+	}
+
+	STUDENT_TAG_ASSIGNMENTS {
+		uuid id PK ""  
+		uuid student_id FK ""  
+		uuid tag_id FK ""  
+		timestamp assigned_at  ""  
+	}
+
+	ATTENDANCE_RECORDS {
+		uuid id PK ""  
+		uuid session_id FK ""  
+		uuid student_id FK ""  
+		string participant_name  ""  
+		string status  ""  
+		integer total_duration_minutes  ""  
+		timestamp first_joined_at  ""  
+		timestamp last_left_at  ""  
+		timestamp created_at  ""  
+		timestamp updated_at  ""  
+	}
+
+	ATTENDANCE_INTERVALS {
+		uuid id PK ""  
+		uuid session_id FK ""  
+		uuid student_id FK ""  
+		string participant_name  ""  
+		timestamp joined_at  ""  
+		timestamp left_at  ""  
+		timestamp created_at  ""  
+	}
+
+	PARTICIPATION_LOGS {
+		uuid id PK ""  
+		uuid session_id FK ""  
+		uuid student_id FK ""  
+		interaction_type interaction_type  ""  
+		string interaction_value  ""  
+		timestamp timestamp  ""  
+		jsonb additional_data  ""  
+	}
+
+	USERS||--o{CLASSES:"owns"
+	USERS||--o{REFRESH_TOKEN_SESSIONS:"has"
+	USERS||--o{EXTENSION_TOKENS:"has"
+	USERS||--o{STUDENT_NOTES:"created_by"
+	CLASSES||--o{STUDENTS:"contains"
+	CLASSES||--o{SESSIONS:"schedules"
+	CLASSES||--o{SESSION_LINKS:"has"
+	CLASSES||--o{EXEMPTED_ACCOUNTS:"has"
+	CLASSES||--o{STUDENT_TAGS:"defines"
+	STUDENTS||--o{STUDENT_NOTES:"has"
+	STUDENTS||--o{STUDENT_TAG_ASSIGNMENTS:"tagged_with"
+	STUDENT_TAGS||--o{STUDENT_TAG_ASSIGNMENTS:"assigned_to"
+	SESSIONS||--o{ATTENDANCE_RECORDS:"records"
+	SESSIONS||--o{ATTENDANCE_INTERVALS:"intervals"
+	SESSIONS||--o{PARTICIPATION_LOGS:"logs"
+	STUDENTS|o--o{ATTENDANCE_RECORDS:"may_link"
+	STUDENTS|o--o{ATTENDANCE_INTERVALS:"may_link"
+	STUDENTS|o--o{PARTICIPATION_LOGS:"may_link"
 ```
 
 ---

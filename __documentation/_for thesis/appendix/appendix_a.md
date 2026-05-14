@@ -9,60 +9,36 @@ This appendix presents the current diagrams and system models for the ENGAGIUM i
 
 ## A.1 Context Diagram
 
-The context diagram shows ENGAGIUM as a single system interacting with current external actors/platforms.
+The context diagram follows Gane-Sarson notation: ENGAGIUM is modeled as one process (Process 0) with only the three external entities shown here.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                            ENGAGIUM CONTEXT DIAGRAM                            │
+│                 ENGAGIUM CONTEXT DIAGRAM (GANE-SARSON STYLE)                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
-                         ┌─────────────────────┐
-                         │     INSTRUCTOR      │
-                         │   (Primary User)    │
-                         └──────────┬──────────┘
-                                    │
-          ┌─────────────────────────┼─────────────────────────┐
-          │                         │                         │
-          ▼                         ▼                         ▼
- ┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
- │  Web Dashboard   │      │ Chrome Extension │      │  CSV Roster Data │
- │  (React App)     │      │ (Google Meet)    │      │   (Import Flow)  │
- └─────────┬────────┘      └─────────┬────────┘      └─────────┬────────┘
-           │                         │                         │
-           └─────────────────────────┼─────────────────────────┘
-                                     │
-                                     ▼
-                         ┌──────────────────────────┐
-                         │         ENGAGIUM         │
-                         │  Participation Tracking  │
-                         │          System          │
-                         └────────────┬─────────────┘
-                                      │
-       ┌──────────────────────────────┼──────────────────────────────┐
-       │                              │                              │
-       ▼                              ▼                              ▼
-┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
-│   Google Meet    │         │  Zoom Meeting    │         │  Email Service   │
-│ (DOM Event Source│         │ Context (Zoom    │         │ (Password Reset) │
-│ via Extension)   │         │ Apps SDK Bridge) │         │                  │
-└──────────────────┘         └──────────────────┘         └──────────────────┘
-                                      │
-                                      ▼
-                             ┌──────────────────┐
-                             │   PostgreSQL DB  │
-                             │ (System of Record)│
-                             └──────────────────┘
+                                   ┌──────────────────────┐
+                                   │      Instructor      │
+                                   └──────────┬───────────┘
+                      credentials, commands, edits │ dashboards, analytics, exports, live status
+                                                  │
+                                                  ▼
+         ┌──────────────────────┐      ╭───────────────────────────────╮      ┌──────────────────────┐
+         │     Google Meet      │◄─────┤            ENGAGIUM           ├─────►│         Zoom         │
+         └──────────────────────┘      │     Online Class Participation │      └──────────────────────┘
+              join/leave/chat/reaction │          Tracking System       │ authenticated session actions
+              and hand/mic signals ───►╰───────────────────────────────╯ and live status
+             live session prompts and status ◄───────────────────────────┘
+                                                                 bridge context, participant data,
+                                                                 meeting operations ◄───────────────
 ```
 
 **External Entity Summary**
 
 | Entity | Role | Data Flow |
 |--------|------|-----------|
-| Instructor | Authenticates, manages classes/students/sessions, reviews live and historical analytics | Inputs: credentials, class/session commands, edits; Outputs: dashboards, analytics, exports |
-| Google Meet | Primary browser meeting source for extension-based detection | Inputs to system: join/leave/chat/reaction/hand/mic signals |
-| Zoom Context | Zoom Apps SDK meeting context consumed by web bridge routes/services | Inputs to system: bridge context and meeting operations |
-| PostgreSQL Database | Persistent storage layer | Bidirectional data flow for auth, classes, students, sessions, attendance, participation |
-| Email Service | Password recovery support | Output: password reset emails |
+| Instructor | Authenticates, manages classes/students/sessions, reviews live and historical analytics | Inputs: credentials, commands, edits; Outputs: dashboards, analytics, exports, live status |
+| Google Meet | Primary browser meeting source for extension-based detection | Inputs to system: join/leave/chat/reaction/hand/mic signals; Outputs from system: live session prompts and status |
+| Zoom | Zoom meeting context consumed by the web bridge | Inputs to system: bridge context, participant data, meeting operations; Outputs from system: authenticated session actions and live status |
 
 ---
 
@@ -74,41 +50,60 @@ The Level-0 DFD decomposes the ENGAGIUM system into major implemented processes.
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                             ENGAGIUM LEVEL-0 DFD                               │
 └─────────────────────────────────────────────────────────────────────────────────┘
-
-  ┌───────────────┐      ┌───────────────┐      ┌───────────────┐
-  │  INSTRUCTOR   │      │  GOOGLE MEET  │      │  ZOOM CONTEXT │
-  └───────┬───────┘      └───────┬───────┘      └───────┬───────┘
-          │                      │                      │
-          │ Credentials,         │ DOM events via       │ Bridge context
-          │ class/session cmds   │ extension detectors  │ and commands
-          ▼                      ▼                      ▼
- ┌────────────────────┐   ┌────────────────────┐   ┌────────────────────┐
- │1.0 AUTHENTICATE &  │   │4.0 DETECT MEETING  │   │5.0 PROCESS BRIDGE  │
- │    AUTHORIZE       │   │    EVENTS (EXT)    │   │    EVENTS (ZOOM)   │
- └─────────┬──────────┘   └─────────┬──────────┘   └─────────┬──────────┘
-           │                        │                        │
-           │ user context           │ normalized events      │ normalized events
-           ▼                        ▼                        ▼
- ┌────────────────────┐   ┌────────────────────────────────────────────────┐
- │2.0 MANAGE CLASSES, │   │6.0 PROCESS & STORE SESSION / ATTENDANCE /     │
- │    STUDENTS, TAGS, │──►│    PARTICIPATION DATA                         │
- │    NOTES, LINKS    │   └─────────┬──────────────────────────────────────┘
- └─────────┬──────────┘             │
-           │                        │ writes / reads
-           ▼                        ▼
- ┌────────────────────┐   ┌────────────────────────────────────────────────┐
- │3.0 MANAGE SESSION  │   │D1: DATABASE                                    │
- │    LIFECYCLE       │   │users, refresh_token_sessions, extension_tokens,│
- │(start/end/active)  │   │classes, students, sessions, attendance_*,      │
- └─────────┬──────────┘   │participation_logs, links, exemptions, tags,    │
-           │              │assignments, notes                               │
-           │              └────────────────────────────────────────────────┘
-           │
-           ▼
- ┌────────────────────┐
- │7.0 GENERATE LIVE   │──────────────► Live feed, session detail, analytics,
- │    VIEWS & REPORTS │               exports, settings/token management
- └────────────────────┘
+  ┌───────────────┐                        ┌───────────────┐    ┌───────────────┐
+  │  INSTRUCTOR   │──────────────────────►│   1.0         │───►│   2.0         │
+  │               │ credentials, commands │ AUTHENTICATE  │ user│ MANAGE        │
+  └───────────────┘                        │ & AUTHORIZE   │ctx  │ CLASSES,      │
+                                                                   └───────────────┘     │ STUDENTS,     │
+                                                                                                   │ TAGS, NOTES,  │
+                                                                                                   │ LINKS         │
+                                                                                                        └────┬─────────┘
+                                                                                                                │ setup
+                                                                                                                ▼
+                                         ┌────────────────────────────────────────────────────────────────┐
+                                         │                                3.0                           │
+                                         │                      MANAGE SESSION LIFECYCLE                  │
+                                         └────────────────────────────────────────────────────────────────┘
+                                                                                        │
+                                                                                        │ active session context
+                                                                                        ▼
+                                 ┌──────────────────────┐    ┌──────────────────────┐    ┌───────────────┐
+                                 │    Google Meet       │───►│      4.0             │───►│               │
+                                 │  (external DOM events)│    │ DETECT MEETING EVENTS│    │               │
+                                 └──────────────────────┘    └──────────────────────┘    │               │
+                                                                                                                                 │
+                                                                                                                                 │
+                                 ┌──────────────────────┐    ┌──────────────────────┐    ┌──▼────────────┐
+                                 │        Zoom          │───►│      5.0             │───►│    6.0         │
+                                 │  (bridge context /    │    │ PROCESS BRIDGE EVENTS│    │ PROCESS &     │
+                                 │   participant data)   │    └──────────────────────┘    │ STORE SESSION, │
+                                 └──────────────────────┘                                │ ATTENDANCE &  │
+                                                                                                                  events│ PARTICIPATION  │
+                                                                                                                            └────┬─────────┘
+                                                                                                                                    │
+                                                                                                                                    │ writes/updates
+                                                                                                                                    ▼
+                                                                                                                            ┌────────────┐
+                                                                                                                            │  D1 DB     │
+                                                                                                                            │ (data store)│
+                                                                                                                            └────────────┘
+                                                                                                                                    ▲
+                                                                                                                                    │ reads/lookups
+                                                                                                                                    │
+                                                                                                                                    ▼
+                                                                                                                            ┌────────────┐
+                                                                                                                            │   7.0      │
+                                                                                                                            │ GENERATE    │
+                                                                                                                            │ REPORTS     │
+                                                                                                                            └────────────┘
+                                                                                                                                    │
+                                                                                                                                    │ live feed / analytics
+                                                                                                                                    ▼
+                                                                                                                            ┌────────────┐
+                                                                                                                            │   OUTPUT   │
+                                                                                                                            │ Live feed,  │
+                                                                                                                            │ reports     │
+                                                                                                                            └────────────┘
 ```
 
 **Process Descriptions**
@@ -125,107 +120,13 @@ The Level-0 DFD decomposes the ENGAGIUM system into major implemented processes.
 
 ---
 
-## A.3 Program Flowchart
+## A.3 User Decision Tree
 
-The flowchart illustrates the current live tracking flow, including both Meet-extension and Zoom-bridge entry paths.
+The decision tree illustrates the professor's workflow from login through session lifecycle to analytics review.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                     ENGAGIUM LIVE SESSION FLOWCHART                            │
-└─────────────────────────────────────────────────────────────────────────────────┘
 
-                               ┌───────────┐
-                               │   START   │
-                               └─────┬─────┘
-                                     │
-                                     ▼
-                       ┌──────────────────────────┐
-                       │ Instructor enters meeting│
-                       │ context (Meet or Zoom)   │
-                       └────────────┬─────────────┘
-                                    │
-                           ┌────────┴────────┐
-                           │                 │
-                           ▼                 ▼
-                ┌──────────────────┐   ┌──────────────────┐
-                │ Google Meet path │   │ Zoom bridge path │
-                │ (extension)      │   │ (/zoom/bridge)   │
-                └────────┬─────────┘   └────────┬─────────┘
-                         │                      │
-                         └──────────┬───────────┘
-                                    ▼
-                      ┌──────────────────────────┐
-                      │ POST /sessions/start-    │
-                      │ from-meeting             │
-                      └────────────┬─────────────┘
-                                   │
-                                   ▼
-                      ┌──────────────────────────┐
-                      │ Backend creates/updates  │
-                      │ active session record    │
-                      └────────────┬─────────────┘
-                                   │
-                                   ▼
-                    ┌────────────────────────────────┐
-                    │ EVENT LOOP (while session live)│
-                    └───────────────┬────────────────┘
-                                    │
-         ┌──────────────────────────┼──────────────────────────┐
-         │                          │                          │
-         ▼                          ▼                          ▼
- ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
- │ Attendance join │       │ Participation   │       │ Attendance leave│
- │ / leave events  │       │ events (chat,   │       │ events          │
- │                 │       │ reaction, hand, │       │                 │
- │                 │       │ mic, etc.)      │       │                 │
- └────────┬────────┘       └────────┬────────┘       └────────┬────────┘
-          │                         │                         │
-          └──────────────┬──────────┴──────────┬──────────────┘
-                         ▼                     ▼
-              ┌─────────────────────┐   ┌─────────────────────┐
-              │ attendance endpoints│   │ live-event / bulk   │
-              │ and interval writes │   │ participation writes│
-              └──────────┬──────────┘   └──────────┬──────────┘
-                         └──────────────┬───────────┘
-                                        ▼
-                           ┌──────────────────────────┐
-                           │ Socket.io emits updates  │
-                           │ to instructor/session    │
-                           │ rooms                    │
-                           └────────────┬─────────────┘
-                                        │
-                                        ▼
-                           ┌──────────────────────────┐
-                           │ Dashboard live feed and  │
-                           │ session views update     │
-                           └────────────┬─────────────┘
-                                        │
-                                        ▼
-                               ┌────────────────┐
-                               │ Session ended? │
-                               └───────┬────────┘
-                                       │
-                         ┌─────────────┴─────────────┐
-                         │                           │
-                        NO                          YES
-                         │                           │
-                         │                           ▼
-                         │              ┌──────────────────────────┐
-                         │              │ PUT /sessions/:id/end-   │
-                         │              │ with-timestamp            │
-                         │              └────────────┬─────────────┘
-                         │                           │
-                         └──────────►(loop)          ▼
-                                      ┌──────────────────────────┐
-                                      │ Finalize intervals and   │
-                                      │ attendance totals/status │
-                                      └────────────┬─────────────┘
-                                                   │
-                                                   ▼
-                                              ┌───────────┐
-                                              │    END    │
-                                              └───────────┘
-```
+
+Refer to Appendix A.3 in *Diagrams with Mermaid Code* for the complete flowchart rendering.
 
 ---
 
