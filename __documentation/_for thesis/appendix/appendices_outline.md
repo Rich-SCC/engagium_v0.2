@@ -5,7 +5,7 @@
 # **APPENDIX A: Diagrams and System Models**
 
 A.1 Context Diagram  
-A.2 Level-0 Data Flow Diagram (Exploded Diagram)  
+A.2 Level-1 Data Flow Diagram (Exploded Diagram)  
 A.3 Program Flowchart  
 A.4 Visual Table of Contents (VTOC) Diagram  
 A.5 Input-Process-Output (IPO) Diagram
