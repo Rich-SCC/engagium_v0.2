@@ -233,13 +233,11 @@ flowchart LR
 
 ---
 
-## A.3 User Program Flowchart Set (ISO 5807 — professor-only)
+## A.3 User Program Flowchart
 
 The program flowchart set illustrates the instructor's workflow through the ENGAGIUM system using binary decision points. It is split by area of concern.
 
 ### A.3.1 Auth and Recovery Flow
-
-Notation: Mermaid nodes labeled with `Input:`, `Output:`, and `Document:` are used to approximate ISO 5807 shapes that Mermaid does not render directly.
 
 ```mermaid
 ---
@@ -316,8 +314,6 @@ flowchart TB
 ---
 
 ### A.3.2 Dashboard Hub and Navigation Flow
-
-Notation: Mermaid nodes labeled with `Input:`, `Output:`, and `Document:` are used to approximate ISO 5807 shapes that Mermaid does not render directly.
 
 ```mermaid
 ---
@@ -398,8 +394,6 @@ flowchart TB
 ---
 
 ### A.3.3 Class and Roster Management Flow
-
-Notation: Mermaid nodes labeled with `Input:`, `Output:`, and `Document:` are used to approximate ISO 5807 shapes that Mermaid does not render directly.
 
 ```mermaid
 ---
@@ -488,8 +482,6 @@ flowchart TB
 ---
 
 ### A.3.4 Session Monitoring and History Flow
-
-Notation: Mermaid nodes labeled with `Input:`, `Output:`, and `Document:` are used to approximate ISO 5807 shapes that Mermaid does not render directly.
 
 ```mermaid
 ---
@@ -583,8 +575,6 @@ flowchart TB
 
 ### A.3.5 Analytics and Review Flow
 
-Notation: Mermaid nodes labeled with `Input:`, `Output:`, and `Document:` are used to approximate ISO 5807 shapes that Mermaid does not render directly.
-
 ```mermaid
 ---
 config:
@@ -652,8 +642,6 @@ flowchart TB
 
 ### A.3.6 Settings and Extension Token Flow
 
-Notation: Mermaid nodes labeled with `Input:`, `Output:`, and `Document:` are used to approximate ISO 5807 shapes that Mermaid does not render directly.
-
 ```mermaid
 ---
 config:
@@ -677,7 +665,7 @@ flowchart TB
     TokenChoice -- Yes --> GenerateToken["Input: Generate extension token"]
     TokenChoice -- No --> RevokeToken["Input: Revoke extension token"]
 
-    GenerateToken --> TokenPreview["Document: Token preview and vault entry"]
+    GenerateToken --> TokenPreview["Output: Token preview and vault entry"]
     RevokeToken --> TokenRevoked["Output: Revocation confirmation"]
     TokenPreview --> ReturnHub["Return to dashboard hub"]
     TokenRevoked --> ReturnHub
@@ -716,7 +704,7 @@ flowchart TB
     - **No** → Proceed to revoke option
 11. **Input: Generate Extension Token**: Create new cryptographic token tied to professor account
 12. **Input: Revoke Extension Token**: Invalidate existing token(s) from database
-13. **Document: Token Preview and Vault Entry**: Output token one-time display with copy-to-clipboard and vault entry instructions
+13. **Output: Token Preview and Vault Entry**: Output token one-time display with copy-to-clipboard and vault entry instructions
 14. **Output: Revocation Confirmation**: Display confirmation that token(s) have been revoked
 15. **Return to Dashboard Hub**: Exit settings and return to main dashboard
 16. **End**: Settings configuration complete
@@ -732,8 +720,6 @@ flowchart TB
 ---
 
 ### A.3.7 Zoom Bridge and OAuth Flow
-
-Notation: Mermaid nodes labeled with `Input:`, `Output:`, and `Document:` are used to approximate ISO 5807 shapes that Mermaid does not render directly.
 
 ```mermaid
 ---
@@ -808,16 +794,6 @@ flowchart TB
 ---
 
 ### A.3.8 Chrome Extension Meeting Tracking Flow
-
-**Concern**: Chrome extension user journey for Google Meet attendance tracking
-
-**Abstraction Level**: Screen/State-level (one node = one visible interface state or user action)
-
-**Mermaid ISO 5807 Approximation**:
-- Rectangles = Process/Action (state)
-- Diamonds = Decision (binary Yes/No only)
-- Parallelograms/labels = Input/Output annotations
-- Arrows labeled Yes→right, No→down
 
 ```mermaid
 flowchart TD
