@@ -38,8 +38,6 @@ docker compose -f docker-compose.dev.yml up -d
 
 - [System Architecture](__documentation/SYSTEM_ARCHITECTURE.md) - Core design overview
 - [System Framework](__documentation/SYSTEM_FRAMEWORK_FULL.md) - Complete technical specification
-- [For Thesis](__documentation/_for%20thesis/) - Research documentation
-- [Production Readiness](./PRODUCTION_READINESS_CHECKLIST.md) - Beta deployment status
 
 ## Development
 
@@ -73,6 +71,6 @@ Run the stacks with different Compose project names and different host ports.
 	docker compose -p engagium-prod -f docker-compose.prod.yml ps
 	docker compose -p engagium-dev -f docker-compose.dev.yml ps
 
-## Environment Setup
+## Environment and Secrets Setup
 
-See [Environment Setup](__documentation/ENV_SETUP.md) and [Secrets Setup](__documentation/SECRETS_SETUP.md).
+See [Environment and Secrets Setup](__documentation/ENV_SETUP.md).
